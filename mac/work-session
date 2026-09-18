@@ -1,0 +1,63 @@
+#!/usr/bin/env zsh
+# work-session <nome-da-tarefa> [repo]
+#
+# Atacha na sessao tmux da tarefa; se nao existir, cria um worktree irmao do repo
+# (fora do diretorio principal), a sessao tmux e sobe o claude la dentro.
+#
+# repo: caminho de um repo git, ou nome de diretorio dentro de $WORK_REPOS_DIR.
+#       So e necessario quando a sessao ainda nao existe.
+#
+# Chamado localmente pela funcao `work` e remotamente via ssh, que roda um shell
+# nao-interativo: por isso o PATH e o binario do claude sao resolvidos aqui.
+
+emulate -L zsh
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+
+task="${1:-}"
+repo_arg="${2:-}"
+repos_dir="${WORK_REPOS_DIR:-$HOME/dev/micromed}"
+
+if [[ -z "$task" ]]; then
+  print -u2 "usage: work-session <nome-da-tarefa> [repo]"
+  exit 1
+fi
+
+session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1 || true)
+if [[ -n "$session" ]]; then
+  exec tmux attach -t "$session"
+fi
+
+if [[ -z "$repo_arg" ]]; then
+  print -u2 "work-session: nenhuma sessao para '$task'; informe o repo para criar uma"
+  print -u2 "repos em ${repos_dir}:"
+  ls -1 "$repos_dir" >&2
+  exit 1
+fi
+
+if git -C "$repo_arg" rev-parse --show-toplevel &>/dev/null; then
+  repo_root=$(git -C "$repo_arg" rev-parse --show-toplevel)
+elif git -C "${repos_dir}/${repo_arg}" rev-parse --show-toplevel &>/dev/null; then
+  repo_root=$(git -C "${repos_dir}/${repo_arg}" rev-parse --show-toplevel)
+else
+  print -u2 "work-session: '$repo_arg' nao e um repo git"
+  exit 1
+fi
+
+repo_name=${repo_root:t}
+worktree_path="${repo_root}-${task}"
+branch="work/${task}"
+session="${repo_name}-${task}"
+
+if [[ ! -d "$worktree_path" ]]; then
+  if git -C "$repo_root" show-ref --verify --quiet "refs/heads/${branch}"; then
+    git -C "$repo_root" worktree add "$worktree_path" "$branch"
+  else
+    git -C "$repo_root" worktree add "$worktree_path" -b "$branch"
+  fi
+fi
+
+claude_bin=$(command -v claude)
+exec tmux new-session -s "$session" -c "$worktree_path" \
+  "${(q)claude_bin} --dangerously-skip-permissions --name ${(q)task}"
