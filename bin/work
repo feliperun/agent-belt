@@ -5,7 +5,8 @@
 #   work ls                         a mesma lista, em texto
 #   work <tarefa> [repo]            cria (ou reata) na maquina local
 #   work <maquina> <tarefa> [repo]  cria (ou reata) na maquina registrada
-#   work attach <sessao> [maquina]  atacha direto, sem menu
+#   work attach [-d] <sessao> [maquina]  atacha direto, sem menu
+#                                   -d expulsa quem ja estiver atachado
 #   work adopt [maquina]            agente aberto fora do tmux: encerra e
 #                                   reabre a mesma conversa dentro do tmux
 #   work hosts [discover|add|rm|self]   registro de maquinas
@@ -447,15 +448,28 @@ do_attach_local() {
   err=$(tmux has-session -t "=$s" 2>&1) ||
     die "nao achei a sessao '$s' nesta maquina (tmux: ${err:-sem detalhe})"
   if [ -n "${TMUX:-}" ]; then exec tmux switch-client -t "=$s"; fi
-  exec tmux attach -t "=$s"
+  # -d expulsa os outros clientes. Util quando a sessao esta atachada noutra
+  # maquina: com dois clientes, o tmux encolhe a janela para o menor dos dois
+  # e a vista do maior fica truncada, parecendo que "nao abriu".
+  exec tmux attach ${ATTACH_DETACH:+-d} -t "=$s"
+}
+
+# Attach numa outra maquina. Sem `exec`: se falhar, precisa sobrar alguem para
+# dizer o motivo -- senao volta ao prompt em silencio.
+remote_attach() {
+  local i="$1" s="$2" rc
+  # shellcheck disable=SC2046
+  ssh "${SSH_TTY[@]}" "${TARGETS[$i]}" $(remote_prefix "$i") attach ${ATTACH_DETACH:+-d} "$s"
+  rc=$?
+  [ "$rc" -eq 0 ] || die "attach de '$s' em ${NAMES[$i]} terminou com rc=$rc"
+  exit 0
 }
 
 attach_index() {
   local r="$1" i s
   i="${R_IDX[$r]}"; s="${R_SESSION[$r]}"
   if is_self "$i"; then do_attach_local "$s"; fi
-  # shellcheck disable=SC2046
-  exec ssh "${SSH_TTY[@]}" "${TARGETS[$i]}" $(remote_prefix "$i") attach "$s"
+  remote_attach "$i" "$s"
 }
 
 create_session() {
@@ -599,8 +613,7 @@ cmd_adopt() {
     ok*) name=${out#ok${SEP}}
          printf 'adotada: sessao %s em %s\n' "$name" "${A_HOST[$i]}"
          if is_self "$idx"; then do_attach_local "$name"; fi
-         # shellcheck disable=SC2046
-         exec ssh "${SSH_TTY[@]}" "${TARGETS[$idx]}" $(remote_prefix "$idx") attach "$name" ;;
+         remote_attach "$idx" "$name" ;;
     erro*) die "${out#erro${SEP}}" ;;
     *)     die "sem resposta de ${A_HOST[$i]}" ;;
   esac
@@ -743,6 +756,7 @@ load_config
 SELF=$(detect_self || true)
 
 agent="${WORK_AGENT:-claude}"
+ATTACH_DETACH=""
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -750,6 +764,7 @@ while [ $# -gt 0 ]; do
     --claude) agent=claude; shift ;;
     --codex)  agent=codex;  shift ;;
     --shell)  agent=shell;  shift ;;
+    -d|--detach-others) ATTACH_DETACH=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [ $# -gt 0 ]; do args+=("$1"); shift; done ;;
     -*) die "opcao desconhecida: $1" ;;
@@ -784,8 +799,7 @@ case "${1:-}" in
     if [ -n "$hostarg" ]; then
       idx=$(resolve_host "$hostarg") || die "maquina desconhecida: $hostarg (veja: $PROG hosts)"
       if is_self "$idx"; then do_attach_local "$sess"; fi
-      # shellcheck disable=SC2046
-      exec ssh "${SSH_TTY[@]}" "${TARGETS[$idx]}" $(remote_prefix "$idx") attach "$sess"
+      remote_attach "$idx" "$sess"
     fi
     # Atalho que importa: quando o `work` de outra maquina chama este por ssh,
     # a sessao esta aqui. Atachar direto evita uma varredura de rede inteira

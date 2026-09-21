@@ -227,10 +227,28 @@ if [ "${WORK_NO_AUTOTRUST:-0}" != "1" ]; then
   esac
 fi
 
+# O caminho do worktree, no formato em que o claude nomeia a pasta de projeto
+# (`/` `\` `:` `.` viram `-`), para saber se ja existe conversa ali.
+claude_conv_exists() {
+  local p="$1" slug
+  [ "$PLATFORM" = windows ] && p=$(cygpath -w "$p" 2>/dev/null || printf '%s' "$p")
+  slug=$(printf '%s' "$p" | sed 's|[/\\:. ]|-|g')
+  ls "$HOME/.claude/projects/$slug"/*.jsonl >/dev/null 2>&1
+}
+
 case "$agent" in
   claude)
     bin=$(command -v claude) || die "claude nao encontrado no PATH"
-    cmd="$(printf '%q' "$bin") --dangerously-skip-permissions --name $(printf '%q' "$task")"
+    cmd="$(printf '%q' "$bin") --dangerously-skip-permissions"
+    # Worktree que ja teve conversa merece continuar de onde parou: sessao
+    # tmux morta (maquina reiniciada, janela fechada) nao devia significar
+    # comecar do zero e ter que lembrar de dar /resume na mao. WORK_NEW=1
+    # forca conversa nova.
+    if [ "${WORK_NEW:-0}" != "1" ] && claude_conv_exists "$worktree_path"; then
+      cmd="$cmd --continue"
+    else
+      cmd="$cmd --name $(printf '%q' "$task")"
+    fi
     ;;
   codex)
     bin=$(command -v codex) || die "codex nao encontrado no PATH"
@@ -247,9 +265,18 @@ if [ "$PLATFORM" = windows ] && [ "$agent" != shell ]; then
   cmd="winpty $cmd"
 fi
 
+# O servidor do tmux herda os descritores de quem o iniciou. No Windows isso
+# amarra a vida dele ao console de quem criou a sessao -- fechar aquela janela
+# mata o servidor e leva junto *todas* as sessoes, que era justamente o que se
+# queria evitar. Subir o servidor antes, com os descritores fechados, desamarra
+# (e no POSIX, de quebra, impede que um ssh nao-interativo fique pendurado
+# esperando o fim do servidor que acabou de herdar seu stdout).
+tmux start-server </dev/null >/dev/null 2>&1
+
 # Sobe destacado para marcar o agente na sessao (o `work ls` le essa marca) e
 # so entao atacha.
-tmux new-session -d -s "$session" -c "$worktree_path" "$cmd" || die "falhou criar a sessao tmux"
+tmux new-session -d -s "$session" -c "$worktree_path" "$cmd" </dev/null >/dev/null 2>&1 ||
+  die "falhou criar a sessao tmux"
 # Sem o prefixo "=" aqui: set-option nao aceita target exato, e um "-s" no
 # lugar viraria server option -- marcaria todas as sessoes de uma vez.
 tmux set-option -t "$session" @work_agent "$agent" 2>/dev/null
