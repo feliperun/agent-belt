@@ -135,7 +135,28 @@ pré-autoriza: `hasTrustDialogAccepted` no `~/.claude.json` para o Claude,
 (respeitando `CODEX_HOME`). `WORK_NO_AUTOTRUST=1` desliga.
 
 O agente escolhido fica marcado na sessão (`@work_agent`) e aparece na coluna
-AGENTE do `work ls`. Sessões criadas antes disso mostram `-`.
+AGENTE do `work ls`. Sessão que **não** nasceu pelo `work` — inclusive um tmux
+que você abriu na mão — também aparece na lista, com o agente deduzido do
+processo em primeiro plano do pane e um `~` indicando que é dedução.
+
+### O que a lista diz além das sessões
+
+```
+5 maquinas: 1 com sessao, 4 sem, 1 sem resposta: frb-linux  ->  work doctor
+agente fora do tmux, aberto direto (nao da para atachar): felipe-windows (1)
+```
+
+Sem esse rodapé não dá para distinguir "essa máquina não tem sessão" de "essa
+máquina não respondeu" — e você fica procurando uma sessão que a lista nunca
+vai mostrar. A resposta do `ls-raw` termina numa linha `#fora`, que serve de
+sinal de vida: se ela não chegou, a máquina entra como *sem resposta*.
+
+**Agente aberto direto, fora do tmux, não tem como ser atachado.** Um processo
+de console não migra para dentro do tmux depois de começar: no Linux existe o
+`reptyr`, frágil com TUI, e no Windows não há equivalente — o processo está
+preso ao ConPTY da janela que o criou, e o caminho de volta é o RDP naquela
+sessão. Por isso o `work` só conta e avisa. Para ser atacável, tem que nascer
+dentro do tmux (`work <tarefa>`, ou `tm` para uma sessão simples).
 
 ## Por que o Windows é diferente
 
