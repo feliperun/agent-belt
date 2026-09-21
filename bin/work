@@ -47,6 +47,13 @@ case "$(uname -s)" in
   *)                    PLATFORM=linux ;;
 esac
 
+# Mesma historia do work-session: TERM que veio do cliente pode nao existir no
+# terminfo desta maquina, e ai o `tmux attach` morre.
+if command -v infocmp >/dev/null 2>&1; then
+  [ -n "${TERM:-}" ] && infocmp "$TERM" >/dev/null 2>&1 || TERM=xterm-256color
+fi
+export TERM="${TERM:-xterm-256color}"
+
 [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH"
 [ "$PLATFORM" = mac ] && [ -d /opt/homebrew/bin ] && PATH="/opt/homebrew/bin:$PATH"
 # O ssh do Windows nao esta no PATH do login shell do MSYS2. Sem isto, este

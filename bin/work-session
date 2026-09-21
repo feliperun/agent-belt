@@ -52,6 +52,16 @@ case "$PLATFORM" in
     ;;
 esac
 export PATH
+# O TERM chega do cliente via ssh e pode nao existir no terminfo *daqui*: o
+# Ghostty da omarchy manda xterm-ghostty, que o MSYS2 nao tem. Com um TERM
+# desconhecido o tmux pode recusar a abrir, e a falha aparece so quando se
+# dispara de uma maquina especifica -- o tipo de bug que parece fantasma.
+normalize_term() {
+  command -v infocmp >/dev/null 2>&1 || return 0
+  [ -n "${TERM:-}" ] && infocmp "$TERM" >/dev/null 2>&1 && return 0
+  TERM=xterm-256color
+}
+normalize_term
 export TERM="${TERM:-xterm-256color}"
 
 default_repos_dir() {
