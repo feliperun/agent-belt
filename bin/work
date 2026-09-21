@@ -186,12 +186,21 @@ infer_agent() {
 # mesmo segundo que o winpty que o lancou. Bater por segundo erra para o lado
 # seguro: na duvida, nao oferece matar um agente que ja esta no tmux.
 win_agents_outside() {
-  local intimes winpid stime rest
-  intimes=$(ps -f 2>/dev/null | awk '/[w]inpty|[c]laude|[c]odex/ { print $5 }' | sort -u)
+  local intimes winpid stime rest inside total
+  # Trava barata primeiro: se ha pane de agente para cada .exe, nada esta
+  # solto. Cobre o caso comum de um agente so e nunca oferece matar o que
+  # esta no tmux.
+  inside=$(tmux list-panes -a -F '#{pane_current_command}' 2>/dev/null | grep -cE '^(winpty|claude|codex)$')
+  total=$(ps -W 2>/dev/null | grep -cE '[c]laude\.exe|[c]odex\.exe')
+  [ "${total:-0}" -le "${inside:-0}" ] && return 0
+  # Comparacao por minuto, nao por segundo: o .exe nasce um instante depois do
+  # winpty que o lancou (16:58:34 -> 16:58:35), e exigir o mesmo segundo
+  # marcava como solto um agente que estava dentro do tmux.
+  intimes=$(ps -f 2>/dev/null | awk '/[w]inpty|[c]laude|[c]odex/ { print substr($5, 1, 5) }' | sort -u)
   ps -W 2>/dev/null | grep -E '[c]laude\.exe|[c]odex\.exe' |
   while read -r _ _ _ winpid _ _ stime rest; do
     case "$winpid" in ''|*[!0-9]*) continue ;; esac
-    printf '%s\n' "$intimes" | grep -qx -- "$stime" && continue
+    printf '%s\n' "$intimes" | grep -qx -- "$(printf '%s' "$stime" | cut -c1-5)" && continue
     printf '%s %s\n' "$winpid" "$rest"
   done
 }
