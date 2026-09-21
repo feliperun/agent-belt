@@ -110,7 +110,14 @@ esac
 
 # Uma sessao viva ganha de tudo: reatacha e pronto (o agente ja escolhido
 # naquela sessao continua sendo o dela).
-session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1)
+#
+# A marca @work_task vem antes do nome porque o nome pode ter mudado: renomear
+# a conversa no agente renomeia a sessao tmux junto, e sem isto `work xpto`
+# nao acharia mais a sessao do xpto -- criaria uma segunda no mesmo worktree.
+session=$(tmux list-sessions -F "#{session_name}|#{?@work_task,#{@work_task},}" 2>/dev/null |
+  awk -F'[|]' -v t="$task" '$2 == t { print $1; exit }')
+[ -n "$session" ] ||
+  session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1)
 if [ -n "$session" ]; then
   exec tmux attach -t "=$session"
 fi

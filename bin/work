@@ -230,14 +230,57 @@ agents_outside() {
   printf '%s' "$total"
 }
 
+# Renomear a conversa no claude/codex renomeia a sessao tmux junto. O agente
+# publica o proprio nome no titulo do terminal (OSC) e o tmux guarda isso em
+# pane_title -- e o unico canal que existe de dentro do agente para fora.
+#
+# Tres cuidados:
+#   - o titulo vem com um glifo de estado na frente ("* fix-windows"), entao
+#     so a parte que vira slug interessa;
+#   - quando o nome do agente e o mesmo que o `work` deu no --name, nao ha
+#     rename nenhum a propagar (seria trocar "coreum-xpto" por "xpto" e perder
+#     o repo do nome);
+#   - o prefixo do repo fica: "coreum-xpto" renomeado para "bug-impressora"
+#     vira "coreum-bug-impressora".
+# WORK_NO_RENAME=1 desliga.
+sync_session_name() {
+  local sess="$1" agent="$2" task="$3" title="$4" novo base
+  [ "${WORK_NO_RENAME:-0}" = "1" ] && return 0
+  case "$agent" in claude*|codex*) ;; *) return 0 ;; esac
+  [ -n "$title" ] || return 0
+
+  # Nome de sessao do tmux nao aceita "." nem ":"; o resto vira traco.
+  novo=$(printf '%s' "$title" | tr ' ' '-' | tr -cd 'A-Za-z0-9_-' |
+         sed -e 's/^-*//' -e 's/-*$//' | cut -c1-40)
+  [ -n "$novo" ] || return 0
+  [ "$novo" = "$task" ] && return 0          # e so o --name que nos mesmos demos
+  [ "$novo" = "$sess" ] && return 0
+
+  base=""
+  [ -n "$task" ] && case "$sess" in *-"$task") base="${sess%-$task}" ;; esac
+  [ -n "$base" ] && novo="$base-$novo"
+  [ "$novo" = "$sess" ] && return 0
+  tmux has-session -t "=$novo" 2>/dev/null && return 0   # nome ja ocupado
+
+  # Sessao antiga nao tem @work_task. Gravar o nome de agora antes de trocar
+  # mantem `work <nome-antigo>` funcionando depois do rename -- senao ele nao
+  # acharia mais nada e abriria uma segunda sessao no mesmo worktree.
+  [ -n "$task" ] || tmux set-option -t "$sess" @work_task "$sess" 2>/dev/null
+
+  tmux rename-session -t "=$sess" "$novo" 2>/dev/null || return 0
+  printf '%s' "$novo"
+}
+
 ls_raw() {
-  local s w c a ag p tty cmd
+  local s w c a ag p tty cmd task title novo
   tmux list-sessions -F \
-    "#{session_name}${SEP}#{session_windows}${SEP}#{session_created}${SEP}#{?session_attached,1,0}${SEP}#{?@work_agent,#{@work_agent},}${SEP}#{session_path}${SEP}#{pane_tty}${SEP}#{pane_current_command}" \
+    "#{session_name}${SEP}#{session_windows}${SEP}#{session_created}${SEP}#{?session_attached,1,0}${SEP}#{?@work_agent,#{@work_agent},}${SEP}#{session_path}${SEP}#{pane_tty}${SEP}#{pane_current_command}${SEP}#{?@work_task,#{@work_task},}${SEP}#{pane_title}" \
     2>/dev/null |
-  while IFS="$SEP" read -r s w c a ag p tty cmd; do
+  while IFS="$SEP" read -r s w c a ag p tty cmd task title; do
     [ -n "$s" ] || continue
     [ -n "$ag" ] || ag=$(infer_agent "$tty" "$cmd")
+    novo=$(sync_session_name "$s" "$ag" "$task" "$title")
+    [ -n "$novo" ] && s="$novo"
     printf "%s${SEP}%s${SEP}%s${SEP}%s${SEP}%s${SEP}%s\n" "$s" "$w" "$c" "$a" "$ag" "$p"
   done
   printf "#fora${SEP}%s\n" "$(agents_outside)"

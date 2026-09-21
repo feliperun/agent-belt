@@ -136,7 +136,22 @@ pré-autoriza: `hasTrustDialogAccepted` no `~/.claude.json` para o Claude,
 (respeitando `CODEX_HOME`). `WORK_NO_AUTOTRUST=1` desliga.
 
 O agente escolhido fica marcado na sessão (`@work_agent`) e aparece na coluna
-AGENTE do `work ls`. Sessão que **não** nasceu pelo `work` — inclusive um tmux
+AGENTE do `work ls`.
+
+**Renomear a conversa no agente renomeia a sessão tmux.** O Claude Code (e o
+Codex) publicam o próprio nome no título do terminal, e é isso que o tmux
+guarda em `pane_title` — o único canal que existe de dentro do agente para
+fora. Então `/rename` lá aparece no `work` aqui. Três cuidados no caminho:
+
+- o título vem com um glifo de estado na frente (`✳ fix-windows`), então só a
+  parte que vira slug conta;
+- se o nome do agente é o mesmo que o `work` passou no `--name`, não há rename
+  a propagar (seria trocar `coreum-xpto` por `xpto` e perder o repo do nome);
+- o prefixo do repo fica: `coreum-xpto` renomeado para `bug-impressora` vira
+  `coreum-bug-impressora`.
+
+O nome antigo continua funcionando (`work xpto` acha a sessão renomeada) porque
+a busca usa a marca `@work_task`, não o nome. `WORK_NO_RENAME=1` desliga. Sessão que **não** nasceu pelo `work` — inclusive um tmux
 que você abriu na mão — também aparece na lista, com o agente deduzido do
 processo em primeiro plano do pane e um `~` indicando que é dedução.
 
