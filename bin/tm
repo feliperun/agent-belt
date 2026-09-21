@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# tm [nome] -> reata a sessao tmux se existir, cria se nao existir.
+# Sob ConPTY (Windows) o TERM pode chegar vazio, e ai o tmux se recusa a desenhar.
+export TERM="${TERM:-xterm-256color}"
+exec tmux new -A -s "${1:-main}"

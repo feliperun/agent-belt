@@ -1,91 +1,163 @@
-# tmux work sessions
+# work — sessões de trabalho persistentes no tailnet inteiro
 
-Sessões de trabalho persistentes: cada tarefa ganha um **git worktree** isolado,
-uma **sessão tmux** e um **Claude Code** rodando lá dentro. Fechar o terminal,
-cair a conexão ou desconectar o RDP não mata nada — `work <tarefa>` de novo reata.
+Cada tarefa ganha um **git worktree** isolado, uma **sessão tmux** e um **agente**
+(Claude Code ou Codex) rodando lá dentro. Fechar o terminal, cair a conexão ou
+desconectar o RDP não mata nada — `work` de novo reata.
 
-Funciona em três papéis:
-
-| diretório | papel |
-|---|---|
-| `mac/` | macOS (zsh) — host de sessões |
-| `windows/` | Windows 11 (PowerShell 5.1 + MSYS2) — host de sessões |
-| `client/` | qualquer terminal remoto (Linux/macOS) — só dispara e reata nos hosts |
-
-## Uso
-
-Num host, dentro de um repo git:
+A sessão pode nascer em **qualquer máquina do tailnet, a partir de qualquer
+outra**, e a lista de sessões vivas é sempre a lista de *todas* as máquinas,
+independente de onde você está e de que diretório.
 
 ```
-work <tarefa>          # cria worktree irmão + sessão tmux + claude; reata se existir
-tm [nome]              # sessão tmux simples (reata ou cria)
-works                  # (Windows) lista as sessões vivas
+work                            menu interativo com as sessões de todas as máquinas
+work ls                         a mesma lista, em texto
+work <tarefa> [repo]            cria (ou reata) aqui
+work <máquina> <tarefa> [repo]  cria (ou reata) na máquina do tailnet
+work attach <sessão> [máquina]  atacha direto, sem menu
+work hosts [discover|add|rm|self]   registro de máquinas
+work doctor                     testa ssh, work e toolchain em cada máquina
+
+  -a|--agent claude|codex|shell   qual agente sobe (default: claude)
+  --codex / --claude / --shell    atalhos
+tm [nome]                         sessão tmux simples, sem worktree nem agente
 ```
 
-`work xpto` em `~/dev/micromed/coreum` cria o worktree `coreum-xpto` na branch
-`work/xpto` e a sessão tmux `coreum-xpto`.
+`work xpto` dentro de `~/dev/micromed/coreum` cria o worktree `coreum-xpto` na
+branch `work/xpto` e a sessão tmux `coreum-xpto`. `work frb-omarchy xpto coreum`
+faz o mesmo na omarchy — e se você estiver dentro de um repo git, o **nome** do
+repo viaja junto, então `work frb-omarchy xpto` resolve `coreum` na cópia de lá.
 
-De um terminal remoto:
+Máquinas são identificadas pelo **nome oficial do tailnet** (`macbook-pro`,
+`felipe-windows`, `frb-omarchy`, …). Prefixo não-ambíguo também serve:
+`work frb-om xpto`.
+
+## Arquitetura
+
+Um script só, `bin/work`, instalado em **todas** as máquinas — cada uma é
+cliente e host ao mesmo tempo. Quando o alvo é ela mesma, executa local; quando
+é outra, chama por ssh o `work` de lá. Quem cria a sessão é sempre o
+`bin/work-session` da máquina de destino, que resolve PATH, worktree, confiança
+do agente e tmux com as regras da plataforma dele.
 
 ```
-rwork <tarefa> [repo]        # alvo default (mac)
-rwork mac <tarefa> [repo]    # host macOS
-rwork win <tarefa> [repo]    # host Windows
-rwork [mac|win] ls           # sessões vivas no alvo
-rwork doctor                 # testa ssh + work-session nos dois alvos
+bin/work          dispatcher: registro, menu, ls, attach, doctor
+bin/work-session  cria/reata a sessão nesta máquina (macOS, Linux, MSYS2)
+bin/tm            sessão tmux simples
+windows/…ps1      funções work/tm/works do PowerShell (chamam o bash do MSYS2)
+install.sh        instala em ~/.local/bin desta máquina
+scripts/deploy.sh instala/atualiza nas máquinas do registro
+scripts/mesh-keys.sh   distribui as chaves ssh para todo mundo se falar com todo mundo
 ```
+
+### Registro de máquinas
+
+`~/.config/work/hosts.conf`, uma linha por máquina:
+
+```
+host macbook-pro     frb@macbook-pro           posix
+host felipe-windows  Micromed@felipe-windows   msys
+host frb-omarchy     frb@frb-omarchy           posix
+self macbook-pro
+```
+
+`work hosts discover` preenche isso a partir do `tailscale status` (o usuário
+ssh sai do `~/.ssh/config` de cada host, e o tipo, do SO informado pelo
+tailnet). O `deploy.sh` **copia** esse registro para as outras máquinas em vez
+de redescobrir lá: redescobrir do outro lado erra o usuário de quem não está no
+`~/.ssh/config` de lá — `Micromed@felipe-windows` viraria `frb@felipe-windows`.
 
 ## Instalação
 
-**macOS** — `mac/work-session` em `~/.local/bin/` (`chmod +x`), e o conteúdo de
-`mac/zshrc-snippet.sh` no `~/.zshrc`.
+**Numa máquina** (macOS, Linux ou Windows com MSYS2):
 
-**Windows** — precisa de MSYS2 com tmux e winpty, Git for Windows, Node e o
-`claude.exe`:
+```
+./install.sh
+```
+
+Copia `work`, `work-session` e `tm` para `~/.local/bin` (mais o apelido `rwork`),
+descobre as máquinas do tailnet e marca qual é esta. No Windows instala também o
+profile do PowerShell.
+
+**Nas outras, a partir de uma já instalada:**
+
+```
+./scripts/deploy.sh --all          # ou: ./scripts/deploy.sh frb-omarchy felipe-windows
+```
+
+**Chaves ssh de todos para todos** (o que permite criar sessão em qualquer
+combinação de origem e destino):
+
+```
+./scripts/mesh-keys.sh --dry-run   # mostra a matriz de quem alcança quem
+./scripts/mesh-keys.sh             # acrescenta o que falta em cada authorized_keys
+```
+
+O Windows fica de fora da escrita automática: lá a conta é administradora e o
+sshd usa `C:\ProgramData\ssh\administrators_authorized_keys`, com ACL restrita a
+SYSTEM + Administradores — `ssh-copy-id` acerta o arquivo errado e falha em
+silêncio. Como o Windows já aceita as outras máquinas, o script só reporta.
+
+**Windows, pré-requisitos** — MSYS2 com tmux e winpty, Git for Windows, Node e
+o `claude.exe`:
 
 ```powershell
 winget install --id MSYS2.MSYS2 -e
 C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm --needed tmux winpty"
 ```
 
-Depois `windows/work-session` em `%USERPROFILE%\.local\bin\` (line endings **LF**)
-e `windows/Microsoft.PowerShell_profile.ps1` em
-`%USERPROFILE%\Documents\WindowsPowerShell\`.
+## Agentes
 
-**Cliente remoto** — `client/rwork-snippet.sh` em `~/.local/bin/` e um
-`. ~/.local/bin/rwork-snippet.sh` no `~/.bashrc` (ou `.zshrc`). Hosts e usuários
-saem de `RWORK_MAC_HOST`, `RWORK_MAC_USER`, `RWORK_WIN_HOST`, `RWORK_WIN_USER`;
-o alvo default de `RWORK_TARGET`.
+| agente | como sobe |
+|---|---|
+| `claude` (default) | `claude --dangerously-skip-permissions --name <tarefa>` |
+| `codex` | `codex --dangerously-bypass-approvals-and-sandbox` |
+| `shell` | só o `$SHELL` no worktree, sem agente |
+
+Os dois param num diálogo de confiança ao abrir um diretório novo — e todo
+worktree é um diretório novo, o que mataria a sessão autônoma antes de começar.
+Como o worktree é um checkout do repo que você mesmo escolheu, o `work-session`
+pré-autoriza: `hasTrustDialogAccepted` no `~/.claude.json` para o Claude,
+`[projects."<caminho>"] trust_level = "trusted"` no `config.toml` do Codex
+(respeitando `CODEX_HOME`). `WORK_NO_AUTOTRUST=1` desliga.
+
+O agente escolhido fica marcado na sessão (`@work_agent`) e aparece na coluna
+AGENTE do `work ls`. Sessões criadas antes disso mostram `-`.
 
 ## Por que o Windows é diferente
 
 Não é WSL de propósito: numa máquina com virtualização desligada e repos
 Windows-nativos em `C:\dev`, o acesso por `/mnt/c` seria lento e sem toolchain.
-O multiplexador é o tmux do MSYS2 e o `claude.exe` continua nativo. Isso impõe
-quatro adaptações, todas comentadas no `windows/work-session`:
+O multiplexador é o tmux do MSYS2 e o agente continua nativo. Daí quatro
+adaptações, todas comentadas no código:
 
-1. **`winpty` na frente do `claude.exe`** — sem ele o Node não acha um console de
+1. **`winpty` na frente do agente** — sem ele o Node não acha um console de
    verdade dentro do pane e a TUI não entra em raw mode.
 2. **PATH montado à mão** — o login shell do MSYS2 é mínimo e não vê `git`,
    `node` nem `claude`.
 3. **Guarda de colisão** — `$repo-$task` pode bater num repo vizinho real
    (`coreum` → `coreum-docs` existe). Diretório preexistente só é reaproveitado
-   se for mesmo worktree daquele repo.
-4. **Pré-autorização do worktree** em `~/.claude.json`
-   (`hasTrustDialogAccepted`) — sem isso toda sessão nova para no diálogo
-   "is this a project you trust?" e a sessão autônoma não sai do lugar.
-   `WORK_NO_AUTOTRUST=1` desliga.
+   se for mesmo worktree daquele repo. Vale em todas as plataformas.
+4. **Pré-autorização do worktree**, acima.
 
 ## Armadilhas conhecidas
 
-- **PowerShell 5.1 mangleia aspas duplas** ao passar argumento para binário
-  nativo. Nada de `"` dentro de string passada ao `bash -lc`.
-- **O sshd do Windows embrulha o comando em `powershell -c`**, então quoting de
-  shell não vale e aspas aninhadas se perdem. Por isso o `rwork` **valida** os
-  argumentos como slug em vez de escapá-los — e barra invertida é recusada:
-  use `coreum` ou `C:/dev/coreum`, nunca `C:\dev\coreum`.
-- **Conta administradora no Windows**: o `sshd_config` tem
-  `Match Group administrators` apontando para
-  `C:\ProgramData\ssh\administrators_authorized_keys`. O `~/.ssh/authorized_keys`
-  do usuário é **ignorado**, então `ssh-copy-id` falha em silêncio. Escreva no
-  arquivo do ProgramData mantendo a ACL restrita a SYSTEM + Administradores.
+- **O sshd do Windows embrulha o comando em `powershell -c`.** Quoting de shell
+  não vale nada ali: aspas duplas somem, `\ ` não escapa espaço, `||` vira erro
+  de sintaxe. Por isso o `work` manda para lá só tokens simples (e valida os
+  argumentos como slug em vez de escapá-los), o `deploy.sh` usa PowerShell puro
+  sem aspas para criar diretório, e o `mesh-keys.sh` manda script por **stdin**
+  (`bash -l -s`) quando precisa de aspas.
+- **`bash -s` sem `-l` no MSYS2** não tem nem `/usr/bin` no PATH: `uname`, `tr`
+  e `head` somem. Sempre `-l -s`.
+- **Barra invertida é recusada nos argumentos**: use `coreum` ou
+  `C:/dev/coreum`, nunca `C:\dev\coreum`.
+- **Nada de caractere de controle em formato do tmux.** O `ls-raw` separa campos
+  com `|`: sob locale C o tmux troca não-imprimível por `_` na saída do `-F`, e
+  só no destino remoto — o campo some e a linha inteira desalinha.
+- **Tab também não serve como separador**: o `read` do bash colapsa sequências
+  de espaço em branco, e um campo vazio desloca todos os outros.
+- **`tmux set-option -t` não aceita o prefixo `=`** de alvo exato (mas
+  `attach`/`has-session` aceitam), e um `-s` no lugar viraria *server option* —
+  marcaria todas as sessões de uma vez.
+- **Função de shell sombreia o PATH**: `work` e `tm` eram funções no `.zshrc`;
+  viraram scripts justamente para valerem igual em toda máquina.

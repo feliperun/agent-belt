@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# work-session [-a claude|codex|shell] <tarefa> [repo]
+#
+# Atacha na sessao tmux da tarefa; se nao existir, cria um worktree irmao do
+# repo (fora do diretorio principal), a sessao tmux e sobe o agente la dentro.
+#
+# repo: caminho de um repo git (aceita C:\... ou /c/... no Windows), ou nome de
+#       diretorio dentro de $WORK_REPOS_DIR. So e necessario quando a sessao
+#       ainda nao existe.
+#
+# Um script so para macOS, Linux e Windows (MSYS2): tudo que difere entre as
+# plataformas esta reunido nos `case $PLATFORM` daqui.
+#
+# Rodado localmente pelo `work` e remotamente via ssh, que entrega um shell
+# nao-interativo e um PATH minimo: por isso PATH e binarios sao resolvidos aqui.
+
+set -uo pipefail
+
+die() { printf 'work-session: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'work-session: %s\n' "$*" >&2; }
+
+case "$(uname -s)" in
+  MSYS*|MINGW*|CYGWIN*) PLATFORM=windows ;;
+  Darwin)               PLATFORM=mac ;;
+  *)                    PLATFORM=linux ;;
+esac
+
+have_dir() { [ -d "$1" ]; }
+prepend_path() { have_dir "$1" && PATH="$1:$PATH"; }
+append_path()  { have_dir "$1" && PATH="$PATH:$1"; }
+
+case "$PLATFORM" in
+  windows)
+    # O login shell do MSYS2 e minimo e nao ve git/node/claude, que moram do
+    # lado Windows.
+    append_path "/c/Program Files/Git/cmd"
+    append_path "/c/Program Files/nodejs"
+    append_path "$HOME/AppData/Local/Microsoft/WinGet/Links"
+    append_path "/c/Program Files/GitHub CLI"
+    append_path "$HOME/.local/bin"
+    ;;
+  mac)
+    prepend_path /opt/homebrew/bin
+    prepend_path "$HOME/.local/bin"
+    append_path "${ASDF_DATA_DIR:-$HOME/.asdf}/shims"
+    ;;
+  linux)
+    prepend_path "$HOME/.local/bin"
+    append_path "$HOME/.local/share/mise/shims"
+    append_path /usr/local/bin
+    ;;
+esac
+export PATH
+export TERM="${TERM:-xterm-256color}"
+
+default_repos_dir() {
+  if [ "$PLATFORM" = windows ]; then printf '/c/dev'; return; fi
+  local d
+  for d in "$HOME/dev/micromed" "$HOME/dev"; do
+    [ -d "$d" ] && { printf '%s' "$d"; return; }
+  done
+  printf '%s' "$HOME/dev"
+}
+
+agent="${WORK_AGENT:-claude}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    # Diagnostico: quem responde e este script, nao o `work`, porque o PATH
+    # completo (git/node/claude/codex do lado Windows, shims do mise) so e
+    # montado aqui.
+    --probe)
+      printf 'work=sim tmux=%s git=%s claude=%s codex=%s repos=%s\n' \
+        "$(tmux -V 2>/dev/null | awk '{print $2}')" \
+        "$(git --version 2>/dev/null | awk '{print $3}')" \
+        "$(command -v claude >/dev/null 2>&1 && echo sim || echo NAO)" \
+        "$(command -v codex  >/dev/null 2>&1 && echo sim || echo NAO)" \
+        "${WORK_REPOS_DIR:-$(default_repos_dir)}"
+      exit 0 ;;
+    -a|--agent) agent="${2:-}"; shift 2 || die "faltou o nome do agente" ;;
+    --claude)   agent=claude; shift ;;
+    --codex)    agent=codex;  shift ;;
+    --shell)    agent=shell;  shift ;;
+    --)         shift; break ;;
+    -*)         die "opcao desconhecida: $1" ;;
+    *)          break ;;
+  esac
+done
+
+task="${1:-}"
+repo_arg="${2:-}"
+repos_dir="${WORK_REPOS_DIR:-$(default_repos_dir)}"
+
+[ -n "$task" ] || die "usage: work-session [-a claude|codex|shell] <tarefa> [repo]"
+
+case "$agent" in
+  claude|codex|shell) ;;
+  *) die "agente desconhecido: $agent (use claude, codex ou shell)" ;;
+esac
+
+# Uma sessao viva ganha de tudo: reatacha e pronto (o agente ja escolhido
+# naquela sessao continua sendo o dela).
+session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1)
+if [ -n "$session" ]; then
+  exec tmux attach -t "=$session"
+fi
+
+if [ -z "$repo_arg" ]; then
+  printf "work-session: nenhuma sessao para '%s'; informe o repo para criar uma\n" "$task" >&2
+  printf 'repos em %s:\n' "$repos_dir" >&2
+  ls -1 "$repos_dir" >&2 2>/dev/null
+  exit 1
+fi
+
+# O PowerShell entrega C:\dev\coreum; git e tmux precisam de /c/dev/coreum.
+to_unix() {
+  if [ "$PLATFORM" = windows ]; then cygpath -u "$1" 2>/dev/null || printf '%s' "$1"
+  else printf '%s' "$1"; fi
+}
+repo_arg=$(to_unix "$repo_arg")
+
+if git -C "$repo_arg" rev-parse --show-toplevel >/dev/null 2>&1; then
+  repo_root=$(git -C "$repo_arg" rev-parse --show-toplevel)
+elif git -C "${repos_dir}/${repo_arg}" rev-parse --show-toplevel >/dev/null 2>&1; then
+  repo_root=$(git -C "${repos_dir}/${repo_arg}" rev-parse --show-toplevel)
+else
+  die "'$repo_arg' nao e um repo git"
+fi
+
+repo_root=$(to_unix "$repo_root")
+repo_name=$(basename "$repo_root")
+worktree_path="${repo_root}-${task}"
+branch="work/${task}"
+session="${repo_name}-${task}"
+
+# $repo-$task pode colidir com um repo vizinho de verdade (coreum ->
+# coreum-docs, coreum-edge-poc existem): so reaproveita diretorio preexistente
+# se ele for mesmo um worktree deste repo.
+git_common() { git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null; }
+
+if [ -e "$worktree_path" ]; then
+  if [ "$(git_common "$worktree_path")" != "$(git_common "$repo_root")" ]; then
+    die "$worktree_path ja existe e nao e um worktree de ${repo_name}; escolha outro nome de tarefa"
+  fi
+elif git -C "$repo_root" show-ref --verify --quiet "refs/heads/${branch}"; then
+  git -C "$repo_root" worktree add "$worktree_path" "$branch" || die "falhou criar o worktree"
+else
+  git -C "$repo_root" worktree add "$worktree_path" -b "$branch" || die "falhou criar o worktree"
+fi
+
+# Todo worktree e um diretorio novo, e o agente para no dialogo de confianca
+# esperando um Enter -- o que anula a sessao autonoma se voce saiu de perto.
+# Como o worktree e um checkout do repo que voce mesmo escolheu, ele ja entra
+# confiado. WORK_NO_AUTOTRUST=1 desliga.
+trust_path() {
+  # O claude indexa projeto por caminho no formato nativo da plataforma.
+  if [ "$PLATFORM" = windows ]; then cygpath -m "$1" 2>/dev/null || printf '%s' "$1"
+  else printf '%s' "$1"; fi
+}
+
+trust_claude() {
+  local p="$1" runner
+  runner=$(command -v node || command -v python3) || {
+    warn "sem node nem python3: pulei a pre-autorizacao do claude"; return 0; }
+  case "$runner" in
+    *node*) "$runner" -e '
+      const fs = require("fs"), os = require("os"), path = require("path");
+      const file = path.join(os.homedir(), ".claude.json");
+      let data;
+      try { data = JSON.parse(fs.readFileSync(file, "utf8")); }
+      catch (e) { process.exit(0); }
+      if (!fs.existsSync(file + ".pre-work-session.bak")) {
+        fs.copyFileSync(file, file + ".pre-work-session.bak");
+      }
+      data.projects = data.projects || {};
+      data.projects[process.argv[1]] = Object.assign(
+        {}, data.projects[process.argv[1]], { hasTrustDialogAccepted: true }
+      );
+      // Escrita em tmp + rename para o ~/.claude.json nunca ficar truncado no meio.
+      const tmp = file + ".work-session.tmp";
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+      fs.renameSync(tmp, file);
+    ' "$p" 2>/dev/null ;;
+    *) "$runner" - "$p" <<'PY' 2>/dev/null
+import json, os, shutil, sys
+file = os.path.join(os.path.expanduser("~"), ".claude.json")
+try:
+    with open(file, encoding="utf-8") as fh:
+        data = json.load(fh)
+except Exception:
+    sys.exit(0)
+bak = file + ".pre-work-session.bak"
+if not os.path.exists(bak):
+    shutil.copyfile(file, bak)
+proj = data.setdefault("projects", {})
+proj.setdefault(sys.argv[1], {})["hasTrustDialogAccepted"] = True
+tmp = file + ".work-session.tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2)
+os.replace(tmp, file)
+PY
+      ;;
+  esac
+}
+
+trust_codex() {
+  # O codex guarda confianca em [projects."<caminho>"] no config.toml.
+  local p="$1" home="${CODEX_HOME:-$HOME/.codex}" file
+  file="$home/config.toml"
+  [ -d "$home" ] || return 0
+  [ -f "$file" ] || : > "$file"
+  grep -Fq "[projects.\"$p\"]" "$file" && return 0
+  [ -f "$file.pre-work-session.bak" ] || cp "$file" "$file.pre-work-session.bak"
+  printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$p" >> "$file"
+}
+
+if [ "${WORK_NO_AUTOTRUST:-0}" != "1" ]; then
+  case "$agent" in
+    claude) trust_claude "$(trust_path "$worktree_path")" || true ;;
+    codex)
+      if [ "$PLATFORM" = windows ]; then
+        warn "pre-autorizacao do codex nao implementada no Windows; se ele parar no dialogo de confianca, responda uma vez"
+      else
+        trust_codex "$(trust_path "$worktree_path")" || true
+      fi
+      ;;
+  esac
+fi
+
+case "$agent" in
+  claude)
+    bin=$(command -v claude) || die "claude nao encontrado no PATH"
+    cmd="$(printf '%q' "$bin") --dangerously-skip-permissions --name $(printf '%q' "$task")"
+    ;;
+  codex)
+    bin=$(command -v codex) || die "codex nao encontrado no PATH"
+    cmd="$(printf '%q' "$bin") --dangerously-bypass-approvals-and-sandbox"
+    ;;
+  shell)
+    cmd="$(printf '%q' "${SHELL:-/bin/bash}")"
+    ;;
+esac
+
+# O claude/codex sao .exe nativos: dentro do pane do tmux eles so ganham um
+# console de verdade (raw mode, TUI) atraves do winpty.
+if [ "$PLATFORM" = windows ] && [ "$agent" != shell ]; then
+  cmd="winpty $cmd"
+fi
+
+# Sobe destacado para marcar o agente na sessao (o `work ls` le essa marca) e
+# so entao atacha.
+tmux new-session -d -s "$session" -c "$worktree_path" "$cmd" || die "falhou criar a sessao tmux"
+# Sem o prefixo "=" aqui: set-option nao aceita target exato, e um "-s" no
+# lugar viraria server option -- marcaria todas as sessoes de uma vez.
+tmux set-option -t "$session" @work_agent "$agent" 2>/dev/null
+tmux set-option -t "$session" @work_task "$task" 2>/dev/null
+exec tmux attach -t "=$session"

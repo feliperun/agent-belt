@@ -1,44 +1,38 @@
-# --- helpers de sessao persistente: tmux + claude (porte do .zshrc do mac) ---
-# O multiplexador e o tmux do MSYS2; o claude continua sendo o .exe nativo.
-# A logica de verdade vive em ~/.local/bin/work-session, chamado tambem via ssh.
+# --- sessoes de trabalho persistentes: tmux + agente (claude/codex) ---
+# O multiplexador e o tmux do MSYS2; os agentes continuam sendo .exe nativos.
+# Toda a logica vive em ~/.local/bin/work, o mesmo script do mac e do Linux.
+#
+# Nada de aspas duplas nas strings passadas ao bash: o PowerShell 5.1 as
+# mangleia ao entregar argumento para binario nativo.
 
 $MsysBash = 'C:\msys64\usr\bin\bash.exe'
 
-function Get-WorkSessionScript {
+function Get-WorkScript {
     # Cygwin abre "C:/Users/..." sem problema; barra invertida ele mangleia.
-    ($env:USERPROFILE -replace '\\', '/') + '/.local/bin/work-session'
+    ($env:USERPROFILE -replace '\\', '/') + '/.local/bin/work'
 }
 
-# work nome-da-tarefa [repo]
-#   Dentro de um repo git, cria um worktree irmao (fora do repo principal), uma
-#   sessao tmux e sobe o claude la dentro; reata se a sessao ja existir.
+# work                            menu interativo com as sessoes de todas as maquinas
+# work ls                         a mesma lista, em texto
+# work <tarefa> [repo]            cria (ou reata) aqui
+# work <maquina> <tarefa> [repo]  cria (ou reata) na maquina do tailnet
+# work attach <sessao> [maquina]  atacha direto
+# work doctor | work hosts        diagnostico e registro de maquinas
 function work {
-    param(
-        [Parameter(Position = 0, Mandatory = $true)][string] $Task,
-        [Parameter(Position = 1)][string] $Repo
-    )
-
-    if (-not $Repo) {
-        $top = & git rev-parse --show-toplevel 2>$null
-        if ($LASTEXITCODE -eq 0 -and $top) { $Repo = @($top)[0] }
-    }
-
-    $argv = @((Get-WorkSessionScript), $Task)
-    if ($Repo) { $argv += $Repo }
+    $argv = @((Get-WorkScript)) + $args
     & $MsysBash -l @argv
 }
+
+# Nome antigo, mesmo programa.
+function rwork { work @args }
+
+# works -> as sessoes vivas de todas as maquinas (o que sobreviveu ao desconectar)
+function works { work ls }
 
 # tm nome -> reata a sessao se existir, cria se nao existir
 function tm {
     param([Parameter(Position = 0)][string] $Name = 'main')
     if ($Name -notmatch '^[\w.-]+$') { Write-Error "nome de sessao invalido: $Name"; return }
-    # Sob ConPTY o TERM pode chegar vazio, e aí o tmux se recusa a desenhar.
+    # Sob ConPTY o TERM pode chegar vazio, e ai o tmux se recusa a desenhar.
     & $MsysBash -lc "export TERM=`${TERM:-xterm-256color}; exec tmux new -A -s $Name"
-}
-
-# works -> lista as sessoes vivas (o que sobreviveu ao ultimo desconectar)
-function works {
-    # Sem aspas duplas na string: o PowerShell 5.1 as mangleia ao passar
-    # argumento para binario nativo, e o tmux recebia -F sem valor.
-    & $MsysBash -lc 'tmux ls 2>/dev/null || echo nenhuma-sessao-viva'
 }
