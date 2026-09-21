@@ -46,6 +46,10 @@ esac
 
 [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH"
 [ "$PLATFORM" = mac ] && [ -d /opt/homebrew/bin ] && PATH="/opt/homebrew/bin:$PATH"
+# O ssh do Windows nao esta no PATH do login shell do MSYS2. Sem isto, este
+# script funciona como host mas nao como cliente: toda chamada remota falha em
+# silencio e o `ls` mostra so as sessoes locais.
+[ "$PLATFORM" = windows ] && [ -d "/c/Windows/System32/OpenSSH" ] && PATH="$PATH:/c/Windows/System32/OpenSSH"
 export PATH
 
 # ---------------------------------------------------------------- registro --

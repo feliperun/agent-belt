@@ -37,6 +37,7 @@ case "$PLATFORM" in
     append_path "/c/Program Files/nodejs"
     append_path "$HOME/AppData/Local/Microsoft/WinGet/Links"
     append_path "/c/Program Files/GitHub CLI"
+    append_path "/c/Windows/System32/OpenSSH"
     append_path "$HOME/.local/bin"
     ;;
   mac)

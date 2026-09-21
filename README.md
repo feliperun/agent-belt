@@ -181,3 +181,13 @@ adaptações, todas comentadas no código:
   aspas não sobrevive ao `powershell -c`.
 - **Saída do PowerShell vem com CRLF**: `grep -x OK` falha silenciosamente sem
   um `tr -d '\r'` antes — dá falso-negativo em teste de conectividade.
+- **`IdentitiesOnly yes` com lista fixa de `Host` não cobre máquina nova.** No
+  Windows o bloco tailnet do `~/.ssh/config` aponta para uma chave sem
+  passphrase; um host fora dessa lista cai na `id_ed25519` padrão, que *tem*
+  passphrase e não abre em `BatchMode` — `Permission denied (publickey)` mesmo
+  com a chave certa autorizada no destino. Ao registrar uma máquina nova,
+  acrescente o nome dela nesse `Host`.
+- **O `ssh` do Windows não está no PATH do login shell do MSYS2**
+  (`/c/Windows/System32/OpenSSH`). Sem isso a máquina funciona como host mas
+  não como cliente: as chamadas remotas falham caladas e o `work ls` mostra só
+  as sessões locais.
