@@ -285,8 +285,15 @@ tmux start-server </dev/null >/dev/null 2>&1
 
 # Sobe destacado para marcar o agente na sessao (o `work ls` le essa marca) e
 # so entao atacha.
-tmux new-session -d -s "$session" -c "$worktree_path" "$cmd" </dev/null >/dev/null 2>&1 ||
-  die "falhou criar a sessao tmux"
+err=$(tmux new-session -d -s "$session" -c "$worktree_path" "$cmd" </dev/null 2>&1)
+if [ $? -ne 0 ]; then
+  # "duplicate session": alguem criou entre a checagem la em cima e agora --
+  # outra maquina, outro terminal, ou o servidor que acabou de voltar. Se a
+  # sessao existe, atachar e o que se queria desde o comeco; morrer aqui era
+  # so teimosia. Qualquer outra falha sai com o motivo do tmux junto.
+  tmux has-session -t "=$session" 2>/dev/null ||
+    die "falhou criar a sessao tmux: ${err:-sem detalhe}"
+fi
 # Sem o prefixo "=" aqui: set-option nao aceita target exato, e um "-s" no
 # lugar viraria server option -- marcaria todas as sessoes de uma vez.
 tmux set-option -t "$session" @work_agent "$agent" 2>/dev/null
