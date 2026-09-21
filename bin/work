@@ -172,14 +172,26 @@ infer_agent() {
 # atachado -- processo de console nao migra para dentro do tmux depois de
 # comecar. Mas contar quantos existem evita voce procurar uma sessao que nunca
 # vai aparecer na lista.
+# No Windows o agente que roda dentro do tmux tambem e um .exe nativo, e o msys
+# nao mostra a parentela dele: pelo `ps -W` os dois casos sao identicos. O que
+# separa e o horario de inicio -- o claude.exe lancado por um pane nasce no
+# mesmo segundo que o winpty que o lancou. Bater por segundo erra para o lado
+# seguro: na duvida, nao oferece matar um agente que ja esta no tmux.
+win_agents_outside() {
+  local intimes winpid stime rest
+  intimes=$(ps -f 2>/dev/null | awk '/[w]inpty|[c]laude|[c]odex/ { print $5 }' | sort -u)
+  ps -W 2>/dev/null | grep -E '[c]laude\.exe|[c]odex\.exe' |
+  while read -r _ _ _ winpid _ _ stime rest; do
+    case "$winpid" in ''|*[!0-9]*) continue ;; esac
+    printf '%s\n' "$intimes" | grep -qx -- "$stime" && continue
+    printf '%s %s\n' "$winpid" "$rest"
+  done
+}
+
 agents_outside() {
   local total=0 inside=0 panes agentes t
   if [ "$PLATFORM" = windows ]; then
-    # O msys nao enxerga tty de processo nativo do Windows; aqui a conta e por
-    # processo mesmo, descontando os panes que rodam agente.
-    total=$(ps -W 2>/dev/null | grep -cE '[c]laude\.exe|[c]odex\.exe')
-    inside=$(tmux list-panes -a -F '#{pane_current_command}' 2>/dev/null | grep -cE '^(winpty|claude|codex)$')
-    if [ "${total:-0}" -gt "${inside:-0}" ]; then printf '%s' "$((total - inside))"; else printf '0'; fi
+    printf '%s' "$(win_agents_outside | grep -c .)"
     return
   fi
   # Contar processo nao serve: um agente sobe uma penca de filhos (MCP, tools).
@@ -269,8 +281,7 @@ adopt_list() {
   local panes pid tty rest agent dir winpid conv
   if [ "$PLATFORM" = windows ]; then
     conv=$(last_claude_conv) || conv="?${SEP}0"
-    ps -W 2>/dev/null | grep -E '[c]laude\.exe|[c]odex\.exe' | while read -r _ _ _ winpid rest; do
-      case "$winpid" in ''|*[!0-9]*) continue ;; esac
+    win_agents_outside | while read -r winpid rest; do
       agent=claude; case "$rest" in *codex*) agent=codex ;; esac
       printf '%s%s%s%s%s%s\n' "$winpid" "$SEP" "$agent" "$SEP" "$conv" "$SEP"
     done
