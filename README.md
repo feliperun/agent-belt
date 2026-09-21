@@ -88,9 +88,23 @@ profile do PowerShell.
 combinação de origem e destino):
 
 ```
-./scripts/mesh-keys.sh --dry-run   # mostra a matriz de quem alcança quem
-./scripts/mesh-keys.sh             # acrescenta o que falta em cada authorized_keys
+./scripts/mesh-keys.sh --dry-run   # mostra o que faria + a matriz de quem alcança quem
+./scripts/mesh-keys.sh             # corrige e mostra a matriz
 ```
+
+Ele cuida dos **dois** motivos que derrubam um par:
+
+1. `authorized_keys` sem a chave da origem → `Permission denied (publickey)`.
+   Quais chaves distribuir não se descobre listando `~/.ssh/*.pub`: o
+   `~/.ssh/config` pode forçar uma `IdentityFile` diferente por destino. Quem
+   sabe a resposta é o ssh da origem, então o script roda
+   `ssh -G <destino>` lá e usa exatamente o que ele diz que vai oferecer.
+2. `known_hosts` com host key antiga → `HOST IDENTIFICATION HAS CHANGED`, que
+   recusa a conexão *antes* de autenticar. Acontece quando uma máquina é
+   reinstalada. A referência é o `known_hosts` de quem roda o script (que
+   alcança todas); só na falta de registro local a chave vem do `ssh-keyscan`.
+
+Máquina fora do ar é simplesmente pulada — rode de novo quando ela voltar.
 
 O Windows fica de fora da escrita automática: lá a conta é administradora e o
 sshd usa `C:\ProgramData\ssh\administrators_authorized_keys`, com ACL restrita a
@@ -161,3 +175,9 @@ adaptações, todas comentadas no código:
   marcaria todas as sessões de uma vez.
 - **Função de shell sombreia o PATH**: `work` e `tm` eram funções no `.zshrc`;
   viraram scripts justamente para valerem igual em toda máquina.
+- **`bash -s` lendo script por stdin também serve para mandar dados**: o
+  `while read` depois do `done` consome o resto do mesmo stdin. É como o
+  `mesh-keys.sh` entrega script *e* lista para o Windows, onde argumento com
+  aspas não sobrevive ao `powershell -c`.
+- **Saída do PowerShell vem com CRLF**: `grep -x OK` falha silenciosamente sem
+  um `tr -d '\r'` antes — dá falso-negativo em teste de conectividade.
