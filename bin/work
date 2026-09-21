@@ -6,6 +6,8 @@
 #   work <tarefa> [repo]            cria (ou reata) na maquina local
 #   work <maquina> <tarefa> [repo]  cria (ou reata) na maquina registrada
 #   work attach <sessao> [maquina]  atacha direto, sem menu
+#   work adopt [maquina]            agente aberto fora do tmux: encerra e
+#                                   reabre a mesma conversa dentro do tmux
 #   work hosts [discover|add|rm|self]   registro de maquinas
 #   work doctor                     testa ssh, work e toolchain em cada maquina
 #
@@ -212,6 +214,125 @@ ls_raw() {
   printf "#fora${SEP}%s\n" "$(agents_outside)"
 }
 
+# ------------------------------------------------------------------ adocao --
+#
+# Agente que nasceu fora do tmux nao pode ser atachado -- mas a conversa dele
+# nao vive no processo. O claude guarda cada sessao em
+# ~/.claude/projects/<caminho>/<id>.jsonl, o codex em ~/.codex. Entao da para
+# encerrar o processo solto e reabrir a *mesma* conversa dentro do tmux, no
+# mesmo diretorio, com --continue. Perde-se o turno em andamento e o
+# scrollback; a conversa volta inteira.
+
+# `stat -f` no GNU e "filesystem", nao "formato": tentar o -c antes evita
+# receber texto de erro no lugar do epoch (e um ATIVO "?" na tabela).
+file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf 0; }
+
+proc_cwd() {
+  local pid="$1"
+  [ -r "/proc/$pid/cwd" ] && { readlink "/proc/$pid/cwd"; return; }
+  lsof -a -d cwd -p "$pid" -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+}
+
+# Quando a conversa daquele diretorio foi tocada pela ultima vez. O claude
+# troca "/" e "." por "-" no nome da pasta de projeto.
+conv_epoch() {
+  local dir="$1" slug f
+  slug=$(printf '%s' "$dir" | sed 's|[/.]|-|g')
+  f=$(ls -t "$HOME/.claude/projects/$slug"/*.jsonl 2>/dev/null | head -1)
+  [ -n "$f" ] && file_mtime "$f" || printf 0
+}
+
+# Se o processo foi aberto com --resume/--session-id, o id da conversa esta nos
+# proprios argumentos e a adocao volta exatamente naquela. Sem isso, so da para
+# pedir a mais recente do diretorio (--continue) -- que e a certa quando ha um
+# agente so ali, e ambigua quando ha varios.
+conv_id() {
+  printf '%s' "$1" | sed -nE 's/.*--(resume|session-id)[ =]([0-9a-fA-F-]{36}).*/\2/p' | head -1
+}
+
+# Plano B do Windows: processo nativo nao entrega cwd para o msys, entao o
+# diretorio sai do registro de conversas do proprio claude.
+last_claude_conv() {
+  local f d
+  f=$(ls -t "$HOME"/.claude/projects/*/*.jsonl 2>/dev/null | head -1)
+  [ -n "$f" ] || return 1
+  # O jsonl guarda o caminho como JSON: C:\\dev\\x. Desescapa e, no Windows,
+  # converte para a forma que o tmux e o test -d entendem.
+  d=$(grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | head -1 | sed 's/.*:"//; s/"$//; s|\\\\|\\|g')
+  [ -n "$d" ] || return 1
+  [ "$PLATFORM" = windows ] && d=$(cygpath -u "$d" 2>/dev/null || printf '%s' "$d")
+  printf '%s%s%s' "$d" "$SEP" "$(file_mtime "$f")"
+}
+
+# pid|agente|diretorio|epoch -- um por agente rodando fora do tmux
+adopt_list() {
+  local panes pid tty rest agent dir winpid conv
+  if [ "$PLATFORM" = windows ]; then
+    conv=$(last_claude_conv) || conv="?${SEP}0"
+    ps -W 2>/dev/null | grep -E '[c]laude\.exe|[c]odex\.exe' | while read -r _ _ _ winpid rest; do
+      case "$winpid" in ''|*[!0-9]*) continue ;; esac
+      agent=claude; case "$rest" in *codex*) agent=codex ;; esac
+      printf '%s%s%s%s%s%s\n' "$winpid" "$SEP" "$agent" "$SEP" "$conv" "$SEP"
+    done
+    return
+  fi
+  panes=$(tmux list-panes -a -F '#{pane_tty}' 2>/dev/null | sed -e 's|^/dev/||' -e 's|^tty||' | sort -u)
+  ps axo pid=,tty=,args= 2>/dev/null |
+    awk -v s="$SEP" '$2 != "??" && $2 != "?" && !/bg-spare/ && !/\/versions\/[0-9]/ &&
+         /(^|[ \/])[c]laude( |$)|(^|[ \/])[c]odex( |$)/ {
+           pid = $1; tty = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); print pid s tty s $0 }' |
+  while IFS="$SEP" read -r pid tty args; do
+    tty=$(printf '%s' "$tty" | sed -e 's|^/dev/||' -e 's|^tty||')
+    printf '%s\n' "$panes" | grep -qx -- "$tty" && continue
+    agent=claude; case "$args" in *codex*) agent=codex ;; esac
+    dir=$(proc_cwd "$pid"); [ -n "$dir" ] || dir="?"
+    printf '%s%s%s%s%s%s%s%s%s\n' \
+      "$pid" "$SEP" "$agent" "$SEP" "$dir" "$SEP" "$(conv_epoch "$dir")" "$SEP" "$(conv_id "$args")"
+  done
+}
+
+# Encerra o processo $1 e reabre a conversa dele dentro do tmux. So recebe um
+# numero: assim atravessa o `powershell -c` do sshd do Windows sem quoting.
+adopt_do() {
+  local pid="$1" line agent dir id name base n cmd bin
+  case "$pid" in ''|*[!0-9]*) printf 'erro%spid invalido\n' "$SEP"; return 1 ;; esac
+  line=$(adopt_list | awk -F"$SEP" -v p="$pid" '$1 == p { print; exit }')
+  [ -n "$line" ] || { printf 'erro%sesse processo nao esta mais fora do tmux\n' "$SEP"; return 1; }
+  agent=$(printf '%s' "$line" | cut -d"$SEP" -f2)
+  dir=$(printf '%s' "$line" | cut -d"$SEP" -f3)
+  id=$(printf '%s' "$line" | cut -d"$SEP" -f5)
+  [ -d "$dir" ] || { printf 'erro%sdiretorio da conversa desconhecido (%s)\n' "$SEP" "$dir"; return 1; }
+
+  case "$agent" in
+    claude) bin=$(command -v claude) || { printf 'erro%sclaude nao esta no PATH\n' "$SEP"; return 1; }
+            cmd="$(printf '%q' "$bin") --dangerously-skip-permissions"
+            if [ -n "$id" ]; then cmd="$cmd --resume $id"; else cmd="$cmd --continue"; fi ;;
+    codex)  bin=$(command -v codex)  || { printf 'erro%scodex nao esta no PATH\n' "$SEP"; return 1; }
+            cmd="$(printf '%q' "$bin") --dangerously-bypass-approvals-and-sandbox resume"
+            if [ -n "$id" ]; then cmd="$cmd $id"; else cmd="$cmd --last"; fi ;;
+    *)      printf 'erro%sagente desconhecido: %s\n' "$SEP" "$agent"; return 1 ;;
+  esac
+  [ "$PLATFORM" = windows ] && cmd="winpty $cmd"
+
+  # Sem basename aqui: a quebra de linha que ele devolve viraria um traco no
+  # fim do nome da sessao.
+  base=$(printf '%s' "${dir##*/}" | tr -c 'A-Za-z0-9._-' '-'); name="$base"; n=2
+  while tmux has-session -t "=$name" 2>/dev/null; do name="$base-$n"; n=$((n + 1)); done
+
+  if [ "$PLATFORM" = windows ]; then
+    /c/Windows/System32/taskkill.exe /PID "$pid" /T /F >/dev/null 2>&1
+  else
+    kill -TERM "$pid" 2>/dev/null
+    for n in 1 2 3 4 5; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+  fi
+
+  tmux new-session -d -s "$name" -c "$dir" "$cmd" ||
+    { printf 'erro%sfalhou criar a sessao tmux\n' "$SEP"; return 1; }
+  tmux set-option -t "$name" @work_agent "$agent" 2>/dev/null
+  printf 'ok%s%s\n' "$SEP" "$name"
+}
+
 raw_for_host() {
   local i="$1"
   if is_self "$i"; then ls_raw; return; fi
@@ -309,8 +430,11 @@ render_rows() {
 # ----------------------------------------------------------------- acoes --
 
 do_attach_local() {
-  local s="$1"
-  tmux has-session -t "=$s" 2>/dev/null || die "sessao '$s' nao existe nesta maquina"
+  local s="$1" err
+  # O erro do tmux vai junto: engolido, "nao existe" tambem seria o que se ve
+  # quando o tmux nao esta no PATH ou o servidor caiu -- causas bem diferentes.
+  err=$(tmux has-session -t "=$s" 2>&1) ||
+    die "nao achei a sessao '$s' nesta maquina (tmux: ${err:-sem detalhe})"
   if [ -n "${TMUX:-}" ]; then exec tmux switch-client -t "=$s"; fi
   exec tmux attach -t "=$s"
 }
@@ -384,6 +508,90 @@ menu() {
       [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "${#R_SESSION[@]}" ] \
         || die "escolha fora da lista: $choice"
       attach_index "$((choice - 1))" ;;
+  esac
+}
+
+# ------------------------------------------------------- adocao (cliente) --
+
+A_HOST=(); A_IDX=(); A_PID=(); A_AGENT=(); A_DIR=(); A_AGE=(); A_CONV=()
+
+collect_adoptables() {
+  A_HOST=(); A_IDX=(); A_PID=(); A_AGENT=(); A_DIR=(); A_AGE=(); A_CONV=()
+  local only="$1" tmp i pid ag dir ep cid
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/workad.XXXXXX") || die "nao consegui criar diretorio temporario"
+  for ((i = 0; i < ${#NAMES[@]}; i++)); do
+    [ -n "$only" ] && [ "$only" != "$i" ] && continue
+    if is_self "$i"; then
+      adopt_list > "$tmp/$i" 2>/dev/null &
+    else
+      # shellcheck disable=SC2046
+      ssh -n "${SSH_BATCH[@]}" "${TARGETS[$i]}" $(remote_prefix "$i") adopt-list > "$tmp/$i" 2>/dev/null &
+    fi
+  done
+  wait
+  for ((i = 0; i < ${#NAMES[@]}; i++)); do
+    [ -s "$tmp/$i" ] || continue
+    while IFS="$SEP" read -r pid ag dir ep cid; do
+      case "$pid" in ''|*[!0-9]*) continue ;; esac
+      A_HOST+=("${NAMES[$i]}"); A_IDX+=("$i"); A_PID+=("$pid"); A_AGENT+=("$ag")
+      A_DIR+=("$dir"); A_AGE+=("$(age_of "$ep")")
+      # Conversa exata quando o pid carrega o id; senao, a mais recente do dir.
+      A_CONV+=("$([ -n "$cid" ] && printf '%s' "${cid%%-*}" || printf '+recente')")
+    done < <(tr -d '\r' < "$tmp/$i")
+  done
+  rm -rf "$tmp"
+}
+
+cmd_adopt() {
+  local target="${1:-}" only="" i idx choice conf out name
+  if [ -n "$target" ]; then
+    only=$(resolve_host "$target") || die "maquina desconhecida: $target (veja: $PROG hosts)"
+  fi
+  collect_adoptables "$only"
+  if [ "${#A_PID[@]}" -eq 0 ]; then
+    printf 'nenhum agente rodando fora do tmux%s\n' "${target:+ em $target}"
+    return 0
+  fi
+
+  printf '%3s  %-16s  %-7s  %5s  %-9s  %s\n' '#' MAQUINA AGENTE ATIVO CONVERSA DIRETORIO
+  for ((i = 0; i < ${#A_PID[@]}; i++)); do
+    printf '%3d  %-16s  %-7s  %5s  %-9s  %s\n' \
+      "$((i + 1))" "${A_HOST[$i]}" "${A_AGENT[$i]}" "${A_AGE[$i]}" \
+      "${A_CONV[$i]}" "${A_DIR[$i]}"
+  done
+  printf '\nadotar = ENCERRAR o processo e reabrir a mesma conversa dentro do tmux.\n'
+  printf 'perde o turno em andamento e o scrollback; a conversa volta pelo --continue.\n'
+
+  [ -t 0 ] && [ -t 1 ] || return 0
+  printf '\nqual adotar? (numero, q): '
+  read -r choice < /dev/tty || return 0
+  case "$choice" in
+    ''|q|Q)   return 0 ;;
+    *[!0-9]*) die "escolha invalida: $choice" ;;
+  esac
+  [ "$choice" -ge 1 ] && [ "$choice" -le "${#A_PID[@]}" ] || die "fora da lista: $choice"
+  i=$((choice - 1)); idx="${A_IDX[$i]}"
+
+  printf 'encerrar %s (pid %s) em %s e reabrir em tmux? [s/N] ' \
+    "${A_AGENT[$i]}" "${A_PID[$i]}" "${A_HOST[$i]}"
+  read -r conf < /dev/tty || return 0
+  case "$conf" in s|S|y|Y) ;; *) printf 'cancelado\n'; return 0 ;; esac
+
+  if is_self "$idx"; then
+    out=$(adopt_do "${A_PID[$i]}")
+  else
+    # shellcheck disable=SC2046
+    out=$(ssh -n "${SSH_BATCH[@]}" "${TARGETS[$idx]}" $(remote_prefix "$idx") adopt-do "${A_PID[$i]}" 2>&1 |
+          tr -d '\r' | grep -E '^(ok|erro)' | head -1)
+  fi
+  case "$out" in
+    ok*) name=${out#ok${SEP}}
+         printf 'adotada: sessao %s em %s\n' "$name" "${A_HOST[$i]}"
+         if is_self "$idx"; then do_attach_local "$name"; fi
+         # shellcheck disable=SC2046
+         exec ssh "${SSH_TTY[@]}" "${TARGETS[$idx]}" $(remote_prefix "$idx") attach "$name" ;;
+    erro*) die "${out#erro${SEP}}" ;;
+    *)     die "sem resposta de ${A_HOST[$i]}" ;;
   esac
 }
 
@@ -551,8 +759,11 @@ case "${1:-}" in
              fi
              render_footer
              exit 0 ;;
+  adopt)     shift; cmd_adopt "${1:-}"; exit $? ;;
   ls-raw)    ls_raw; exit 0 ;;          # uso interno, via ssh
   probe)     probe_local; exit 0 ;;     # uso interno, via ssh
+  adopt-list) adopt_list; exit 0 ;;     # uso interno, via ssh
+  adopt-do)  shift; adopt_do "${1:-}"; exit $? ;;   # uso interno, via ssh
   run)       shift                      # uso interno: cria nesta maquina
              exec work-session --agent "$agent" "$@" ;;
   attach)
@@ -565,7 +776,11 @@ case "${1:-}" in
       # shellcheck disable=SC2046
       exec ssh "${SSH_TTY[@]}" "${TARGETS[$idx]}" $(remote_prefix "$idx") attach "$sess"
     fi
-    # Sem maquina: procura a sessao em todas, e so entao decide.
+    # Atalho que importa: quando o `work` de outra maquina chama este por ssh,
+    # a sessao esta aqui. Atachar direto evita uma varredura de rede inteira
+    # (com o timeout de cada maquina) so para redescobrir o obvio.
+    tmux has-session -t "=$sess" 2>/dev/null && do_attach_local "$sess"
+    # Senao, procura em todas e so entao decide.
     collect_sessions
     for ((i = 0; i < ${#R_SESSION[@]}; i++)); do
       [ "${R_SESSION[$i]}" = "$sess" ] && attach_index "$i"
@@ -589,6 +804,14 @@ case "${1:-}" in
 esac
 
 # Sobrou: `work <tarefa> [repo]` ou `work <maquina> <tarefa> [repo]`.
+#
+# Antes disso, uma protecao: numa maquina com `work` antigo, um subcomando que
+# ela ainda nao conhece cairia aqui e viraria *nome de tarefa*. Melhor dizer
+# que a versao esta velha do que criar uma branch chamada "adopt-list".
+case "${1:-}" in
+  ls-*|adopt*|probe|run|hosts|doctor|attach|version|help)
+    die "subcomando '$1' nao existe nesta versao do work (atualize com: scripts/deploy.sh)" ;;
+esac
 [ -n "$SELF" ] || warn "nao identifiquei esta maquina no registro; use: $PROG hosts self <nome>"
 
 if [ $# -ge 2 ] && idx=$(resolve_host "$1" 2>/dev/null); then

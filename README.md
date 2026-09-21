@@ -14,6 +14,7 @@ work ls                         a mesma lista, em texto
 work <tarefa> [repo]            cria (ou reata) aqui
 work <máquina> <tarefa> [repo]  cria (ou reata) na máquina do tailnet
 work attach <sessão> [máquina]  atacha direto, sem menu
+work adopt [máquina]            adota agente aberto fora do tmux
 work hosts [discover|add|rm|self]   registro de máquinas
 work doctor                     testa ssh, work e toolchain em cada máquina
 
@@ -151,12 +152,34 @@ máquina não respondeu" — e você fica procurando uma sessão que a lista nun
 vai mostrar. A resposta do `ls-raw` termina numa linha `#fora`, que serve de
 sinal de vida: se ela não chegou, a máquina entra como *sem resposta*.
 
-**Agente aberto direto, fora do tmux, não tem como ser atachado.** Um processo
-de console não migra para dentro do tmux depois de começar: no Linux existe o
-`reptyr`, frágil com TUI, e no Windows não há equivalente — o processo está
-preso ao ConPTY da janela que o criou, e o caminho de volta é o RDP naquela
-sessão. Por isso o `work` só conta e avisa. Para ser atacável, tem que nascer
-dentro do tmux (`work <tarefa>`, ou `tm` para uma sessão simples).
+### Adotar um agente aberto fora do tmux
+
+Um processo de console **não migra** para dentro do tmux depois de começar: no
+Linux existe o `reptyr`, frágil com TUI, e no Windows não há equivalente — o
+processo fica preso ao ConPTY da janela que o criou. Mas a *conversa* não vive
+no processo: o Claude guarda cada sessão em
+`~/.claude/projects/<caminho>/<id>.jsonl` e o Codex em `~/.codex`. Então dá
+para encerrar o processo solto e reabrir a mesma conversa dentro do tmux:
+
+```
+work adopt                  # candidatos em todas as máquinas
+work adopt felipe-windows   # só naquela
+```
+
+```
+  #  MAQUINA           AGENTE   ATIVO  CONVERSA   DIRETORIO
+  1  felipe-windows    claude      3h  +recente   /c/dev/faberun-fix-windows
+```
+
+Escolhido um, ele pede confirmação, encerra o processo e sobe uma sessão tmux
+no mesmo diretório com `--continue` (ou `--resume <id>`, quando o id está nos
+argumentos do processo — aí a conversa retomada é exatamente aquela, sem
+ambiguidade quando há vários agentes no mesmo diretório). Você perde o turno em
+andamento e o scrollback; a conversa volta inteira.
+
+No Windows o diretório não vem do processo (o msys não lê o cwd de processo
+nativo): sai do `"cwd"` gravado no próprio `.jsonl` da conversa, desescapado e
+convertido para a forma que o tmux entende.
 
 ## Por que o Windows é diferente
 
