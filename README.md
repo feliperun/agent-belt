@@ -67,6 +67,19 @@ tailnet). O `deploy.sh` **copia** esse registro para as outras máquinas em vez
 de redescobrir lá: redescobrir do outro lado erra o usuário de quem não está no
 `~/.ssh/config` de lá — `Micromed@felipe-windows` viraria `frb@felipe-windows`.
 
+### Clipboard ao anexar uma sessão remota
+
+Ao fazer `work attach` a sessão continua no tmux da máquina de destino, mas o
+terminal está no cliente de origem. O `work` configura automaticamente o tmux
+do destino para encaminhar o clipboard por OSC 52: habilita `set-clipboard`,
+`allow-passthrough` e a feature genérica `*:clipboard` antes de criar ou
+anexar a sessão. Isso é importante sobretudo para um terminal do Omarchy com
+uma sessão no macOS, porque o tmux do macOS não conhece `xterm-ghostty` por
+padrão.
+
+Depois de atualizar o `work`, basta anexar de novo com `work attach`. No
+copy-mode do tmux, `v` inicia a seleção e `y` copia para o clipboard local.
+
 ## Instalação
 
 **Numa máquina** (macOS, Linux ou Windows com MSYS2):

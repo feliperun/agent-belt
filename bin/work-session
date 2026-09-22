@@ -64,6 +64,18 @@ normalize_term() {
 normalize_term
 export TERM="${TERM:-xterm-256color}"
 
+# O attach remoto chega direto ao tmux desta maquina. Habilite OSC 52 no
+# servidor de destino para que o copy-mode consiga levar a selecao de volta ao
+# clipboard do terminal que esta no Omarchy (ou em qualquer outro cliente).
+tmux_clipboard() {
+  tmux set-option -g set-clipboard on 2>/dev/null || return 0
+  tmux set-option -g allow-passthrough on 2>/dev/null || true
+  if ! tmux show-options -gqv terminal-features 2>/dev/null |
+      grep -qE '^\*:.*clipboard'; then
+    tmux set-option -as terminal-features ',*:clipboard' 2>/dev/null || true
+  fi
+}
+
 default_repos_dir() {
   if [ "$PLATFORM" = windows ]; then printf '/c/dev'; return; fi
   local d
@@ -119,6 +131,7 @@ session=$(tmux list-sessions -F "#{session_name}|#{?@work_task,#{@work_task},}" 
 [ -n "$session" ] ||
   session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1)
 if [ -n "$session" ]; then
+  tmux_clipboard
   exec tmux attach -t "=$session"
 fi
 
@@ -301,6 +314,7 @@ if [ $? -ne 0 ]; then
   tmux has-session -t "=$session" 2>/dev/null ||
     die "falhou criar a sessao tmux: ${err:-sem detalhe}"
 fi
+tmux_clipboard
 # Sem o prefixo "=" aqui: set-option nao aceita target exato, e um "-s" no
 # lugar viraria server option -- marcaria todas as sessoes de uma vez.
 tmux set-option -t "$session" @work_agent "$agent" 2>/dev/null

@@ -64,6 +64,23 @@ export PATH
 
 # ---------------------------------------------------------------- registro --
 
+# O tmux que roda no destino precisa saber que o terminal que chegou pelo SSH
+# aceita OSC 52. No Omarchy isso vem do tmux.conf local, mas um attach remoto
+# entra direto no tmux da outra maquina; portanto a configuracao do cliente
+# nunca chega ao servidor remoto. Sem a feature `clipboard`, o tmux do Mac,
+# por exemplo, nao emite o OSC 52 quando copiamos no copy-mode.
+tmux_clipboard() {
+  tmux set-option -g set-clipboard on 2>/dev/null || return 0
+  tmux set-option -g allow-passthrough on 2>/dev/null || true
+
+  # `terminal-features` e uma opcao array. So acrescenta a regra generica uma
+  # vez para nao fazer o valor crescer a cada `work attach`.
+  if ! tmux show-options -gqv terminal-features 2>/dev/null |
+      grep -qE '^\*:.*clipboard'; then
+    tmux set-option -as terminal-features ',*:clipboard' 2>/dev/null || true
+  fi
+}
+
 NAMES=(); TARGETS=(); KINDS=(); SELF_NAME=""
 
 load_config() {
@@ -506,6 +523,7 @@ do_attach_local() {
   # quando o tmux nao esta no PATH ou o servidor caiu -- causas bem diferentes.
   err=$(tmux has-session -t "=$s" 2>&1) ||
     die "nao achei a sessao '$s' nesta maquina (tmux: ${err:-sem detalhe})"
+  tmux_clipboard
   if [ -n "${TMUX:-}" ]; then exec tmux switch-client -t "=$s"; fi
   # -d expulsa os outros clientes. Util quando a sessao esta atachada noutra
   # maquina: com dois clientes, o tmux encolhe a janela para o menor dos dois
