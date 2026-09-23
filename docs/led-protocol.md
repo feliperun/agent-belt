@@ -61,10 +61,10 @@ Do mesmo canal, segundo outros projetos para este VID:PID:
 - O formato com RGB por tecla (`03 FE B0 <camada-1> <modo> R G B …`) é de outro
   firmware com o mesmo VID:PID; aqui não faz nada.
 
-## Uso no minikeyboard
+## Uso no agent-belt
 
 `src/led.m`: uma thread aplica sempre o último estado desejado e pula escritas
 repetidas. Prioridade: gravando (branco fixo) > transcrevendo (ciano fixo) >
 agente aguardando você (vermelho) > agente terminou e não foi visto (verde) >
 base (onda branca reativa, `02`). `"led": false` na config desliga. Manual:
-`minikeyboard led <cor> <modo>`.
+`agent-belt led <cor> <modo>`.

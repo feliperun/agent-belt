@@ -34,7 +34,7 @@ char *mk_keychain_secret(const char *service, const char *account) {
 
 // A second daemon would double every key and scroll.
 int mk_single_instance(void) {
-    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/minikeyboard"];
+    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt"];
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     int fd = open([dir stringByAppendingPathComponent:@"daemon.lock"].fileSystemRepresentation, O_CREAT | O_RDWR, 0600);
     if (fd < 0) return -1;
@@ -49,7 +49,7 @@ int mk_check_permissions(void) {
     BOOL input = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted;
     BOOL accessibility = AXIsProcessTrusted();
     if (input && accessibility) return 0;
-    NSString *marker = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/minikeyboard/permission-prompt"];
+    NSString *marker = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt/permission-prompt"];
     NSDate *last = [NSFileManager.defaultManager attributesOfItemAtPath:marker error:nil].fileModificationDate;
     if (!last || -last.timeIntervalSinceNow > 600) {
         [NSFileManager.defaultManager createDirectoryAtPath:marker.stringByDeletingLastPathComponent
@@ -59,7 +59,7 @@ int mk_check_permissions(void) {
         if (!accessibility)
             AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge id)kAXTrustedCheckOptionPrompt: @YES});
     }
-    fprintf(stderr, "[minikeyboard] faltam permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
+    fprintf(stderr, "[agent-belt] faltam permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
             input ? "" : "Monitoramento de Entrada", !input && !accessibility ? ", " : "",
             accessibility ? "" : "Acessibilidade");
     return -1;
@@ -99,10 +99,10 @@ static NSUInteger MKDeviceCount(uint16_t vendor_id, uint16_t product_id) {
     return count;
 }
 
-// `minikeyboard status`: one screen instead of reading launchctl and the log.
+// `agent-belt status`: one screen instead of reading launchctl and the log.
 int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_env) {
     @autoreleasepool {
-        NSString *service = [NSString stringWithFormat:@"gui/%d/com.frb.minikeyboard", getuid()];
+        NSString *service = [NSString stringWithFormat:@"gui/%d/com.frb.agentbelt", getuid()];
         NSString *agent = MKCommandOutput(@"/bin/launchctl", @[@"print", service]);
         NSString *pid = nil;
         for (NSString *line in [agent componentsSeparatedByString:@"\n"]) {
@@ -113,7 +113,7 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
         else if (pid) printf("daemon:       rodando (pid %s)\n", pid.UTF8String);
         else printf("daemon:       instalado, mas parado\n");
 
-        NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/minikeyboard.log"];
+        NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/agent-belt.log"];
         NSString *log = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
         NSRange ready = [log rangeOfString:@"] pronto" options:NSBackwardsSearch];
         NSRange missing = [log rangeOfString:@"] faltam permissões" options:NSBackwardsSearch];
@@ -129,7 +129,7 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
 
         NSDictionary *query = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecAttrService: @"minikeyboard",
+            (__bridge id)kSecAttrService: @"agent-belt",
             (__bridge id)kSecAttrAccount: @"deepgram",
             (__bridge id)kSecReturnAttributes: @YES,
         };
@@ -138,13 +138,13 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
         if (attributes) CFRelease(attributes);
         // Reads the secret like the daemon does (same signed app), so a missing
         // Keychain grant shows up here as the system prompt, not mid-dictation.
-        char *secret = keychain ? mk_keychain_secret("minikeyboard", "deepgram") : NULL;
+        char *secret = keychain ? mk_keychain_secret("agent-belt", "deepgram") : NULL;
         if (secret) { memset(secret, 0, strlen(secret)); free(secret); }
         printf("deepgram:     %s\n", secret ? "chave no Keychain, legível pelo app"
                                     : keychain ? "chave no Keychain, mas o app não tem acesso (rode status de novo e autorize)"
                                     : getenv(key_env) ? "só no ambiente do terminal (o LaunchAgent não vê)" : "sem chave");
 
-        printf("config:       %s/.config/minikeyboard/config.json\n", NSHomeDirectory().UTF8String);
+        printf("config:       %s/.config/agent-belt/config.json\n", NSHomeDirectory().UTF8String);
         printf("log:          %s\n", logPath.UTF8String);
         NSArray *lines = [log componentsSeparatedByString:@"\n"];
         NSUInteger shown = 0;

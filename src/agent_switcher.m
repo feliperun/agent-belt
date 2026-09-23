@@ -107,7 +107,7 @@ static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) {
 }
 
 static NSDictionary *MKOrca(NSArray<NSString *> *arguments) {
-    NSData *data = MKRun(MKToolPath(@"orca", @"MINIKEYBOARD_ORCA_CLI"), [arguments arrayByAddingObject:@"--json"]);
+    NSData *data = MKRun(MKToolPath(@"orca", @"AGENT_BELT_ORCA_CLI"), [arguments arrayByAddingObject:@"--json"]);
     id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     return [json isKindOfClass:NSDictionary.class] && MKBool(json[@"ok"]) ? json[@"result"] : nil;
 }
@@ -120,7 +120,7 @@ static NSArray<NSArray<NSString *> *> *MKRows(NSString *text) {
 }
 
 static NSArray<NSArray<NSString *> *> *MKTmux(NSArray<NSString *> *arguments) {
-    NSData *data = MKRun(MKToolPath(@"tmux", @"MINIKEYBOARD_TMUX"), arguments);
+    NSData *data = MKRun(MKToolPath(@"tmux", @"AGENT_BELT_TMUX"), arguments);
     return data ? MKRows([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"") : @[];
 }
 
@@ -256,7 +256,7 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
     NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
     NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
     NSDictionary *result = orca ? MKOrca(@[@"terminal", @"list", @"--limit", @"100"]) : nil;
-    if (orca && !result) fprintf(stderr, "[minikeyboard] Orca: CLI indisponível; confira MINIKEYBOARD_ORCA_CLI\n");
+    if (orca && !result) fprintf(stderr, "[agent-belt] Orca: CLI indisponível; confira AGENT_BELT_ORCA_CLI\n");
     for (NSDictionary *terminal in MKArray(result[@"terminals"])) {
         if (!MKLiveTerminal(terminal)) continue;
         NSString *handle = terminal[@"handle"];
@@ -454,7 +454,7 @@ static void MKRestoreWindows(NSRunningApplication *app) {
 }
 
 static BOOL MKFocusFailed(MKAgentTarget *target, const char *step) {
-    fprintf(stderr, "[minikeyboard] %s: falhou em %s\n", target.label.UTF8String, step);
+    fprintf(stderr, "[agent-belt] %s: falhou em %s\n", target.label.UTF8String, step);
     return NO;
 }
 
@@ -475,7 +475,7 @@ static BOOL MKFocus(MKAgentTarget *target) {
     if (AXUIElementPerformAction((__bridge AXUIElementRef)window, kAXRaiseAction) != kAXErrorSuccess) return NO;
     if ([target.bundle isEqual:@"com.anthropic.claudefordesktop"]) {
         id code = MKFindCodeControl(window);
-        if (!code) { fprintf(stderr, "[minikeyboard] Claude: modo Code não exposto pela acessibilidade\n"); return NO; }
+        if (!code) { fprintf(stderr, "[agent-belt] Claude: modo Code não exposto pela acessibilidade\n"); return NO; }
         if (!MKBool(MKAttr(code, kAXValueAttribute)) && !MKPress(code)) return NO;
     }
     if (target.control && !MKPress(target.control)) return NO;
@@ -486,7 +486,7 @@ static BOOL MKFocus(MKAgentTarget *target) {
 // Orca's "active" worktree selector reflects the caller's worktree, not the UI,
 // so the ring position is ours: the last agent focused, shared by daemon and CLI.
 static NSString *MKLastKeyPath(void) {
-    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/minikeyboard"];
+    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt"];
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     return [dir stringByAppendingPathComponent:@"last-agent"];
 }
@@ -524,7 +524,7 @@ static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
         if (target.state == MKStateWorking) return; // a spinning agent is not asking
         BOOL waiting = NO;
         if (target.pane) {
-            NSData *screen = MKRun(MKToolPath(@"tmux", @"MINIKEYBOARD_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
+            NSData *screen = MKRun(MKToolPath(@"tmux", @"AGENT_BELT_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
             waiting = screen && MKWaitingScreen([[NSString alloc] initWithData:screen encoding:NSUTF8StringEncoding] ?: @"");
         } else if (target.terminal) {
             NSDictionary *shown = MKOrca(@[@"terminal", @"show", @"--terminal", target.terminal]);
@@ -575,7 +575,7 @@ static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
     [mk_done removeObject:target.key]; // seen
     if (target.state == MKStateDone) target.state = MKStateIdle;
     MKUpdateLed(ring);
-    fprintf(stderr, "[minikeyboard] AGENT → %s\n", MKTitleOf(target).UTF8String);
+    fprintf(stderr, "[agent-belt] AGENT → %s\n", MKTitleOf(target).UTF8String);
 }
 
 // Discovery plus states, with each target's place in the ring.
@@ -613,11 +613,11 @@ static NSArray<MKAgentTarget *> *MKRefreshRing(BOOL desktop) {
 
 static int MKCycle(BOOL desktop) {
     if (!AXIsProcessTrusted()) {
-        fprintf(stderr, "[minikeyboard] alternar agents requer permissão de Accessibility\n");
+        fprintf(stderr, "[agent-belt] alternar agents requer permissão de Accessibility\n");
         return -1;
     }
     MKRefreshRing(desktop);
-    if (!mk_ring.count) { fprintf(stderr, "[minikeyboard] nenhum terminal com coding agent (Orca ou work)\n"); return -1; }
+    if (!mk_ring.count) { fprintf(stderr, "[agent-belt] nenhum terminal com coding agent (Orca ou work)\n"); return -1; }
     NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
     NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
@@ -627,13 +627,13 @@ static int MKCycle(BOOL desktop) {
         MKShowHud(target, mk_ring);
         return 0;
     }
-    fprintf(stderr, "[minikeyboard] não consegui focar nenhuma sessão (veja as falhas acima)\n");
+    fprintf(stderr, "[agent-belt] não consegui focar nenhuma sessão (veja as falhas acima)\n");
     return -1;
 }
 
 static dispatch_queue_t mk_agents_queue;
 static void MKCreateAgentsQueue(void) {
-    mk_agents_queue = dispatch_queue_create("minikeyboard.agents", DISPATCH_QUEUE_SERIAL);
+    mk_agents_queue = dispatch_queue_create("agent-belt.agents", DISPATCH_QUEUE_SERIAL);
 }
 
 void mk_agents_next(int desktop) {
@@ -702,7 +702,7 @@ static void MKMenuPress(void) {
     mk_menu_last_press = now;
     switch (MKMenuDecide(mk_menu_visible, since)) {
     case MKMenuShow: {
-        if (!AXIsProcessTrusted()) { fprintf(stderr, "[minikeyboard] menu de agents requer Accessibility\n"); return; }
+        if (!AXIsProcessTrusted()) { fprintf(stderr, "[agent-belt] menu de agents requer Accessibility\n"); return; }
         mk_menu_ring = MKRefreshRing(NO);
         if (!mk_menu_ring.count) { mk_hud_show("Nenhum coding agent", "Orca ou work", 0); return; }
         NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
@@ -786,7 +786,7 @@ int mk_agents_command(int mode, int desktop) {
         if (mode == 2) { MKBottom(); return 0; }
         if (mode == 1) return MKCycle(desktop != 0);
         if (!AXIsProcessTrusted()) {
-            fprintf(stderr, "[minikeyboard] agents list requer Accessibility\n");
+            fprintf(stderr, "[agent-belt] agents list requer Accessibility\n");
             return -1;
         }
         NSArray *targets = MKDiscover(desktop != 0);
@@ -823,7 +823,7 @@ static void MKBottom(void) {
     }
     if (MKAgentHost(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier))
         for (int i = 0; i < 4; i++) mk_scroll_down(5000);
-    fprintf(stderr, "[minikeyboard] AGENTS ↓ fim (%lu pane(s) tmux)\n", (unsigned long)cancelled);
+    fprintf(stderr, "[agent-belt] AGENTS ↓ fim (%lu pane(s) tmux)\n", (unsigned long)cancelled);
 }
 
 void mk_agents_bottom(void) {
@@ -847,7 +847,7 @@ static void MKNotifyAway(NSArray<MKAgentTarget *> *ring) {
     for (NSString *key in since.allKeys) if (![waiting containsObject:key]) [since removeObjectForKey:key];
     [notified intersectSet:waiting];
     const double idle = CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, kCGAnyInputEventType);
-    NSString *ford = MKToolPath(@"ford-send", @"MINIKEYBOARD_FORD_SEND");
+    NSString *ford = MKToolPath(@"ford-send", @"AGENT_BELT_FORD_SEND");
     for (MKAgentTarget *target in ring) {
         if (target.state != MKStateWaiting) continue;
         if (!since[target.key]) since[target.key] = @(now);
@@ -859,7 +859,7 @@ static void MKNotifyAway(NSArray<MKAgentTarget *> *ring) {
         task.arguments = @[[NSString stringWithFormat:@"🔴 %@ está esperando uma decisão sua há %.0f min", name,
                             (now - since[target.key].doubleValue) / 60]];
         task.standardOutput = task.standardError = [NSFileHandle fileHandleWithNullDevice];
-        if ([task launchAndReturnError:nil]) fprintf(stderr, "[minikeyboard] aviso no WhatsApp: %s\n", name.UTF8String);
+        if ([task launchAndReturnError:nil]) fprintf(stderr, "[agent-belt] aviso no WhatsApp: %s\n", name.UTF8String);
     }
 }
 

@@ -26,7 +26,7 @@ pub fn deepgramKey(allocator: std.mem.Allocator, env_name: []const u8) ![]u8 {
     var name: [256]u8 = undefined;
     const name_z = std.fmt.bufPrintZ(&name, "{s}", .{env_name}) catch return error.DeepgramApiKeyMissing;
     if (std.c.getenv(name_z)) |value| return allocator.dupe(u8, std.mem.span(value));
-    const secret = c.mk_keychain_secret("minikeyboard", "deepgram") orelse return error.DeepgramApiKeyMissing;
+    const secret = c.mk_keychain_secret("agent-belt", "deepgram") orelse return error.DeepgramApiKeyMissing;
     defer c.mk_free_buffer(@ptrCast(secret));
     return allocator.dupe(u8, std.mem.span(secret));
 }
@@ -132,7 +132,7 @@ pub const HidListener = struct {
         if (c.mk_status_init() != 0) {
             std.log.warn("não consegui criar indicador na barra de menus", .{});
         }
-        self.debug_input = std.c.getenv("MINIKEYBOARD_DEBUG_INPUT") != null;
+        self.debug_input = std.c.getenv("AGENT_BELT_DEBUG_INPUT") != null;
         const hid_thread = try std.Thread.spawn(.{}, hidThread, .{self});
         hid_thread.detach();
 
@@ -161,7 +161,7 @@ fn hidCallback(context: ?*anyopaque, key: u8, pressed: u8) callconv(.c) void {
     const listener: *HidListener = @ptrCast(@alignCast(context.?));
     noteKey(listener, key, pressed != 0);
     if (listener.debug_input) {
-        std.debug.print("[minikeyboard] HID key={d} {s}\n", .{ key, if (pressed != 0) "down" else "up" });
+        std.debug.print("[agent-belt] HID key={d} {s}\n", .{ key, if (pressed != 0) "down" else "up" });
     }
     listener.on_event(listener.context, .{ .key = key, .pressed = pressed != 0 });
 }
@@ -169,7 +169,7 @@ fn hidCallback(context: ?*anyopaque, key: u8, pressed: u8) callconv(.c) void {
 fn knobCallback(context: ?*anyopaque, event: i8) callconv(.c) void {
     const listener: *HidListener = @ptrCast(@alignCast(context.?));
     const knob: KnobEvent = @enumFromInt(event);
-    if (listener.debug_input) std.debug.print("[minikeyboard] KNOB {s}\n", .{@tagName(knob)});
+    if (listener.debug_input) std.debug.print("[agent-belt] KNOB {s}\n", .{@tagName(knob)});
     listener.on_knob(listener.context, knob);
 }
 
@@ -192,7 +192,7 @@ fn eventFilter(context: ?*anyopaque, keycode: u16, pressed: u8, repeated: u8) ca
     const release_until = listener.release_until_ns[key].load(.acquire);
     const should_suppress = held or (release_until != 0 and c.mk_monotonic_ns() <= release_until);
     if (listener.debug_input and (repeated == 0 or !should_suppress)) {
-        std.debug.print("[minikeyboard] TAP keycode={d} key={d} {s} suppress={s}\n", .{
+        std.debug.print("[agent-belt] TAP keycode={d} key={d} {s} suppress={s}\n", .{
             keycode,
             key,
             if (pressed != 0) "down" else "up",

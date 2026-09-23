@@ -302,15 +302,15 @@ void mk_status_set(int status) {
             switch (status) {
                 case 1:
                     mk_status_item.button.title = @"🎙️";
-                    mk_status_item.button.toolTip = @"Minikeyboard gravando";
+                    mk_status_item.button.toolTip = @"Agent Belt gravando";
                     break;
                 case 2:
                     mk_status_item.button.title = @"⏳";
-                    mk_status_item.button.toolTip = @"Minikeyboard transcrevendo";
+                    mk_status_item.button.toolTip = @"Agent Belt transcrevendo";
                     break;
                 case 3:
                     mk_status_item.button.title = @"⚠️";
-                    mk_status_item.button.toolTip = @"Minikeyboard: erro, consulte o terminal";
+                    mk_status_item.button.toolTip = @"Agent Belt: erro, consulte o terminal";
                     mk_hide_timer = [NSTimer timerWithTimeInterval:2.2 repeats:NO block:^(NSTimer *timer) {
                         (void)timer;
                         mk_fade_out(^{});
@@ -605,8 +605,8 @@ void mk_menu_hide(void) {
 static void mk_refresh_title(void) {
     if (mk_dictation_status) return; // mk_status_set owns the title meanwhile
     mk_status_item.button.title = @[@"⌨️", @"🟢", @"🔴"][MAX(0, MIN(2, mk_attention))];
-    mk_status_item.button.toolTip = @[@"Minikeyboard: nada pendente", @"Minikeyboard: um agente terminou",
-                                      @"Minikeyboard: um agente aguarda você"][MAX(0, MIN(2, mk_attention))];
+    mk_status_item.button.toolTip = @[@"Agent Belt: nada pendente", @"Agent Belt: um agente terminou",
+                                      @"Agent Belt: um agente aguarda você"][MAX(0, MIN(2, mk_attention))];
 }
 
 void mk_status_attention(int attention) {

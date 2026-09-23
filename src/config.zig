@@ -49,7 +49,7 @@ pub const ConfigStore = struct {
         const home_ptr = std.c.getenv("HOME") orelse return error.HomeNotFound;
         const home = std.mem.span(home_ptr);
 
-        const dir = try std.fs.path.join(allocator, &.{ home, ".config", "minikeyboard" });
+        const dir = try std.fs.path.join(allocator, &.{ home, ".config", "agent-belt" });
         defer allocator.free(dir);
         try std.Io.Dir.createDirPath(.cwd(), io, dir);
 

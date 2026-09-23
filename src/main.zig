@@ -122,24 +122,24 @@ fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 
 }
 
 fn usage() !void {
-    std.debug.print("minikeyboard — daemon de teclas HID configuráveis\n" ++
+    std.debug.print("agent-belt — daemon de teclas HID configuráveis\n" ++
         "\n" ++
         "uso:\n" ++
-        "  minikeyboard init\n" ++
-        "  minikeyboard bind <a-f> ptt\n" ++
-        "  minikeyboard bind <0-5|a-f> agents [desktop]\n" ++
-        "  minikeyboard bind <0-5|a-f> menu\n" ++
-        "  minikeyboard bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
-        "  minikeyboard bind <a-f> command <comando>\n" ++
-        "  minikeyboard bind <a-f> script <comando-ou-script>\n" ++
-        "  minikeyboard bind <a-f> text <texto>\n" ++
-        "  minikeyboard bind <a-f> disabled\n" ++
-        "  minikeyboard devices\n" ++
-        "  minikeyboard status\n" ++
-        "  minikeyboard led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
-        "  minikeyboard daemon\n" ++
-        "  minikeyboard preview\n" ++
-        "  minikeyboard agents <list|next|bottom> [desktop]\n" ++
+        "  agent-belt init\n" ++
+        "  agent-belt bind <a-f> ptt\n" ++
+        "  agent-belt bind <0-5|a-f> agents [desktop]\n" ++
+        "  agent-belt bind <0-5|a-f> menu\n" ++
+        "  agent-belt bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
+        "  agent-belt bind <a-f> command <comando>\n" ++
+        "  agent-belt bind <a-f> script <comando-ou-script>\n" ++
+        "  agent-belt bind <a-f> text <texto>\n" ++
+        "  agent-belt bind <a-f> disabled\n" ++
+        "  agent-belt devices\n" ++
+        "  agent-belt status\n" ++
+        "  agent-belt led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
+        "  agent-belt daemon\n" ++
+        "  agent-belt preview\n" ++
+        "  agent-belt agents <list|next|bottom> [desktop]\n" ++
         "  ./install.sh [--keep-config|--uninstall]\n", .{});
     return error.InvalidArguments;
 }

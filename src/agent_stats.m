@@ -6,7 +6,7 @@
 // Sources (see the research notes in docs/agent-stats.md):
 //   ~/.claude/sessions/<pid>.json            live process → sessionId, tmux pane, start
 //   ~/.claude/projects/*/<sessionId>.jsonl   transcript: titles, recap, usage per message
-//   ~/Library/Caches/minikeyboard/claude-statusline.json  plan quotas, teed by the statusline
+//   ~/Library/Caches/agent-belt/claude-statusline.json  plan quotas, teed by the statusline
 //   ~/.codex/sessions/**/rollout-*.jsonl     token_count events carry Codex rate limits
 // Transcripts are read incrementally; only lines with interesting markers are parsed.
 
@@ -215,7 +215,7 @@ static double MKEpoch(id value) {
 }
 
 static NSString *MKClaudeQuota(void) {
-    NSDictionary *status = MKDict(MKJSON([NSData dataWithContentsOfFile:MKHome(@"Library/Caches/minikeyboard/claude-statusline.json")]));
+    NSDictionary *status = MKDict(MKJSON([NSData dataWithContentsOfFile:MKHome(@"Library/Caches/agent-belt/claude-statusline.json")]));
     NSDictionary *limits = MKDict(status[@"rate_limits"]);
     NSDictionary *five = MKDict(limits[@"five_hour"]), *week = MKDict(limits[@"seven_day"]);
     NSString *a = MKPercent(five, @"used_percentage", MKEpoch(five[@"resets_at"]));

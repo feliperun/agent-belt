@@ -1,5 +1,5 @@
-#ifndef MINIKEYBOARD_MACOS_SHIM_H
-#define MINIKEYBOARD_MACOS_SHIM_H
+#ifndef AGENT_BELT_MACOS_SHIM_H
+#define AGENT_BELT_MACOS_SHIM_H
 
 #include <stddef.h>
 #include <stdint.h>

@@ -12,7 +12,7 @@ nada é enviado nem autenticado. Código em `src/agent_stats.m`.
 | recap | último `system/away_summary`, senão `last-prompt` |
 | tokens e custo | `message.usage` de cada `assistant`, **deduplicado por `message.id`** (uma linha por bloco, usage repetido), mais `subagents/*.jsonl`; preço de lista da Anthropic (tabela no código, 2026-09-23) |
 | tempo | `startedAt` do processo |
-| cota Claude | só existe no JSON que o Claude Code passa ao statusline: `~/.claude/statusline-command.sh` salva o último em `~/Library/Caches/minikeyboard/claude-statusline.json` (`rate_limits.five_hour`/`seven_day`) |
+| cota Claude | só existe no JSON que o Claude Code passa ao statusline: `~/.claude/statusline-command.sh` salva o último em `~/Library/Caches/agent-belt/claude-statusline.json` (`rate_limits.five_hour`/`seven_day`) |
 | cota Codex | último `token_count` com `rate_limits.primary` (5 h) e `secondary` (7 d) nos rollouts de `~/.codex/sessions` |
 
 Os transcripts são lidos de forma incremental (offset por arquivo) e só as linhas

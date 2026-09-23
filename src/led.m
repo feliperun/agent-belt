@@ -116,7 +116,7 @@ static void MKLedUpdate(int *field, int value) {
 void mk_led_status(int status) { MKLedUpdate(&mk_led_status_value, status); }
 void mk_led_agents(int attention) { MKLedUpdate(&mk_led_agents_value, attention); }
 
-// `minikeyboard led <color> <mode>`: one synchronous write.
+// `agent-belt led <color> <mode>`: one synchronous write.
 int mk_led_set(uint16_t vendor_id, uint16_t product_id, int color, int mode) {
     if (color < 0 || color > 7 || mode < 0 || mode > 5) return -2;
     IOHIDManagerRef manager = MKLedManager(vendor_id, product_id);

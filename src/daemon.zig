@@ -28,7 +28,7 @@ const Daemon = struct {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
         daemon.handleEvent(event) catch |err| {
             macos.setStatus(.failed);
-            std.debug.print("[minikeyboard] erro: {s}\n", .{@errorName(err)});
+            std.debug.print("[agent-belt] erro: {s}\n", .{@errorName(err)});
         };
     }
 
@@ -57,7 +57,7 @@ const Daemon = struct {
             self.recording = recorder;
             self.recording_key = event.key;
             macos.setStatus(.recording);
-            std.debug.print("[minikeyboard] GRAVANDO — solte a tecla para transcrever\n", .{});
+            std.debug.print("[agent-belt] GRAVANDO — solte a tecla para transcrever\n", .{});
             return;
         }
 
@@ -87,23 +87,23 @@ const Daemon = struct {
             .smart_format = self.config.deepgram_smart_format,
             .mip_opt_out = self.config.deepgram_mip_opt_out,
         };
-        std.debug.print("[minikeyboard] TRANSCRIVENDO...\n", .{});
+        std.debug.print("[agent-belt] TRANSCRIVENDO...\n", .{});
         const text = try dg.transcribe(wav);
         defer self.allocator.free(text);
         if (text.len == 0) {
-            std.debug.print("[minikeyboard] nenhuma fala detectada\n", .{});
+            std.debug.print("[agent-belt] nenhuma fala detectada\n", .{});
             return;
         }
         try macos.dismissOverlay();
         try macos.insertText(text);
-        std.debug.print("[minikeyboard] INSERIDO ({d} caracteres)\n", .{text.len});
+        std.debug.print("[agent-belt] INSERIDO ({d} caracteres)\n", .{text.len});
     }
 };
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     macos.trimLog();
     macos.singleInstance() catch |err| {
-        std.debug.print("[minikeyboard] outro daemon já está rodando (launchctl print gui/$UID/com.frb.minikeyboard)\n", .{});
+        std.debug.print("[agent-belt] outro daemon já está rodando (launchctl print gui/$UID/com.frb.agentbelt)\n", .{});
         return err;
     };
     macos.checkPermissions() catch |err| {
@@ -113,7 +113,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     };
     macos.agentsMonitor();
     if (config.led) macos.ledStart(config.vendor_id, config.product_id);
-    std.debug.print("[minikeyboard] pronto: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
+    std.debug.print("[agent-belt] pronto: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
     // "system" leaves the knob as the device's volume control.
     macos.setKnobIntercept(!std.mem.eql(u8, config.knob, "system"));

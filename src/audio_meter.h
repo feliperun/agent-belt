@@ -1,5 +1,5 @@
-#ifndef MINIKEYBOARD_AUDIO_METER_H
-#define MINIKEYBOARD_AUDIO_METER_H
+#ifndef AGENT_BELT_AUDIO_METER_H
+#define AGENT_BELT_AUDIO_METER_H
 
 #include <math.h>
 #include <stddef.h>

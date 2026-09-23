@@ -421,7 +421,7 @@ static dispatch_source_t mk_key_timer;
 static uint16_t mk_key_held;
 static uint64_t mk_key_held_flags;
 static void mk_key_queue_create(void) {
-    mk_key_queue = dispatch_queue_create("minikeyboard.keys", DISPATCH_QUEUE_SERIAL);
+    mk_key_queue = dispatch_queue_create("agent-belt.keys", DISPATCH_QUEUE_SERIAL);
 }
 
 void mk_press_key(uint16_t keycode, uint64_t flags, int pressed) {

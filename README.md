@@ -1,6 +1,6 @@
-# minikeyboard
+# agent-belt
 
-Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráveis.
+Daemon macOS em Zig para transformar um agent-belt HID em atalhos configuráveis.
 
 ## Instalação
 
@@ -8,17 +8,17 @@ Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráve
 ./install.sh
 ```
 
-Compila, empacota em `~/Applications/Minikeyboard.app` (assinado com o seu certificado
+Compila, empacota em `~/Applications/Agent Belt.app` (assinado com o seu certificado
 Apple Development, para as permissões sobreviverem a cada atualização), guarda
-`DEEPGRAM_API_KEY` no Keychain e registra o LaunchAgent `com.frb.minikeyboard`, que sobe
-no login e renasce se cair. Na primeira vez, autorize "Minikeyboard" em Monitoramento de
+`DEEPGRAM_API_KEY` no Keychain e registra o LaunchAgent `com.frb.agentbelt`, que sobe
+no login e renasce se cair. Na primeira vez, autorize "Agent Belt" em Monitoramento de
 Entrada e Acessibilidade; o daemon tenta de novo a cada ~15 s e segue sozinho quando elas aparecem. O Microfone é pedido no primeiro
 push-to-talk.
 
 A configuração vem do código: edite os padrões em `src/config.zig` e rode `./install.sh`
-de novo, que regenera `~/.config/minikeyboard/config.json` (`--keep-config` preserva o
+de novo, que regenera `~/.config/agent-belt/config.json` (`--keep-config` preserva o
 arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica em
-`~/Library/Logs/minikeyboard.log` e o CLI em `~/.local/bin/minikeyboard`.
+`~/Library/Logs/agent-belt.log` e o CLI em `~/.local/bin/agent-belt`.
 
 ## Estado atual
 
@@ -46,12 +46,12 @@ arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica 
 
 ```sh
 zig build -Doptimize=ReleaseSafe
-zig-out/bin/minikeyboard init
+zig-out/bin/agent-belt init
 export DEEPGRAM_API_KEY='...'
-zig-out/bin/minikeyboard daemon
+zig-out/bin/agent-belt daemon
 ```
 
-Para ver a animação sem microfone nem teclado, execute `zig-out/bin/minikeyboard preview`.
+Para ver a animação sem microfone nem teclado, execute `zig-out/bin/agent-belt preview`.
 Ela exibe quatro segundos de gravação simulada e quatro segundos de transcrição.
 Durante o uso normal, a janela aparece no canto superior direito da tela onde está
 o ponteiro do mouse. Ela não recebe foco nem cliques. Ao concluir, faz uma saída
@@ -65,7 +65,7 @@ uma escala de voz em decibéis; isso não altera o ganho do áudio enviado à AP
 áudio e fechamento completo antes de liberar a inserção. O teste abre o painel
 por alguns segundos e exige uma sessão gráfica do macOS; não usa microfone nem API.
 
-Configuração é salva em `~/.config/minikeyboard/config.json`.
+Configuração é salva em `~/.config/agent-belt/config.json`.
 
 Na primeira execução, autorize o binário em Ajustes do Sistema → Privacidade e
 Segurança:
@@ -81,7 +81,7 @@ não foi concedido.
 Para diagnosticar a correlação entre o HID e os eventos de teclado do macOS:
 
 ```sh
-MINIKEYBOARD_DEBUG_INPUT=1 zig-out/bin/minikeyboard daemon
+AGENT_BELT_DEBUG_INPUT=1 zig-out/bin/agent-belt daemon
 ```
 
 Ao pressionar `a`, o diagnóstico deve mostrar `HID key=0 down` e um evento `TAP`
@@ -91,20 +91,20 @@ correspondente com `suppress=yes`. O daemon também imprime `GRAVANDO`,
 Exemplos:
 
 ```sh
-zig-out/bin/minikeyboard bind a ptt
-zig-out/bin/minikeyboard bind b command 'open -a Calculator'
-zig-out/bin/minikeyboard bind c script '/Users/frb/bin/meu-script.sh'
-zig-out/bin/minikeyboard bind d text 'Olá!'
-zig-out/bin/minikeyboard bind e disabled
-zig-out/bin/minikeyboard bind 4 agents
+zig-out/bin/agent-belt bind a ptt
+zig-out/bin/agent-belt bind b command 'open -a Calculator'
+zig-out/bin/agent-belt bind c script '/Users/frb/bin/meu-script.sh'
+zig-out/bin/agent-belt bind d text 'Olá!'
+zig-out/bin/agent-belt bind e disabled
+zig-out/bin/agent-belt bind 4 agents
 ```
 
-Para rodar no login, compile o binário e execute `zig-out/bin/minikeyboard install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
+Para rodar no login, compile o binário e execute `zig-out/bin/agent-belt install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
 
 ## Nota sobre captura
 
 O daemon usa o monitor HID sem privilégios de root e um CGEvent tap para
-suprimir os eventos `a`–`f` correlacionados ao minikeyboard, evitando que eles
+suprimir os eventos `a`–`f` correlacionados ao agent-belt, evitando que eles
 também sejam digitados no aplicativo ativo.
 Após soltar uma tecla, ele mantém a supressão por 100 ms para absorver eventos
 de repetição atrasados do macOS.
@@ -124,13 +124,13 @@ direito mostra o agente, a posição e o estado; `agents list` mostra o estado d
 
 Uma sessão só conta enquanto algum pane roda `claude`, `codex`, `opencode`, `gemini` etc.;
 se o agente encerrar, ela sai do anel. A ordem é estável e a posição fica em
-`~/Library/Caches/minikeyboard/last-agent`. Para incluir também as janelas do Codex e
+`~/Library/Caches/agent-belt/last-agent`. Para incluir também as janelas do Codex e
 do Claude Desktop: `bind 4 agents desktop`. Requer Accessibility.
 
 ```sh
-zig-out/bin/minikeyboard agents list
-zig-out/bin/minikeyboard agents next
-zig-out/bin/minikeyboard agents bottom
+zig-out/bin/agent-belt agents list
+zig-out/bin/agent-belt agents next
+zig-out/bin/agent-belt agents bottom
 ```
 
 ## Menu de agentes (tecla 1)
@@ -180,4 +180,4 @@ As teclas acendem conforme o estado: **branco** gravando, **ciano** transcrevend
 **vermelho** quando um agente aguarda você, **verde** quando um terminou e você ainda não
 viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque. Protocolo
 e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
-`minikeyboard led <cor> <modo>` troca à mão.
+`agent-belt led <cor> <modo>` troca à mão.

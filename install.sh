@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # install.sh [--keep-config] | --uninstall
 #
-# Instala o minikeyboard como app de background: compila, empacota em
-# ~/Applications/Minikeyboard.app, assina, guarda a chave do Deepgram no
+# Instala o agent-belt como app de background: compila, empacota em
+# ~/Applications/Agent Belt.app, assina, guarda a chave do Deepgram no
 # Keychain e registra um LaunchAgent que sobe no login e renasce se cair.
 #
 # A configuracao vem do codigo (src/config.zig): cada instalacao regenera
-# ~/.config/minikeyboard/config.json a partir dos padroes. --keep-config
+# ~/.config/agent-belt/config.json a partir dos padroes. --keep-config
 # preserva o arquivo atual.
 
 set -euo pipefail
 
-label=com.frb.minikeyboard
-app="$HOME/Applications/Minikeyboard.app"
-exe="$app/Contents/MacOS/minikeyboard"
+label=com.frb.agentbelt
+app="$HOME/Applications/Agent Belt.app"
+exe="$app/Contents/MacOS/agent-belt"
 plist="$HOME/Library/LaunchAgents/$label.plist"
-log="$HOME/Library/Logs/minikeyboard.log"
-link="$HOME/.local/bin/minikeyboard"
+log="$HOME/Library/Logs/agent-belt.log"
+link="$HOME/.local/bin/agent-belt"
 domain="gui/$(id -u)"
 src=$(cd "$(dirname "$0")" && pwd)
 
@@ -27,12 +27,14 @@ die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 # daemons dobrariam cada tecla.
 stop_daemons() {
   launchctl bootout "$domain/$label" 2>/dev/null || true
+  launchctl bootout "$domain/com.frb.minikeyboard" 2>/dev/null || true # before the rename
   pkill -f '/minikeyboard daemon$' 2>/dev/null || true
+  pkill -f '/agent-belt daemon$' 2>/dev/null || true
   for _ in $(seq 1 50); do
-    pgrep -f '/minikeyboard daemon$' >/dev/null || return 0
+    pgrep -f '/agent-belt daemon$' >/dev/null || return 0
     sleep 0.1
   done
-  pkill -9 -f '/minikeyboard daemon$' 2>/dev/null || true
+  pkill -9 -f '/agent-belt daemon$' 2>/dev/null || true
 }
 
 keep_config=0
@@ -42,8 +44,8 @@ case "${1:-}" in
     stop_daemons
     rm -f "$plist" "$link"
     rm -rf "$app"
-    say "pronto. Config (~/.config/minikeyboard) e chave no Keychain foram mantidas;"
-    printf '    para apagar a chave: security delete-generic-password -s minikeyboard -a deepgram\n'
+    say "pronto. Config (~/.config/agent-belt) e chave no Keychain foram mantidas;"
+    printf '    para apagar a chave: security delete-generic-password -s agent-belt -a deepgram\n'
     exit 0 ;;
   --keep-config) keep_config=1 ;;
   "") ;;
@@ -58,29 +60,29 @@ say "compilando (ReleaseSafe)"
 (cd "$src" && zig build -Doptimize=ReleaseSafe)
 
 version=$(git -C "$src" describe --always --dirty 2>/dev/null || echo dev)
-stage=$(mktemp -d)/Minikeyboard.app
+stage=$(mktemp -d)/Agent Belt.app
 mkdir -p "$stage/Contents/MacOS"
-cp "$src/zig-out/bin/minikeyboard" "$stage/Contents/MacOS/minikeyboard"
+cp "$src/zig-out/bin/agent-belt" "$stage/Contents/MacOS/agent-belt"
 cat > "$stage/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>$label</string>
-  <key>CFBundleName</key><string>Minikeyboard</string>
-  <key>CFBundleExecutable</key><string>minikeyboard</string>
+  <key>CFBundleName</key><string>Agent Belt</string>
+  <key>CFBundleExecutable</key><string>agent-belt</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSMicrophoneUsageDescription</key><string>O minikeyboard grava sua voz enquanto a tecla de push-to-talk esta pressionada para transcrever com o Deepgram.</string>
+  <key>NSMicrophoneUsageDescription</key><string>O agent-belt grava sua voz enquanto a tecla de push-to-talk esta pressionada para transcrever com o Deepgram.</string>
 </dict></plist>
 PLIST
 
 # As permissoes (Monitoramento de Entrada, Acessibilidade, Microfone) ficam
 # presas a assinatura. Com um certificado, o requisito e "este bundle id +
 # este certificado" e sobrevive a cada rebuild; ad-hoc muda a cada build.
-identity="${MINIKEYBOARD_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null |
+identity="${AGENT_BELT_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null |
   sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)}"
 if [ -z "$identity" ]; then
   identity=-
@@ -98,6 +100,13 @@ mv "$stage" "$app"
 mkdir -p "$(dirname "$link")"
 ln -sf "$exe" "$link"
 
+# The project was called minikeyboard: drop that install (its privacy grants
+# and Keychain item stay behind under the old identity).
+rm -f "$HOME/Library/LaunchAgents/com.frb.minikeyboard.plist" "$HOME/.local/bin/minikeyboard"
+rm -rf "$HOME/Applications/Minikeyboard.app"
+[ -f "$HOME/.config/minikeyboard/config.json" ] && [ ! -f "$HOME/.config/agent-belt/config.json" ] &&
+  mkdir -p "$HOME/.config/agent-belt" && cp "$HOME/.config/minikeyboard/config.json" "$HOME/.config/agent-belt/"
+
 if [ "$keep_config" = 0 ]; then
   say "config regenerada a partir de src/config.zig"
   "$exe" init >/dev/null 2>&1
@@ -105,19 +114,19 @@ fi
 
 # O LaunchAgent nao herda o ambiente do shell: a chave vai para o Keychain,
 # liberada para o app sem prompt.
-# So grava quando falta (ou com MINIKEYBOARD_UPDATE_KEY=1): alterar um item
+# So grava quando falta (ou com AGENT_BELT_UPDATE_KEY=1): alterar um item
 # existente abre um dialogo do Keychain e travaria a instalacao.
-if security find-generic-password -s minikeyboard -a deepgram >/dev/null 2>&1 &&
-    [ "${MINIKEYBOARD_UPDATE_KEY:-0}" != 1 ]; then
+if security find-generic-password -s agent-belt -a deepgram >/dev/null 2>&1 &&
+    [ "${AGENT_BELT_UPDATE_KEY:-0}" != 1 ]; then
   say "chave do Deepgram ja esta no Keychain"
 elif [ -n "${DEEPGRAM_API_KEY:-}" ]; then
   say "guardando DEEPGRAM_API_KEY no Keychain"
-  security delete-generic-password -s minikeyboard -a deepgram >/dev/null 2>&1 || true
-  security add-generic-password -s minikeyboard -a deepgram -w "$DEEPGRAM_API_KEY" -T "$app" >/dev/null
+  security delete-generic-password -s agent-belt -a deepgram >/dev/null 2>&1 || true
+  security add-generic-password -s agent-belt -a deepgram -w "$DEEPGRAM_API_KEY" -T "$app" >/dev/null
 else
   if [ -t 0 ]; then
     read -rsp "Chave do Deepgram: " key; echo
-    [ -n "$key" ] && security add-generic-password -U -s minikeyboard -a deepgram -w "$key" -T "$app" >/dev/null
+    [ -n "$key" ] && security add-generic-password -U -s agent-belt -a deepgram -w "$key" -T "$app" >/dev/null
   else
     say "sem chave do Deepgram: o push-to-talk vai falhar ate rodar de novo com DEEPGRAM_API_KEY"
   fi
@@ -157,11 +166,11 @@ else
 fi
 cat <<MSG
 
-Na primeira vez, autorize "Minikeyboard" em Ajustes do Sistema >
+Na primeira vez, autorize "Agent Belt" em Ajustes do Sistema >
 Privacidade e Seguranca: Monitoramento de Entrada e Acessibilidade (o daemon tenta
 de novo sozinho a cada ~15 s) e o Microfone no primeiro push-to-talk.
 
-  minikeyboard agents list        CLI (link em $link)
+  agent-belt agents list        CLI (link em $link)
   tail -f $log
   ./install.sh --uninstall
 MSG
