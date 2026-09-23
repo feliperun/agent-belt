@@ -24,6 +24,8 @@ uint64_t mk_monotonic_ns(void) {
 struct mk_hid_context {
     mk_hid_callback callback;
     mk_knob_callback knob;
+    mk_f5_callback f5;
+    uint16_t vendor_id;
     mk_event_filter_callback filter;
     void *context;
     CFMachPortRef event_tap;
@@ -66,11 +68,15 @@ static int mk_is_tracked_keycode(uint16_t keycode) {
 // Handled keys are swallowed, down, repeat and up alike.
 enum { mk_kc_return = 36, mk_kc_enter = 76, mk_kc_escape = 53, mk_kc_space = 49, mk_kc_up = 126, mk_kc_down = 125 };
 
+static atomic_int mk_f5_swallow;
+
 static int mk_hotkey(CGEventRef event, int down) {
     const uint16_t keycode = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     const CGEventFlags modifiers = CGEventGetFlags(event) &
         (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
     const int fresh = down && !CGEventGetIntegerValueField(event, kCGKeyboardEventAutorepeat);
+    // F5 is push-to-talk (read from HID); the plain key must not reach apps.
+    if (keycode == 96 && !modifiers && atomic_load(&mk_f5_swallow)) return 1;
     if (modifiers == (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate)) {
         if (keycode == mk_kc_space) { if (fresh) mk_agents_menu_press(); return 1; }
         if (keycode == mk_kc_up) { if (fresh) mk_agents_next(0); return 1; }
@@ -138,6 +144,15 @@ static void mk_input_value_callback(
 
     const uint32_t usage_page = IOHIDElementGetUsagePage(element);
     const uint32_t usage = IOHIDElementGetUsage(element);
+    // The Mac's own keyboards only contribute F5, the microphone key.
+    int32_t vendor = 0;
+    CFNumberRef vendor_number = IOHIDDeviceGetProperty(IOHIDElementGetDevice(element), CFSTR(kIOHIDVendorIDKey));
+    if (vendor_number) CFNumberGetValue(vendor_number, kCFNumberSInt32Type, &vendor);
+    if (vendor != state->vendor_id) {
+        if (usage_page == 0x07 && usage == 0x3e && state->f5)
+            state->f5(state->context, IOHIDValueGetIntegerValue(value) != 0);
+        return;
+    }
     // Consumer page: Volume Increment/Decrement are the knob's detents, Mute its button.
     if (usage_page == 0x0c && (usage == 0xe9 || usage == 0xea || usage == 0xe2)) {
         if (!atomic_load(&mk_knob_intercept)) return;
@@ -157,6 +172,7 @@ int mk_hid_run(
     uint16_t product_id,
     mk_hid_callback callback,
     mk_knob_callback knob,
+    mk_f5_callback f5,
     void *context
 ) {
     IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
@@ -190,8 +206,27 @@ int mk_hid_run(
         return -3;
     }
 
-    struct mk_hid_context state = { callback, knob, NULL, context, NULL };
-    IOHIDManagerSetDeviceMatching(manager, matching);
+    struct mk_hid_context state = { .callback = callback, .knob = knob, .f5 = f5, .vendor_id = vendor_id, .context = context };
+    atomic_store(&mk_f5_swallow, f5 != NULL);
+    if (f5) {
+        // Also every keyboard, for F5 (their other keys are ignored above).
+        int32_t page = 0x01, keyboard = 0x06;
+        CFNumberRef page_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &page);
+        CFNumberRef usage_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &keyboard);
+        const void *kb_keys[] = { CFSTR(kIOHIDDeviceUsagePageKey), CFSTR(kIOHIDDeviceUsageKey) };
+        const void *kb_values[] = { page_number, usage_number };
+        CFDictionaryRef keyboards = CFDictionaryCreate(kCFAllocatorDefault, kb_keys, kb_values, 2,
+            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        const void *both[] = { matching, keyboards };
+        CFArrayRef list = CFArrayCreate(kCFAllocatorDefault, both, 2, &kCFTypeArrayCallBacks);
+        IOHIDManagerSetDeviceMatchingMultiple(manager, list);
+        CFRelease(list);
+        CFRelease(keyboards);
+        CFRelease(page_number);
+        CFRelease(usage_number);
+    } else {
+        IOHIDManagerSetDeviceMatching(manager, matching);
+    }
     IOHIDManagerRegisterInputValueCallback(manager, mk_input_value_callback, &state);
     IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     const IOReturn result = IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone);
@@ -208,7 +243,7 @@ int mk_hid_run(
 }
 
 int mk_event_tap_run(mk_event_filter_callback filter, void *context) {
-    struct mk_hid_context state = { NULL, NULL, filter, context, NULL };
+    struct mk_hid_context state = { .filter = filter, .context = context };
     CGEventMask event_mask = (1ULL << kCGEventKeyDown) | (1ULL << kCGEventKeyUp) | (1ULL << NX_SYSDEFINED);
     CFMachPortRef event_tap = CGEventTapCreate(
         kCGHIDEventTap,

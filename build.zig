@@ -101,7 +101,7 @@ pub fn build(b: *std.Build) void {
     agent_test.root_module.linkFramework("AppKit", .{});
     agent_test.root_module.linkFramework("ApplicationServices", .{});
     test_step.dependOn(&b.addRunArtifact(agent_test).step);
-    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(path), .target = target, .optimize = optimize,

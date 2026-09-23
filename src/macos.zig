@@ -153,6 +153,8 @@ pub const HidListener = struct {
     product_id: u16,
     on_event: *const fn (context: *anyopaque, event: HidEvent) void,
     on_knob: *const fn (context: *anyopaque, event: KnobEvent) void,
+    /// F5 on the Mac's own keyboards; null leaves the key to macOS.
+    on_f5: ?*const fn (context: *anyopaque, pressed: bool) void = null,
     context: *anyopaque,
     pressed: std.atomic.Value(u8) = .init(0),
     release_until_ns: [6]std.atomic.Value(u64) = .{
@@ -182,7 +184,7 @@ pub const HidListener = struct {
 };
 
 fn hidThread(listener: *HidListener) void {
-    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, listener);
+    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, if (listener.on_f5 != null) f5Callback else null, listener);
     if (result != 0) {
         std.log.err("não consegui abrir o monitor HID (código={d}); dê ao binário a permissão de Input Monitoring", .{result});
     } else {
@@ -197,6 +199,12 @@ fn hidCallback(context: ?*anyopaque, key: u8, pressed: u8) callconv(.c) void {
         std.debug.print("[agent-belt] HID key={d} {s}\n", .{ key, if (pressed != 0) "down" else "up" });
     }
     listener.on_event(listener.context, .{ .key = key, .pressed = pressed != 0 });
+}
+
+fn f5Callback(context: ?*anyopaque, pressed: u8) callconv(.c) void {
+    const listener: *HidListener = @ptrCast(@alignCast(context.?));
+    if (listener.debug_input) std.debug.print("[agent-belt] F5 {s}\n", .{if (pressed != 0) "down" else "up"});
+    if (listener.on_f5) |on_f5| on_f5(listener.context, pressed != 0);
 }
 
 fn knobCallback(context: ?*anyopaque, event: i8) callconv(.c) void {

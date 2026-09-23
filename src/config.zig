@@ -30,6 +30,9 @@ pub const Config = struct {
     knob_scroll_lines: i32 = 3,
     /// Key LEDs follow push-to-talk and agents: white recording, red waiting, green finished.
     led: bool = true,
+    /// F5, the Mac's microphone key, as push-to-talk (turn off the Dictation
+    /// and Siri keyboard shortcuts in System Settings > Keyboard).
+    f5_push_to_talk: bool = true,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
         .{ .action = "agents_menu" },
@@ -106,6 +109,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"knob\": \"scroll\",\n" ++
         "  \"knob_scroll_lines\": 3,\n" ++
         "  \"led\": true,\n" ++
+        "  \"f5_push_to_talk\": true,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
         "    {\"action\": \"agents_menu\", \"value\": \"\"},\n" ++

@@ -15,6 +15,19 @@ const Daemon = struct {
     command: bool = false,
     keys: @import("key_edges.zig").KeyEdges = .{},
     knob: @import("knob.zig").Knob = .{},
+    talk: @import("f5.zig").Talk = .{},
+
+    /// F5 records like the push-to-talk key, under a key index no binding uses.
+    fn onF5(context: *anyopaque, pressed: bool) void {
+        const daemon: *Daemon = @ptrCast(@alignCast(context));
+        const now = macos.monotonicNs();
+        const action = if (pressed) daemon.talk.press(now) else daemon.talk.release(now);
+        if (action == .none) return;
+        daemon.handlePushToTalk(.{ .key = 6, .pressed = action == .start }) catch |err| {
+            macos.setStatus(.failed);
+            std.debug.print("[agent-belt] erro: {s}\n", .{@errorName(err)});
+        };
+    }
 
     fn onKnob(context: *anyopaque, event: macos.KnobEvent) void {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
@@ -133,6 +146,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
         .product_id = config.product_id,
         .on_event = Daemon.onHidEvent,
         .on_knob = Daemon.onKnob,
+        .on_f5 = if (config.f5_push_to_talk) Daemon.onF5 else null,
         .context = @ptrCast(&daemon),
     };
     try listener.run();

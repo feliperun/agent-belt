@@ -8,12 +8,15 @@ typedef void (*mk_hid_callback)(void *context, uint8_t key, uint8_t pressed);
 typedef int (*mk_event_filter_callback)(void *context, uint16_t keycode, uint8_t pressed, uint8_t repeated);
 /* Knob detent: 1 clockwise, -1 counter-clockwise, 0 button press. */
 typedef void (*mk_knob_callback)(void *context, int8_t event);
+/* F5 (microphone key) on the Mac's own keyboards: pressed or released. */
+typedef void (*mk_f5_callback)(void *context, uint8_t pressed);
 
 int mk_hid_run(
     uint16_t vendor_id,
     uint16_t product_id,
     mk_hid_callback callback,
     mk_knob_callback knob,
+    mk_f5_callback f5,
     void *context
 );
 void mk_knob_set_intercept(int intercept);
