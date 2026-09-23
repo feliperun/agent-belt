@@ -155,7 +155,7 @@ roda rolar o copy-mode em vez de virar setas no prompt do agente.
 
 ## LEDs
 
-As teclas acendem conforme o estado: **arco-íris** gravando, **ciano** transcrevendo,
+As teclas acendem conforme o estado: **branco** gravando, **ciano** transcrevendo,
 **vermelho** quando um agente aguarda você, **verde** quando um terminou e você ainda não
 viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque. Protocolo
 e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;

@@ -12,7 +12,7 @@
 
 // Color 0 is white in reactive mode and off in static mode.
 enum { MKLedWhite = 0, MKLedRed, MKLedOrange, MKLedYellow, MKLedGreen, MKLedCyan, MKLedBlue, MKLedPurple };
-enum { MKModeOff = 0, MKModeStatic = 1, MKModeReactive = 2 };
+enum { MKModeOff = 0, MKModeStatic = 1, MKModeReactive = 2, MKModeWhite = 5 };
 static const useconds_t mk_led_gap = 300 * 1000; // shorter gaps are dropped silently
 
 static IOHIDDeviceRef MKLedDevice(IOHIDManagerRef manager) {
@@ -58,8 +58,11 @@ static int mk_led_applied = -1;
 static uint16_t mk_led_vendor, mk_led_product;
 
 // Priority: recording > transcribing > waiting > finished > white reactive base.
+// The firmware has no continuous animation (modes 2-4 only react to key presses),
+// so every state is one write.
 static int MKLedWanted(void) {
-    if (mk_led_status_value == 1) return -2; // animated
+    // Mode 5 ignores the color; 0x65 is the byte verified on hardware.
+    if (mk_led_status_value == 1) return MKLedBlue << 4 | MKModeWhite;
     if (mk_led_status_value == 2) return MKLedCyan << 4 | MKModeStatic;
     if (mk_led_agents_value == 2) return MKLedRed << 4 | MKModeStatic;
     if (mk_led_agents_value == 1) return MKLedGreen << 4 | MKModeStatic;
@@ -69,23 +72,20 @@ static int MKLedWanted(void) {
 static void *MKLedWorker(void *unused) {
     (void)unused;
     IOHIDManagerRef manager = MKLedManager(mk_led_vendor, mk_led_product);
-    int rainbow = 0;
     for (;;) {
         pthread_mutex_lock(&mk_led_lock);
         int wanted = MKLedWanted();
-        while (wanted != -2 && wanted == mk_led_applied) {
+        while (wanted == mk_led_applied) {
             pthread_cond_wait(&mk_led_wake, &mk_led_lock);
             wanted = MKLedWanted();
         }
         pthread_mutex_unlock(&mk_led_lock);
-        // The firmware has no rainbow in this dialect: cycle the static colors.
-        int value = wanted == -2 ? ((rainbow++ % 7) + 1) << 4 | MKModeStatic : wanted;
         IOHIDDeviceRef device = manager ? MKLedDevice(manager) : NULL;
-        BOOL sent = device && MKLedSend(device, (uint8_t)value);
+        BOOL sent = device && MKLedSend(device, (uint8_t)wanted);
         if (device) CFRelease(device);
         pthread_mutex_lock(&mk_led_lock);
         // Unplugged: remember nothing, so the state is written on reconnect.
-        mk_led_applied = sent ? value : -1;
+        mk_led_applied = sent ? wanted : -1;
         pthread_mutex_unlock(&mk_led_lock);
         if (!sent) sleep(2);
     }

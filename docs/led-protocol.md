@@ -42,11 +42,14 @@ Modos, como observados neste exemplar (o manual diz outra coisa para 2 e 3):
 |---|---|
 | 0 | apagado |
 | 1 | cor fixa |
-| 2 | reativo: apagado; uma onda da cor passa ao apertar e ao soltar uma tecla (cor 0 = branca) |
-| 5 | branco fixo |
+| 2 | reativo: apagado; uma onda da cor passa por todas as teclas ao apertar e ao soltar (cor 0 = branca) |
+| 3 | reativo, igual ao 2 |
+| 4 | reativo, só a tecla apertada acende |
+| 5 | branco fixo (a cor é ignorada; `65` confirmado) |
 
-Os modos 3 e 4 não foram testados. Não há arco-íris no firmware; o daemon faz a
-animação do push-to-talk trocando a cor fixa.
+Não há animação contínua nem arco-íris: tudo que anima reage a teclas. Trocar a
+cor pelo host é lento (≥ 600 ms por troca, com identificação) e grava a flash a
+cada passo. O roxo (`7`) não acendeu em nenhum modo testado.
 
 ## Comandos que nunca devem ser enviados
 
@@ -61,7 +64,7 @@ Do mesmo canal, segundo outros projetos para este VID:PID:
 ## Uso no minikeyboard
 
 `src/led.m`: uma thread aplica sempre o último estado desejado e pula escritas
-repetidas. Prioridade: gravando (arco-íris) > transcrevendo (ciano fixo) >
+repetidas. Prioridade: gravando (branco fixo) > transcrevendo (ciano fixo) >
 agente aguardando você (vermelho) > agente terminou e não foi visto (verde) >
 base (onda branca reativa, `02`). `"led": false` na config desliga. Manual:
 `minikeyboard led <cor> <modo>`.

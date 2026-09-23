@@ -27,7 +27,7 @@ pub const Config = struct {
     knob: []const u8 = "scroll",
     /// Lines per detent; negative inverts the direction.
     knob_scroll_lines: i32 = 3,
-    /// Key LEDs follow push-to-talk and agents: rainbow recording, red waiting, green finished.
+    /// Key LEDs follow push-to-talk and agents: white recording, red waiting, green finished.
     led: bool = true,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
