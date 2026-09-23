@@ -430,13 +430,40 @@ static BOOL MKBringToFront(NSRunningApplication *app) {
            [app activateWithOptions:NSApplicationActivateAllWindows];
 }
 
+// A hidden (Cmd+H) or minimized app can be made frontmost while every window
+// stays in the Dock: unhide it and bring back its minimized standard windows.
+static void MKRestoreWindows(NSRunningApplication *app) {
+    if (app.hidden) [app unhide];
+    id root = CFBridgingRelease(AXUIElementCreateApplication(app.processIdentifier));
+    AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)root, .3);
+    NSArray *windows = MKArray(MKAttr(root, kAXWindowsAttribute));
+    BOOL visible = NO;
+    for (id window in windows)
+        if ([MKString(MKAttr(window, kAXSubroleAttribute)) isEqual:@"AXStandardWindow"] && !MKBool(MKAttr(window, kAXMinimizedAttribute)))
+            visible = YES;
+    if (visible) return;
+    for (id window in windows)
+        if (MKBool(MKAttr(window, kAXMinimizedAttribute))) {
+            AXUIElementSetAttributeValue((__bridge AXUIElementRef)window, kAXMinimizedAttribute, kCFBooleanFalse);
+            AXUIElementPerformAction((__bridge AXUIElementRef)window, kAXRaiseAction);
+        }
+}
+
+static BOOL MKFocusFailed(MKAgentTarget *target, const char *step) {
+    fprintf(stderr, "[minikeyboard] %s: falhou em %s\n", target.label.UTF8String, step);
+    return NO;
+}
+
 static BOOL MKFocus(MKAgentTarget *target) {
-    if (target.app.terminated) return NO;
-    if (target.terminal) {
-        if (!MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal])) return NO;
-        return MKBringToFront(target.app) && MKWaitFrontmost(target.app);
+    if (target.app.terminated) return MKFocusFailed(target, "app encerrado");
+    if (target.terminal || target.tmuxSession) {
+        MKRestoreWindows(target.app);
+        if (target.terminal && !MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal]))
+            return MKFocusFailed(target, "orca terminal switch");
+        if (!MKBringToFront(target.app)) return MKFocusFailed(target, "trazer o app para frente");
+        if (!MKWaitFrontmost(target.app)) return MKFocusFailed(target, "esperar o app ficar em primeiro plano");
+        return YES;
     }
-    if (target.tmuxSession) return MKBringToFront(target.app) && MKWaitFrontmost(target.app);
     id window = target.window;
     if (!MKAttr(window, kAXRoleAttribute)) return NO;
     AXUIElementSetAttributeValue((__bridge AXUIElementRef)window, kAXMinimizedAttribute, kCFBooleanFalse);
@@ -571,7 +598,7 @@ static int MKCycle(BOOL desktop) {
         MKShowHud(target, mk_ring);
         return 0;
     }
-    fprintf(stderr, "[minikeyboard] não consegui focar as sessões; confira Accessibility\n");
+    fprintf(stderr, "[minikeyboard] não consegui focar nenhuma sessão (veja as falhas acima)\n");
     return -1;
 }
 
