@@ -8,7 +8,7 @@ const sessions = @import("sessions/cli.zig");
 const sys = @import("sessions/sys.zig");
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
+    const allocator = init.arena.allocator(); // argv lives as long as the process
     var iterator = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
     var args: std.ArrayList([]const u8) = .empty;
     while (iterator.next()) |arg| try args.append(allocator, arg[0..arg.len]);
