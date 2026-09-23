@@ -13,6 +13,7 @@
 #   work doctor                     testa ssh, work e toolchain em cada maquina
 #
 #   -a|--agent claude|codex|shell   qual agente sobe na sessao (default: claude)
+#   -p|--prompt "texto"             primeira instrucao para o agente (so ao criar)
 #   --codex / --claude / --shell    atalhos
 #
 # Maquinas sao identificadas pelo nome oficial do tailnet (macbook-pro,
@@ -563,7 +564,7 @@ create_session() {
     if [ -z "$repo" ]; then
       top=$(git rev-parse --show-toplevel 2>/dev/null) && repo="$top"
     fi
-    exec work-session --agent "$agent" "$task" ${repo:+"$repo"}
+    exec work-session --agent "$agent" ${prompt:+--prompt "$prompt"} "$task" ${repo:+"$repo"}
   fi
 
   # Remoto: o diretorio atual nao viaja, mas o *nome* do repo sim -- a maquina
@@ -573,7 +574,9 @@ create_session() {
     [ -n "$repo" ] && valid_repo "$repo" || repo=""
   fi
   # shellcheck disable=SC2046
-  exec ssh "${SSH_TTY[@]}" "${TARGETS[$i]}" $(remote_prefix "$i") run --agent "$agent" "$task" ${repo:+"$repo"}
+  # O ssh junta os argumentos numa linha para o shell de la: o prompt vai citado.
+  exec ssh "${SSH_TTY[@]}" "${TARGETS[$i]}" $(remote_prefix "$i") run --agent "$agent" \
+    ${prompt:+--prompt "$(printf '%q' "$prompt")"} "$task" ${repo:+"$repo"}
 }
 
 menu() {
@@ -838,6 +841,7 @@ load_config
 SELF=$(detect_self || true)
 
 agent="${WORK_AGENT:-claude}"
+prompt=""
 ATTACH_DETACH=""
 args=()
 while [ $# -gt 0 ]; do
@@ -846,6 +850,7 @@ while [ $# -gt 0 ]; do
     --claude) agent=claude; shift ;;
     --codex)  agent=codex;  shift ;;
     --shell)  agent=shell;  shift ;;
+    -p|--prompt) prompt=$(printf '%s' "${2:-}" | tr '\n' ' '); shift 2 || die "faltou o texto do prompt" ;;
     -d|--detach-others) ATTACH_DETACH=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; while [ $# -gt 0 ]; do args+=("$1"); shift; done ;;
@@ -873,7 +878,7 @@ case "${1:-}" in
   adopt-list) adopt_list; exit 0 ;;     # uso interno, via ssh
   adopt-do)  shift; adopt_do "${1:-}"; exit $? ;;   # uso interno, via ssh
   run)       shift                      # uso interno: cria nesta maquina
-             exec work-session --agent "$agent" "$@" ;;
+             exec work-session --agent "$agent" ${prompt:+--prompt "$prompt"} "$@" ;;
   attach)
     shift
     sess="${1:-}"; hostarg="${2:-}"
@@ -935,4 +940,4 @@ fi
 valid_slug "${1:-}" || die "nome de tarefa deve ser slug [A-Za-z0-9._-]: ${1:-}"
 repo="${2:-}"
 [ -z "$repo" ] && repo=$(git rev-parse --show-toplevel 2>/dev/null)
-exec work-session --agent "$agent" "$1" ${repo:+"$repo"}
+exec work-session --agent "$agent" ${prompt:+--prompt "$prompt"} "$1" ${repo:+"$repo"}

@@ -91,6 +91,7 @@ default_repos_dir() {
 }
 
 agent="${WORK_AGENT:-claude}"
+prompt=""
 while [ $# -gt 0 ]; do
   case "$1" in
     # Diagnostico: quem responde e este script, nao o `work`, porque o PATH
@@ -108,6 +109,7 @@ while [ $# -gt 0 ]; do
     --claude)   agent=claude; shift ;;
     --codex)    agent=codex;  shift ;;
     --shell)    agent=shell;  shift ;;
+    -p|--prompt) prompt="${2:-}"; shift 2 || die "faltou o texto do prompt" ;;
     --)         shift; break ;;
     -*)         die "opcao desconhecida: $1" ;;
     *)          break ;;
@@ -137,6 +139,10 @@ session=$(tmux list-sessions -F "#{session_name}|#{?@work_task,#{@work_task},}" 
   session=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -E -- "(^|-)${task}\$" | head -1)
 if [ -n "$session" ]; then
   tmux_clipboard
+  # Pedido novo para um agente que ja existe: a instrucao e digitada nele.
+  if [ -n "$prompt" ]; then
+    tmux send-keys -t "=$session" -l -- "$prompt" && tmux send-keys -t "=$session" Enter
+  fi
   exec tmux attach -t "=$session"
 fi
 
@@ -293,6 +299,11 @@ case "$agent" in
     cmd="$(printf '%q' "${SHELL:-/bin/bash}")"
     ;;
 esac
+# A primeira instrucao vira o argumento inicial do agente (claude e codex
+# comecam a conversa com ela). Num shell nao ha para quem dizer.
+if [ -n "$prompt" ] && [ "$agent" != shell ]; then
+  cmd="$cmd $(printf '%q' "$prompt")"
+fi
 
 # O claude/codex sao .exe nativos: dentro do pane do tmux eles so ganham um
 # console de verdade (raw mode, TUI) atraves do winpty.

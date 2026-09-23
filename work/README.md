@@ -19,6 +19,7 @@ work hosts [discover|add|rm|self]   registro de máquinas
 work doctor                     testa ssh, work e toolchain em cada máquina
 
   -a|--agent claude|codex|shell   qual agente sobe (default: claude)
+  -p|--prompt "texto"             primeira instrucao ao agente (numa sessao que ja existe, e digitada nela)
   --codex / --claude / --shell    atalhos
 tm [nome]                         sessão tmux simples, sem worktree nem agente
 ```
