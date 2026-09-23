@@ -883,3 +883,142 @@ void mk_agents_monitor(void) {
     });
     dispatch_resume(timer);
 }
+
+// ---------------------------------------------------------------- new agents by voice
+
+// Held push-to-talk while the agent menu is up: the transcript is a command such
+// as "crie um agente no windows com codex no coreum para investigar o login".
+// A small model turns it into work's arguments; a new Orca terminal runs work.
+
+static NSData *MKRunLong(NSString *path, NSArray<NSString *> *arguments, double timeout) {
+    if (!path) return nil;
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:path];
+    task.arguments = arguments;
+    NSMutableDictionary *environment = [NSProcessInfo.processInfo.environment mutableCopy];
+    if (!environment[@"LANG"]) environment[@"LANG"] = @"en_US.UTF-8";
+    task.environment = environment;
+    NSPipe *pipe = [NSPipe pipe];
+    task.standardOutput = pipe;
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    if (![task launchAndReturnError:nil]) return nil;
+    __block NSData *output = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        output = [pipe.fileHandleForReading readDataToEndOfFile];
+        dispatch_semaphore_signal(done);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC))) != 0) {
+        [task terminate];
+        return nil;
+    }
+    [task waitUntilExit];
+    return task.terminationStatus == 0 ? output : nil;
+}
+
+static NSArray<NSString *> *MKWorkHosts(void) {
+    NSString *config = [NSString stringWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@".config/work/hosts.conf"]
+                                                 encoding:NSUTF8StringEncoding error:nil];
+    NSMutableArray *hosts = [NSMutableArray array];
+    for (NSString *line in [config componentsSeparatedByString:@"\n"]) {
+        NSArray *words = [line componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (words.count >= 2 && [words[0] isEqual:@"host"]) [hosts addObject:words[1]];
+    }
+    return hosts;
+}
+
+static NSArray<NSString *> *MKLocalRepos(void) {
+    NSMutableOrderedSet *repos = [NSMutableOrderedSet orderedSet];
+    for (NSString *dir in @[@"dev/micromed", @"dev/frb", @"dev"]) {
+        NSString *root = [NSHomeDirectory() stringByAppendingPathComponent:dir];
+        for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:nil])
+            if ([NSFileManager.defaultManager fileExistsAtPath:[[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@".git"]])
+                [repos addObject:name];
+    }
+    return repos.array;
+}
+
+static NSString *MKShellQuote(NSString *value) {
+    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
+// Pure: the model's reply (JSON, possibly wrapped in prose) to a work command
+// line, or nil with a reason. Hosts must be known; task must be a slug.
+static NSString *MKWorkCommand(NSString *reply, NSArray<NSString *> *hosts, NSString **why, NSDictionary **parsed) {
+    NSRange open = [reply rangeOfString:@"{"], close = [reply rangeOfString:@"}" options:NSBackwardsSearch];
+    if (open.location == NSNotFound || close.location == NSNotFound || close.location < open.location) { *why = @"não entendi o comando"; return nil; }
+    NSData *json = [[reply substringWithRange:NSMakeRange(open.location, close.location - open.location + 1)] dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *spec = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+    if (![spec isKindOfClass:NSDictionary.class]) { *why = @"não entendi o comando"; return nil; }
+    if (parsed) *parsed = spec;
+    NSString *host = MKString(spec[@"host"]), *agent = MKString(spec[@"agent"]).lowercaseString;
+    NSString *repo = MKString(spec[@"repo"]), *task = MKString(spec[@"task"]), *prompt = MKString(spec[@"prompt"]);
+    if (host.length && ![hosts containsObject:host]) { *why = [NSString stringWithFormat:@"máquina desconhecida: %@", host]; return nil; }
+    if (![@[@"claude", @"codex", @"shell"] containsObject:agent]) agent = @"claude";
+    if ([task rangeOfString:@"^[A-Za-z0-9._-]{1,40}$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"faltou um nome curto para a tarefa"; return nil; }
+    if (!repo.length || [repo rangeOfString:@"^[A-Za-z0-9._-]+$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"diga em qual repositório"; return nil; }
+    NSMutableString *command = [NSMutableString stringWithString:@"work"];
+    if (host.length) [command appendFormat:@" %@", host];
+    [command appendFormat:@" %@ %@ --agent %@", task, repo, agent];
+    if (prompt.length) [command appendFormat:@" --prompt %@", MKShellQuote(prompt)];
+    return command;
+}
+
+static void MKOpenTerminal(NSString *command, NSString *title) {
+    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
+    if (orca && MKOrca(@[@"terminal", @"create", @"--worktree", [@"path:" stringByAppendingString:NSHomeDirectory()],
+                         @"--title", title, @"--command", command, @"--focus"])) {
+        MKRestoreWindows(orca);
+        MKBringToFront(orca);
+        return;
+    }
+    // No Orca: a .command file opens in Terminal.
+    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt"];
+    NSString *script = [dir stringByAppendingPathComponent:@"new-agent.command"];
+    [[NSString stringWithFormat:@"#!/bin/zsh -l\n%@\n", command] writeToFile:script atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:script error:nil];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:script]];
+}
+
+static int MKVoiceCommand(NSString *text, BOOL dryRun) {
+    NSArray *hosts = MKWorkHosts(), *repos = MKLocalRepos();
+    mk_hud_show("Entendendo o comando…", text.UTF8String, 1);
+    NSString *instructions = [NSString stringWithFormat:
+        @"Converta o pedido de voz abaixo nos argumentos de uma ferramenta que cria uma sessão de coding agent. "
+         "Responda SOMENTE um objeto JSON, sem texto fora dele, com as chaves:\n"
+         "host: uma destas máquinas, ou null para esta máquina (%@). \"windows\" costuma ser a que tem windows no nome; \"mac\"/\"aqui\"/\"local\" é null.\n"
+         "agent: \"claude\", \"codex\" ou \"shell\" (claude se não disser).\n"
+         "repo: o nome do repositório; prefira um destes quando parecer o mesmo (%@); null se não disser.\n"
+         "task: slug curto em minúsculas com hífens (até 30 caracteres) que resuma a tarefa.\n"
+         "prompt: a instrução para o agente, em português, reescrita com clareza, sem mencionar máquina/agente/repositório.\n\n"
+         "Pedido: %@", [hosts componentsJoinedByString:@", "], [repos componentsJoinedByString:@", "], text];
+    NSData *reply = MKRunLong(MKToolPath(@"claude", @"AGENT_BELT_CLAUDE"),
+                              @[@"-p", @"--model", @"haiku", @"--output-format", @"text", instructions], 90);
+    NSString *why = nil;
+    NSDictionary *spec = nil;
+    NSString *command = reply ? MKWorkCommand([[NSString alloc] initWithData:reply encoding:NSUTF8StringEncoding] ?: @"", hosts, &why, &spec) : nil;
+    if (!reply) why = @"o claude não respondeu (claude -p)";
+    if (!command) {
+        fprintf(stderr, "[agent-belt] comando de voz recusado: %s\n", why.UTF8String);
+        mk_hud_show([@"Não criei: " stringByAppendingString:why].UTF8String, text.UTF8String, 3);
+        return -1;
+    }
+    if (dryRun) { printf("%s\n", command.UTF8String); return 0; }
+    NSString *host = MKString(spec[@"host"]).length ? spec[@"host"] : @"este Mac";
+    NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", spec[@"task"], spec[@"agent"] ?: @"claude", host];
+    fprintf(stderr, "[agent-belt] novo agente: %s\n", command.UTF8String);
+    mk_hud_show(title.UTF8String, (MKString(spec[@"prompt"]) ?: text).UTF8String, 1);
+    MKOpenTerminal(command, MKString(spec[@"task"]));
+    return 0;
+}
+
+void mk_agents_voice_command(const char *text) {
+    NSString *copy = @(text);
+    MKAgentsAsync(^{ MKVoiceCommand(copy, NO); });
+}
+
+// `agb new [--dry-run] <pedido>`: the same path from a terminal or another agent.
+int mk_agents_new(const char *text, int dry_run) {
+    @autoreleasepool { return MKVoiceCommand(@(text), dry_run != 0); }
+}

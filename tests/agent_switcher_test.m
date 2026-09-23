@@ -92,6 +92,17 @@ int main(void) {
         assert(!MKSessionTabGroup(@"Período"));
         assert(!MKSessionTabGroup(@"Visualização de estatísticas"));
 
+        NSString *why = nil;
+        NSArray *hosts = @[@"macbook-pro", @"felipe-windows"];
+        assert([MKWorkCommand(@"ok: {\"host\":\"felipe-windows\",\"agent\":\"codex\",\"repo\":\"coreum\",\"task\":\"login-bug\",\"prompt\":\"Investigue o login d'hoje\"}", hosts, &why, NULL)
+                 isEqual:@"work felipe-windows login-bug coreum --agent codex --prompt 'Investigue o login d'\\''hoje'"]);
+        assert([MKWorkCommand(@"{\"host\":null,\"agent\":\"CLAUDE\",\"repo\":\"x\",\"task\":\"t\",\"prompt\":\"\"}", hosts, &why, NULL) isEqual:@"work t x --agent claude"]);
+        assert(!MKWorkCommand(@"{\"host\":\"marte\",\"repo\":\"x\",\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"marte"]);
+        assert(!MKWorkCommand(@"{\"repo\":null,\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"repositório"]);
+        assert(!MKWorkCommand(@"{\"repo\":\"x\",\"task\":\"tem espaço\"}", hosts, &why, NULL));
+        assert(!MKWorkCommand(@"desculpe, não sei", hosts, &why, NULL));
+        assert(!MKWorkCommand(@"{\"repo\":\"x; rm -rf ~\",\"task\":\"t\"}", hosts, &why, NULL)); // no shell injection via repo
+
         assert(MKMenuDecide(NO, INFINITY) == MKMenuShow);
         assert(MKMenuDecide(NO, 0.1) == MKMenuShow);   // hidden: any press shows
         assert(MKMenuDecide(YES, 1.0) == MKMenuMove);
@@ -136,6 +147,6 @@ int main(void) {
         w.state = y.state = MKStateIdle;
         assert(MKPickIndex(agentRing, @"x", @"orca") == 2); // plain ring order
 
-        puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states, priority and menu presses OK");
+        puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states, priority and menu presses and voice commands OK");
     }
 }

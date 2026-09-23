@@ -62,7 +62,7 @@ static uint16_t mk_led_vendor, mk_led_product;
 // so every state is one write.
 static int MKLedWanted(void) {
     // Mode 5 ignores the color; 0x65 is the byte verified on hardware.
-    if (mk_led_status_value == 1) return MKLedBlue << 4 | MKModeWhite;
+    if (mk_led_status_value == 1 || mk_led_status_value == 4) return MKLedBlue << 4 | MKModeWhite;
     if (mk_led_status_value == 2) return MKLedCyan << 4 | MKModeStatic;
     if (mk_led_agents_value == 2) return MKLedRed << 4 | MKModeStatic;
     if (mk_led_agents_value == 1) return MKLedGreen << 4 | MKModeStatic;

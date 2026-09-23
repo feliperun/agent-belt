@@ -39,6 +39,17 @@ pub fn main(init: std.process.Init) !void {
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
 
+    if (std.mem.eql(u8, argv[1], "new")) {
+        // agb new [--dry-run] <pedido em linguagem natural>
+        var rest = argv[2..argc];
+        const dry_run = rest.len > 0 and std.mem.eql(u8, rest[0], "--dry-run");
+        if (dry_run) rest = rest[1..];
+        if (rest.len == 0) return usage();
+        const text = try joinArgs(allocator, rest);
+        defer allocator.free(text);
+        return macos.agentsNew(allocator, text, dry_run);
+    }
+
     if (std.mem.eql(u8, argv[1], "permissions")) {
         // Opens the three lists the app must be enabled in.
         for ([_][*:0]const u8{ "ListenEvent", "Accessibility", "Microphone" }) |pane| {
@@ -145,6 +156,7 @@ fn usage() !void {
         "  agb bind <a-f> disabled\n" ++
         "  agb devices\n" ++
         "  agb status\n" ++
+        "  agb new [--dry-run] <pedido>   (ex.: crie um agente no windows com codex no coreum para …)\n" ++
         "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
         "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
         "  agb daemon\n" ++

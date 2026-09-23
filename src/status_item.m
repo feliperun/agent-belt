@@ -35,6 +35,7 @@ static int mk_dictation_status; // mk_status_set: nonzero while dictating
 @property(nonatomic) CGFloat level, releaseLevel;
 @property(nonatomic) double signalPhase, motion, previousTarget;
 @property(nonatomic) BOOL reducedMotion;
+@property(nonatomic) BOOL command; // listening to a voice command, not dictation
 @property(nonatomic, strong) NSTimer *animationTimer;
 - (void)showMode:(NSInteger)mode;
 - (void)stopAnimation;
@@ -105,7 +106,8 @@ static int mk_dictation_status; // mk_status_set: nonzero while dictating
         mk_label(@"Veja o erro no terminal", NSMakePoint(65, 24), 10, mk_ink(0.5));
         return;
     }
-    mk_label(self.mode == 1 ? @"Ouvindo" : @"Transcrevendo", NSMakePoint(65, 44), 12, mk_ink(0.92));
+    mk_label(self.mode == 1 ? (self.command ? @"Comando de voz" : @"Ouvindo") : (self.command ? @"Entendendo" : @"Transcrevendo"),
+             NSMakePoint(65, 44), 12, mk_ink(0.92));
     [self drawSignal:t morph:morph];
 }
 - (void)drawCore:(double)t morph:(double)morph {
@@ -166,7 +168,7 @@ static int mk_dictation_status; // mk_status_set: nonzero while dictating
 // While the transcription is on its way, a line of glyphs keeps deciphering
 // into a phrase: letters settle left to right, hold, then scramble again.
 - (void)drawCipher:(double)t opacity:(double)opacity {
-    static NSString *const phrase = @"decifrando sua voz";
+    NSString *phrase = self.command ? @"decifrando o pedido" : @"decifrando sua voz";
     static NSString *const pool = @"abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/\\|?!";
     NSDictionary *resolved = @{NSFontAttributeName: [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium],
                                NSForegroundColorAttributeName: mk_ink(opacity * 0.85)};
@@ -319,9 +321,15 @@ void mk_status_set(int status) {
             mk_hide_timer = nil;
             mk_dictation_status = status;
             if (status == 0) { mk_order_out(); return; }
-            [mk_overlay_view showMode:status];
+            // A voice command listens exactly like dictation; only the words differ.
+            if (status == 4 || status == 1) mk_overlay_view.command = status == 4;
+            [mk_overlay_view showMode:status == 4 ? 1 : status];
             mk_reveal_overlay();
             switch (status) {
+                case 4:
+                    mk_status_item.button.title = @" 🦇";
+                    mk_status_item.button.toolTip = @"Agent Belt ouvindo um comando";
+                    break;
                 case 1:
                     mk_status_item.button.title = @" 🎙️";
                     mk_status_item.button.toolTip = @"Agent Belt gravando";

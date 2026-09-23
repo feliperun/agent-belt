@@ -187,6 +187,20 @@ viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque
 e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
 `agb led <cor> <modo>` troca à mão.
 
+## Criar agentes por voz
+
+Com o menu de agentes aberto (tecla 1 ou `⌃⌥Espaço`), segure o push-to-talk e peça:
+*"crie um agente no windows com codex no coreum para investigar o login"*. O Deepgram
+transcreve, um Claude Haiku (`claude -p`, com a sua conta) extrai máquina, agente,
+repositório, nome da tarefa e instrução, e um terminal novo no Orca roda o `work` com
+`--prompt`. Sem o Orca, abre no Terminal. O mesmo pelo terminal, ou por outro agente:
+
+```sh
+agb new --dry-run crie um agente no windows com codex no coreum para investigar o login
+# work felipe-windows investigar-login coreum --agent codex --prompt '…'
+agb new crie um agente aqui com claude no agent-belt para revisar o README
+```
+
 ## work: sessões de agente em qualquer máquina
 
 `work/` (antes o repositório `tmux`, trazido com o histórico) cria uma sessão tmux com

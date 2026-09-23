@@ -11,6 +11,8 @@ const Daemon = struct {
     recording: ?macos.Recorder = null,
     recording_key: ?usize = null,
     busy: bool = false,
+    /// Push-to-talk started with the agent menu open: the speech is a command.
+    command: bool = false,
     keys: @import("key_edges.zig").KeyEdges = .{},
     knob: @import("knob.zig").Knob = .{},
 
@@ -56,7 +58,9 @@ const Daemon = struct {
             try recorder.start();
             self.recording = recorder;
             self.recording_key = event.key;
-            macos.setStatus(.recording);
+            self.command = macos.agentsMenuVisible();
+            if (self.command) macos.agentsMenuClose();
+            macos.setStatus(if (self.command) .command else .recording);
             std.debug.print("[agent-belt] GRAVANDO — solte a tecla para transcrever\n", .{});
             return;
         }
@@ -95,6 +99,11 @@ const Daemon = struct {
             return;
         }
         try macos.dismissOverlay();
+        if (self.command) {
+            std.debug.print("[agent-belt] COMANDO: {s}\n", .{text});
+            try macos.voiceCommand(self.allocator, text);
+            return;
+        }
         try macos.insertText(text);
         std.debug.print("[agent-belt] INSERIDO ({d} caracteres)\n", .{text.len});
     }

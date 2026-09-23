@@ -73,6 +73,26 @@ pub fn ledSet(vendor_id: u16, product_id: u16, color: u8, mode: u8) !void {
     };
 }
 
+pub fn agentsMenuVisible() bool {
+    return c.mk_agents_menu_visible() != 0;
+}
+
+pub fn agentsMenuClose() void {
+    c.mk_agents_menu_close();
+}
+
+pub fn voiceCommand(allocator: std.mem.Allocator, text: []const u8) !void {
+    const z = try allocator.dupeZ(u8, text);
+    defer allocator.free(z);
+    c.mk_agents_voice_command(z.ptr);
+}
+
+pub fn agentsNew(allocator: std.mem.Allocator, text: []const u8, dry_run: bool) !void {
+    const z = try allocator.dupeZ(u8, text);
+    defer allocator.free(z);
+    if (c.mk_agents_new(z.ptr, @intFromBool(dry_run)) != 0) return error.AgentNotCreated;
+}
+
 pub fn agentsMenuPress() void {
     c.mk_agents_menu_press();
 }
@@ -94,6 +114,7 @@ pub const Status = enum(c_int) {
     recording = 1,
     transcribing = 2,
     failed = 3,
+    command = 4, // recording a voice command for the agent menu
 };
 
 pub fn setStatus(status: Status) void {
