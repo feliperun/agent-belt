@@ -107,6 +107,9 @@ file — keep appending.
 - **AudioQueue callbacks go to the caller's run loop.** From a dispatch queue (fn+F5)
   there is none and every recording came back empty. `AudioQueueNewInput` gets a
   `NULL` run loop so callbacks use AudioQueue's own thread.
+- **The daemon's main thread must run `[NSApp run]`.** A bare `CFRunLoopRun` services
+  the event tap but never delivers AppKit events: menu bar clicks, menus, alerts and
+  notification actions silently do nothing (`mk_app_run`).
 - **The event tap must never block.** Long work (transcription, focus changes, network)
   goes to a queue; the tap only decides and swallows.
 - **Orca's CLI does not know the UI focus.** `--worktree active` resolves to the

@@ -281,7 +281,10 @@ int mk_event_tap_run(mk_event_filter_callback filter, void *context) {
         return -5;
     }
     CFRunLoopAddSource(CFRunLoopGetCurrent(), event_source, kCFRunLoopCommonModes);
-    CFRunLoopRun();
+    // AppKit's event loop, not a bare CFRunLoopRun: without it clicks on the menu
+    // bar item, menus, alerts and notification actions are never delivered.
+    // The tap source is in the common modes, which NSApp also runs (menus included).
+    mk_app_run();
     CFRunLoopRemoveSource(CFRunLoopGetCurrent(), event_source, kCFRunLoopCommonModes);
     CFRelease(event_source);
     CFRelease(event_tap);

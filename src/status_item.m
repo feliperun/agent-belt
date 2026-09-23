@@ -279,6 +279,14 @@ int mk_status_dismiss(void) {
     return dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0 ? 0 : -1;
 }
 
+void mk_app_run(void) {
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+        [NSApp finishLaunching];
+    }
+    [NSApp run];
+}
+
 int mk_status_init(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
