@@ -853,11 +853,12 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     try mk.appendSlice(ctx.gpa, &ssh_opts);
     try mk.append(ctx.gpa, h.target);
     switch (h.kind) {
-        .posix => try mk.append(ctx.gpa, "mkdir -p ~/.local/bin ~/.config/work"),
+        // The bash tools agb replaced (work, work-session, tm) go, as install.sh does on the Mac.
+        .posix => try mk.append(ctx.gpa, "mkdir -p ~/.local/bin ~/.config/work && rm -f ~/.local/bin/work ~/.local/bin/work-session ~/.local/bin/tm"),
         // Also puts ~\.local\bin on the user's PATH, so `agb` works in any new terminal.
         .msys => try mk.append(ctx.gpa, try ctx.fmt("New-Item -ItemType Directory -Force -Path C:\\Users\\{s}\\.local\\bin,C:\\Users\\{s}\\.config\\work | Out-Null; $b='C:\\Users\\{s}\\.local\\bin'; $p=[Environment]::GetEnvironmentVariable('Path','User'); if (($p -split ';') -notcontains $b) {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';' + $b), 'User') }}; " ++
             // A running agb.exe (an attached terminal) cannot be overwritten, only renamed.
-            "Remove-Item \"$b\\agb.old-*.exe\" -ErrorAction SilentlyContinue; if (Test-Path \"$b\\agb.exe\") {{ Move-Item -Force \"$b\\agb.exe\" \"$b\\agb.old-$([DateTime]::Now.Ticks).exe\" }}", .{ user, user, user })),
+            "Remove-Item \"$b\\agb.old-*.exe\",\"$b\\work\",\"$b\\work-session\",\"$b\\tm\" -ErrorAction SilentlyContinue; if (Test-Path \"$b\\agb.exe\") {{ Move-Item -Force \"$b\\agb.exe\" \"$b\\agb.old-$([DateTime]::Now.Ticks).exe\" }}", .{ user, user, user })),
     }
     if (!sys.run(ctx, mk.items, null).ok) return error.Unreachable;
     const dest_bin = switch (h.kind) {
