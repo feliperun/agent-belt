@@ -1,59 +1,61 @@
-# work — sessões de trabalho persistentes no tailnet inteiro
+# work — persistent work sessions across the whole tailnet
 
-Cada tarefa ganha um **git worktree** isolado, uma **sessão tmux** e um **agente**
-(Claude Code ou Codex) rodando lá dentro. Fechar o terminal, cair a conexão ou
-desconectar o RDP não mata nada — `work` de novo reata.
+In Agent Belt, these commands are reached through `agb` (`agb sessions`, `agb ls`, `agb attach`, `agb hosts`, `agb doctor`, `agb adopt`, `agb tm`, `agb deploy`, `agb new --task …`).
 
-A sessão pode nascer em **qualquer máquina do tailnet, a partir de qualquer
-outra**, e a lista de sessões vivas é sempre a lista de *todas* as máquinas,
-independente de onde você está e de que diretório.
+Each task gets an isolated **git worktree**, a **tmux session** and an **agent**
+(Claude Code or Codex) running inside it. Closing the terminal, losing the connection or
+disconnecting RDP kills nothing — running `work` again reattaches.
+
+A session can be created on **any machine in the tailnet, from any
+other**, and the list of live sessions is always the list across *all* machines,
+regardless of where you are and which directory you're in.
 
 ```
-work                            menu interativo com as sessões de todas as máquinas
-work ls                         a mesma lista, em texto
-work <tarefa> [repo]            cria (ou reata) aqui
-work <máquina> <tarefa> [repo]  cria (ou reata) na máquina do tailnet
-work attach <sessão> [máquina]  atacha direto, sem menu
-work adopt [máquina]            adota agente aberto fora do tmux
-work hosts [discover|add|rm|self]   registro de máquinas
-work doctor                     testa ssh, work e toolchain em cada máquina
+work                            interactive menu with the sessions of every machine
+work ls                         the same list, as text
+work <task> [repo]              create (or reattach) here
+work <machine> <task> [repo]    create (or reattach) on that tailnet machine
+work attach <session> [machine] attach directly, no menu
+work adopt [machine]            adopt an agent opened outside tmux
+work hosts [discover|add|rm|self]   machine registry
+work doctor                     test ssh, work and toolchain on every machine
 
-  -a|--agent claude|codex|shell   qual agente sobe (default: claude)
-  -p|--prompt "texto"             primeira instrucao ao agente (numa sessao que ja existe, e digitada nela)
-  --codex / --claude / --shell    atalhos
-tm [nome]                         sessão tmux simples, sem worktree nem agente
+  -a|--agent claude|codex|shell   which agent starts (default: claude)
+  -p|--prompt "text"              first instruction for the agent (typed into it if the session exists)
+  --codex / --claude / --shell    shortcuts
+tm [name]                         plain tmux session, no worktree or agent
 ```
 
-`work xpto` dentro de `~/dev/micromed/coreum` cria o worktree `coreum-xpto` na
-branch `work/xpto` e a sessão tmux `coreum-xpto`. `work frb-omarchy xpto coreum`
-faz o mesmo na omarchy — e se você estiver dentro de um repo git, o **nome** do
-repo viaja junto, então `work frb-omarchy xpto` resolve `coreum` na cópia de lá.
+`work xpto` inside `~/dev/micromed/coreum` creates the worktree `coreum-xpto` on
+branch `work/xpto` and the tmux session `coreum-xpto`. `work frb-omarchy xpto coreum`
+does the same on omarchy — and if you are inside a git repo, the repo's **name**
+travels along, so `work frb-omarchy xpto` resolves `coreum` to the copy over there.
 
-Máquinas são identificadas pelo **nome oficial do tailnet** (`macbook-pro`,
-`felipe-windows`, `frb-omarchy`, …). Prefixo não-ambíguo também serve:
+Machines are identified by their **official tailnet name** (`macbook-pro`,
+`felipe-windows`, `frb-omarchy`, …). An unambiguous prefix also works:
 `work frb-om xpto`.
 
-## Arquitetura
+## Architecture
 
-Um script só, `bin/work`, instalado em **todas** as máquinas — cada uma é
-cliente e host ao mesmo tempo. Quando o alvo é ela mesma, executa local; quando
-é outra, chama por ssh o `work` de lá. Quem cria a sessão é sempre o
-`bin/work-session` da máquina de destino, que resolve PATH, worktree, confiança
-do agente e tmux com as regras da plataforma dele.
+A single script, `bin/work`, installed on **every** machine — each one is
+client and host at the same time. When the target is itself, it runs locally; when
+it's another, it calls that machine's `work` over ssh. The session is always created by
+the target machine's `bin/work-session`, which resolves PATH, worktree, agent
+trust and tmux using its own platform's rules.
 
 ```
-bin/work          dispatcher: registro, menu, ls, attach, doctor
-bin/work-session  cria/reata a sessão nesta máquina (macOS, Linux, MSYS2)
-bin/tm            sessão tmux simples
-windows/…ps1      funções work/tm/works do PowerShell (chamam o bash do MSYS2)
-install.sh        instala em ~/.local/bin desta máquina
-scripts/deploy.sh instala/atualiza nas máquinas do registro
-scripts/mesh-keys.sh   distribui as chaves ssh para todo mundo se falar com todo mundo
+bin/work          dispatcher: registry, menu, ls, attach, doctor
+bin/work-session  creates/reattaches the session on this machine (macOS, Linux, MSYS2)
+bin/tm            plain tmux session
+windows/…ps1      PowerShell work/tm/works functions (they call MSYS2's bash)
+install.sh        installs into ~/.local/bin on this machine
+scripts/deploy.sh installs/updates the machines in the registry
+scripts/mesh-keys.sh   distributes ssh keys so every machine can reach every other
 ```
 
-### Registro de máquinas
+### Machine registry
 
-`~/.config/work/hosts.conf`, uma linha por máquina:
+`~/.config/work/hosts.conf`, one line per machine:
 
 ```
 host macbook-pro     frb@macbook-pro           posix
@@ -62,136 +64,136 @@ host frb-omarchy     frb@frb-omarchy           posix
 self macbook-pro
 ```
 
-`work hosts discover` preenche isso a partir do `tailscale status` (o usuário
-ssh sai do `~/.ssh/config` de cada host, e o tipo, do SO informado pelo
-tailnet). O `deploy.sh` **copia** esse registro para as outras máquinas em vez
-de redescobrir lá: redescobrir do outro lado erra o usuário de quem não está no
-`~/.ssh/config` de lá — `Micromed@felipe-windows` viraria `frb@felipe-windows`.
+`work hosts discover` fills this in from `tailscale status` (the ssh user
+comes from each host's `~/.ssh/config`, and the type from the OS reported by the
+tailnet). `deploy.sh` **copies** this registry to the other machines instead
+of rediscovering there: rediscovering on the other side gets the user wrong for hosts that aren't in
+that machine's `~/.ssh/config` — `Micromed@felipe-windows` would become `frb@felipe-windows`.
 
-### Clipboard ao anexar uma sessão remota
+### Clipboard when attaching to a remote session
 
-Ao fazer `work attach` a sessão continua no tmux da máquina de destino, mas o
-terminal está no cliente de origem. O `work` configura automaticamente o tmux
-do destino para encaminhar o clipboard por OSC 52: habilita `set-clipboard`,
-`allow-passthrough` e a feature genérica `*:clipboard` antes de criar ou
-anexar a sessão. Isso é importante sobretudo para um terminal do Omarchy com
-uma sessão no macOS, porque o tmux do macOS não conhece `xterm-ghostty` por
-padrão.
+With `work attach` the session stays in the target machine's tmux, but the
+terminal is on the originating client. `work` automatically configures the target's
+tmux to forward the clipboard via OSC 52: it enables `set-clipboard`,
+`allow-passthrough` and the generic `*:clipboard` feature before creating or
+attaching to the session. This matters especially for an Omarchy terminal with
+a session on macOS, because macOS's tmux doesn't know `xterm-ghostty` by
+default.
 
-Depois de atualizar o `work`, basta anexar de novo com `work attach`. No
-copy-mode do tmux, `v` inicia a seleção e `y` copia para o clipboard local.
+After updating `work`, just attach again with `work attach`. In tmux
+copy-mode, `v` starts the selection and `y` copies to the local clipboard.
 
-## Instalação
+## Installation
 
-**Numa máquina** (macOS, Linux ou Windows com MSYS2):
+**On one machine** (macOS, Linux or Windows with MSYS2):
 
 ```
 ./install.sh
 ```
 
-Copia `work`, `work-session` e `tm` para `~/.local/bin` (mais o apelido `rwork`),
-descobre as máquinas do tailnet e marca qual é esta. No Windows instala também o
-profile do PowerShell.
+Copies `work`, `work-session` and `tm` to `~/.local/bin` (plus the `rwork` alias),
+discovers the tailnet machines and marks which one this is. On Windows it also installs the
+PowerShell profile.
 
-**Nas outras, a partir de uma já instalada:**
+**On the others, from one that is already installed:**
 
 ```
 ./scripts/deploy.sh --all          # ou: ./scripts/deploy.sh frb-omarchy felipe-windows
 ```
 
-**Chaves ssh de todos para todos** (o que permite criar sessão em qualquer
-combinação de origem e destino):
+**Everyone-to-everyone ssh keys** (which lets you create a session in any
+combination of origin and target):
 
 ```
 ./scripts/mesh-keys.sh --dry-run   # mostra o que faria + a matriz de quem alcança quem
 ./scripts/mesh-keys.sh             # corrige e mostra a matriz
 ```
 
-Ele cuida dos **dois** motivos que derrubam um par:
+It handles **both** reasons that break a pair:
 
-1. `authorized_keys` sem a chave da origem → `Permission denied (publickey)`.
-   Quais chaves distribuir não se descobre listando `~/.ssh/*.pub`: o
-   `~/.ssh/config` pode forçar uma `IdentityFile` diferente por destino. Quem
-   sabe a resposta é o ssh da origem, então o script roda
-   `ssh -G <destino>` lá e usa exatamente o que ele diz que vai oferecer.
-2. `known_hosts` com host key antiga → `HOST IDENTIFICATION HAS CHANGED`, que
-   recusa a conexão *antes* de autenticar. Acontece quando uma máquina é
-   reinstalada. A referência é o `known_hosts` de quem roda o script (que
-   alcança todas); só na falta de registro local a chave vem do `ssh-keyscan`.
+1. `authorized_keys` missing the origin's key → `Permission denied (publickey)`.
+   Which keys to distribute can't be found by listing `~/.ssh/*.pub`: the
+   `~/.ssh/config` may force a different `IdentityFile` per target. The one that
+   knows the answer is the origin's ssh, so the script runs
+   `ssh -G <target>` there and uses exactly what it says it will offer.
+2. `known_hosts` with an old host key → `HOST IDENTIFICATION HAS CHANGED`, which
+   refuses the connection *before* authenticating. It happens when a machine is
+   reinstalled. The reference is the `known_hosts` of whoever runs the script (which
+   reaches all of them); only when there's no local record does the key come from `ssh-keyscan`.
 
-Máquina fora do ar é simplesmente pulada — rode de novo quando ela voltar.
+A machine that's down is simply skipped — run it again when it comes back.
 
-O Windows fica de fora da escrita automática: lá a conta é administradora e o
-sshd usa `C:\ProgramData\ssh\administrators_authorized_keys`, com ACL restrita a
-SYSTEM + Administradores — `ssh-copy-id` acerta o arquivo errado e falha em
-silêncio. Como o Windows já aceita as outras máquinas, o script só reporta.
+Windows is left out of the automatic writes: there the account is an administrator and
+sshd uses `C:\ProgramData\ssh\administrators_authorized_keys`, with an ACL restricted to
+SYSTEM + Administrators — `ssh-copy-id` hits the wrong file and fails
+silently. Since Windows already accepts the other machines, the script only reports.
 
-**Windows, pré-requisitos** — MSYS2 com tmux e winpty, Git for Windows, Node e
-o `claude.exe`:
+**Windows, prerequisites** — MSYS2 with tmux and winpty, Git for Windows, Node and
+`claude.exe`:
 
 ```powershell
 winget install --id MSYS2.MSYS2 -e
 C:\msys64\usr\bin\bash.exe -lc "pacman -Sy --noconfirm --needed tmux winpty"
 ```
 
-## Agentes
+## Agents
 
-| agente | como sobe |
+| agent | how it starts |
 |---|---|
-| `claude` (default) | `claude --dangerously-skip-permissions --name <tarefa>` |
+| `claude` (default) | `claude --dangerously-skip-permissions --name <task>` |
 | `codex` | `codex --dangerously-bypass-approvals-and-sandbox` |
-| `shell` | só o `$SHELL` no worktree, sem agente |
+| `shell` | just `$SHELL` in the worktree, no agent |
 
-Os dois param num diálogo de confiança ao abrir um diretório novo — e todo
-worktree é um diretório novo, o que mataria a sessão autônoma antes de começar.
-Como o worktree é um checkout do repo que você mesmo escolheu, o `work-session`
-pré-autoriza: `hasTrustDialogAccepted` no `~/.claude.json` para o Claude,
-`[projects."<caminho>"] trust_level = "trusted"` no `config.toml` do Codex
-(respeitando `CODEX_HOME`). `WORK_NO_AUTOTRUST=1` desliga.
+Both stop at a trust dialog when opening a new directory — and every
+worktree is a new directory, which would kill the autonomous session before it starts.
+Since the worktree is a checkout of a repo you chose yourself, `work-session`
+pre-authorizes it: `hasTrustDialogAccepted` in `~/.claude.json` for Claude,
+`[projects."<path>"] trust_level = "trusted"` in Codex's `config.toml`
+(respecting `CODEX_HOME`). `WORK_NO_AUTOTRUST=1` turns it off.
 
-O agente escolhido fica marcado na sessão (`@work_agent`) e aparece na coluna
-AGENTE do `work ls`.
+The chosen agent is tagged on the session (`@work_agent`) and shows up in the
+AGENTE column of `work ls`.
 
-**Renomear a conversa no agente renomeia a sessão tmux.** O Claude Code (e o
-Codex) publicam o próprio nome no título do terminal, e é isso que o tmux
-guarda em `pane_title` — o único canal que existe de dentro do agente para
-fora. Então `/rename` lá aparece no `work` aqui. Três cuidados no caminho:
+**Renaming the conversation in the agent renames the tmux session.** Claude Code (and
+Codex) publish their own name in the terminal title, and that's what tmux
+stores in `pane_title` — the only channel that exists from inside the agent to
+the outside. So `/rename` there shows up in `work` here. Three caveats along the way:
 
-- o título vem com um glifo de estado na frente (`✳ fix-windows`), então só a
-  parte que vira slug conta;
-- se o nome do agente é o mesmo que o `work` passou no `--name`, não há rename
-  a propagar (seria trocar `coreum-xpto` por `xpto` e perder o repo do nome);
-- o prefixo do repo fica: `coreum-xpto` renomeado para `bug-impressora` vira
+- the title comes with a status glyph in front (`✳ fix-windows`), so only the
+  part that becomes a slug counts;
+- if the agent's name is the same one `work` passed in `--name`, there's no rename
+  to propagate (it would swap `coreum-xpto` for `xpto` and lose the repo from the name);
+- the repo prefix stays: `coreum-xpto` renamed to `bug-impressora` becomes
   `coreum-bug-impressora`.
 
-O nome antigo continua funcionando (`work xpto` acha a sessão renomeada) porque
-a busca usa a marca `@work_task`, não o nome. `WORK_NO_RENAME=1` desliga. Sessão que **não** nasceu pelo `work` — inclusive um tmux
-que você abriu na mão — também aparece na lista, com o agente deduzido do
-processo em primeiro plano do pane e um `~` indicando que é dedução.
+The old name keeps working (`work xpto` finds the renamed session) because
+the lookup uses the `@work_task` tag, not the name. `WORK_NO_RENAME=1` turns it off. A session that was **not** created by `work` — including a tmux
+you opened by hand — also shows up in the list, with the agent inferred from the
+pane's foreground process and a `~` indicating it's an inference.
 
-### O que a lista diz além das sessões
+### What the list says besides the sessions
 
 ```
 5 maquinas: 1 com sessao, 4 sem, 1 sem resposta: frb-linux  ->  work doctor
 agente fora do tmux, aberto direto (nao da para atachar): felipe-windows (1)
 ```
 
-Sem esse rodapé não dá para distinguir "essa máquina não tem sessão" de "essa
-máquina não respondeu" — e você fica procurando uma sessão que a lista nunca
-vai mostrar. A resposta do `ls-raw` termina numa linha `#fora`, que serve de
-sinal de vida: se ela não chegou, a máquina entra como *sem resposta*.
+Without this footer you can't tell "this machine has no session" from "this
+machine didn't respond" — and you end up looking for a session the list will never
+show. The `ls-raw` response ends with a `#fora` line, which serves as a
+sign of life: if it didn't arrive, the machine is listed as *no response*.
 
-### Adotar um agente aberto fora do tmux
+### Adopting an agent opened outside tmux
 
-Um processo de console **não migra** para dentro do tmux depois de começar: no
-Linux existe o `reptyr`, frágil com TUI, e no Windows não há equivalente — o
-processo fica preso ao ConPTY da janela que o criou. Mas a *conversa* não vive
-no processo: o Claude guarda cada sessão em
-`~/.claude/projects/<caminho>/<id>.jsonl` e o Codex em `~/.codex`. Então dá
-para encerrar o processo solto e reabrir a mesma conversa dentro do tmux:
+A console process **doesn't migrate** into tmux once it has started: on
+Linux there's `reptyr`, which is fragile with TUIs, and on Windows there's no equivalent — the
+process is bound to the ConPTY of the window that created it. But the *conversation* doesn't live
+in the process: Claude stores each session in
+`~/.claude/projects/<path>/<id>.jsonl` and Codex in `~/.codex`. So you can
+end the stray process and reopen the same conversation inside tmux:
 
 ```
-work adopt                  # candidatos em todas as máquinas
+work adopt                  # candidates on every machine
 work adopt felipe-windows   # só naquela
 ```
 
@@ -200,67 +202,67 @@ work adopt felipe-windows   # só naquela
   1  felipe-windows    claude      3h  +recente   /c/dev/faberun-fix-windows
 ```
 
-Escolhido um, ele pede confirmação, encerra o processo e sobe uma sessão tmux
-no mesmo diretório com `--continue` (ou `--resume <id>`, quando o id está nos
-argumentos do processo — aí a conversa retomada é exatamente aquela, sem
-ambiguidade quando há vários agentes no mesmo diretório). Você perde o turno em
-andamento e o scrollback; a conversa volta inteira.
+Once one is chosen, it asks for confirmation, ends the process and starts a tmux session
+in the same directory with `--continue` (or `--resume <id>`, when the id is in the
+process's arguments — then the resumed conversation is exactly that one, with no
+ambiguity when there are several agents in the same directory). You lose the turn in
+progress and the scrollback; the conversation comes back whole.
 
-No Windows o diretório não vem do processo (o msys não lê o cwd de processo
-nativo): sai do `"cwd"` gravado no próprio `.jsonl` da conversa, desescapado e
-convertido para a forma que o tmux entende.
+On Windows the directory doesn't come from the process (msys can't read the cwd of a native
+process): it comes from the `"cwd"` recorded in the conversation's own `.jsonl`, unescaped and
+converted to the form tmux understands.
 
-## Por que o Windows é diferente
+## Why Windows is different
 
-Não é WSL de propósito: numa máquina com virtualização desligada e repos
-Windows-nativos em `C:\dev`, o acesso por `/mnt/c` seria lento e sem toolchain.
-O multiplexador é o tmux do MSYS2 e o agente continua nativo. Daí quatro
-adaptações, todas comentadas no código:
+It's not WSL on purpose: on a machine with virtualization turned off and
+Windows-native repos in `C:\dev`, access through `/mnt/c` would be slow and without a toolchain.
+The multiplexer is MSYS2's tmux and the agent stays native. Hence four
+adaptations, all commented in the code:
 
-1. **`winpty` na frente do agente** — sem ele o Node não acha um console de
-   verdade dentro do pane e a TUI não entra em raw mode.
-2. **PATH montado à mão** — o login shell do MSYS2 é mínimo e não vê `git`,
-   `node` nem `claude`.
-3. **Guarda de colisão** — `$repo-$task` pode bater num repo vizinho real
-   (`coreum` → `coreum-docs` existe). Diretório preexistente só é reaproveitado
-   se for mesmo worktree daquele repo. Vale em todas as plataformas.
-4. **Pré-autorização do worktree**, acima.
+1. **`winpty` in front of the agent** — without it Node doesn't find a real
+   console inside the pane and the TUI doesn't enter raw mode.
+2. **PATH built by hand** — the MSYS2 login shell is minimal and doesn't see `git`,
+   `node` or `claude`.
+3. **Collision guard** — `$repo-$task` can clash with a real neighboring repo
+   (`coreum` → `coreum-docs` exists). A pre-existing directory is only reused
+   if it really is a worktree of that repo. Applies on all platforms.
+4. **Worktree pre-authorization**, above.
 
-## Armadilhas conhecidas
+## Known pitfalls
 
-- **O sshd do Windows embrulha o comando em `powershell -c`.** Quoting de shell
-  não vale nada ali: aspas duplas somem, `\ ` não escapa espaço, `||` vira erro
-  de sintaxe. Por isso o `work` manda para lá só tokens simples (e valida os
-  argumentos como slug em vez de escapá-los), o `deploy.sh` usa PowerShell puro
-  sem aspas para criar diretório, e o `mesh-keys.sh` manda script por **stdin**
-  (`bash -l -s`) quando precisa de aspas.
-- **`bash -s` sem `-l` no MSYS2** não tem nem `/usr/bin` no PATH: `uname`, `tr`
-  e `head` somem. Sempre `-l -s`.
-- **Barra invertida é recusada nos argumentos**: use `coreum` ou
-  `C:/dev/coreum`, nunca `C:\dev\coreum`.
-- **Nada de caractere de controle em formato do tmux.** O `ls-raw` separa campos
-  com `|`: sob locale C o tmux troca não-imprimível por `_` na saída do `-F`, e
-  só no destino remoto — o campo some e a linha inteira desalinha.
-- **Tab também não serve como separador**: o `read` do bash colapsa sequências
-  de espaço em branco, e um campo vazio desloca todos os outros.
-- **`tmux set-option -t` não aceita o prefixo `=`** de alvo exato (mas
-  `attach`/`has-session` aceitam), e um `-s` no lugar viraria *server option* —
-  marcaria todas as sessões de uma vez.
-- **Função de shell sombreia o PATH**: `work` e `tm` eram funções no `.zshrc`;
-  viraram scripts justamente para valerem igual em toda máquina.
-- **`bash -s` lendo script por stdin também serve para mandar dados**: o
-  `while read` depois do `done` consome o resto do mesmo stdin. É como o
-  `mesh-keys.sh` entrega script *e* lista para o Windows, onde argumento com
-  aspas não sobrevive ao `powershell -c`.
-- **Saída do PowerShell vem com CRLF**: `grep -x OK` falha silenciosamente sem
-  um `tr -d '\r'` antes — dá falso-negativo em teste de conectividade.
-- **`IdentitiesOnly yes` com lista fixa de `Host` não cobre máquina nova.** No
-  Windows o bloco tailnet do `~/.ssh/config` aponta para uma chave sem
-  passphrase; um host fora dessa lista cai na `id_ed25519` padrão, que *tem*
-  passphrase e não abre em `BatchMode` — `Permission denied (publickey)` mesmo
-  com a chave certa autorizada no destino. Ao registrar uma máquina nova,
-  acrescente o nome dela nesse `Host`.
-- **O `ssh` do Windows não está no PATH do login shell do MSYS2**
-  (`/c/Windows/System32/OpenSSH`). Sem isso a máquina funciona como host mas
-  não como cliente: as chamadas remotas falham caladas e o `work ls` mostra só
-  as sessões locais.
+- **Windows sshd wraps the command in `powershell -c`.** Shell quoting
+  is worthless there: double quotes vanish, `\ ` doesn't escape a space, `||` becomes a syntax
+  error. That's why `work` sends only simple tokens there (and validates the
+  arguments as slugs instead of escaping them), `deploy.sh` uses plain PowerShell
+  without quotes to create directories, and `mesh-keys.sh` sends scripts over **stdin**
+  (`bash -l -s`) when it needs quotes.
+- **`bash -s` without `-l` on MSYS2** doesn't even have `/usr/bin` on PATH: `uname`, `tr`
+  and `head` vanish. Always `-l -s`.
+- **Backslashes are rejected in arguments**: use `coreum` or
+  `C:/dev/coreum`, never `C:\dev\coreum`.
+- **No control characters in tmux formats.** `ls-raw` separates fields
+  with `|`: under the C locale tmux replaces non-printables with `_` in `-F` output, and
+  only on the remote target — the field disappears and the whole line gets misaligned.
+- **Tab doesn't work as a separator either**: bash's `read` collapses runs
+  of whitespace, and an empty field shifts all the others.
+- **`tmux set-option -t` doesn't accept the `=` prefix** for an exact target (but
+  `attach`/`has-session` do), and a `-s` in its place would become a *server option* —
+  it would tag every session at once.
+- **Shell functions shadow PATH**: `work` and `tm` used to be functions in `.zshrc`;
+  they became scripts precisely so they behave the same on every machine.
+- **`bash -s` reading a script from stdin can also be used to send data**: the
+  `while read` after `done` consumes the rest of the same stdin. That's how
+  `mesh-keys.sh` delivers a script *and* a list to Windows, where a quoted argument
+  doesn't survive `powershell -c`.
+- **PowerShell output comes with CRLF**: `grep -x OK` fails silently without
+  a `tr -d '\r'` first — it gives a false negative in connectivity tests.
+- **`IdentitiesOnly yes` with a fixed `Host` list doesn't cover a new machine.** On
+  Windows the tailnet block in `~/.ssh/config` points to a key without a
+  passphrase; a host outside that list falls back to the default `id_ed25519`, which *has* a
+  passphrase and doesn't open in `BatchMode` — `Permission denied (publickey)` even
+  with the right key authorized on the target. When registering a new machine,
+  add its name to that `Host`.
+- **Windows `ssh` is not on the MSYS2 login shell's PATH**
+  (`/c/Windows/System32/OpenSSH`). Without it the machine works as a host but
+  not as a client: remote calls fail silently and `work ls` shows only
+  the local sessions.

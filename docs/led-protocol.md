@@ -1,70 +1,70 @@
-# Protocolo dos LEDs (514c:8850, 6 teclas + knob)
+# LED protocol (514c:8850, 6 keys + knob)
 
-Obtido por engenharia reversa do configurador oficial para Mac
-(`http://www.szxiaozi.com/MACEN.zip`, `MINI_KEYBOARD.app`, função
-`Widget::SetRgb_Led_Key` e `Widget::HID_write`) e confirmado no hardware em
-2026-09-23. Nada daqui vem de documentação do fabricante.
+Obtained by reverse engineering the official Mac configurator
+(`http://www.szxiaozi.com/MACEN.zip`, `MINI_KEYBOARD.app`, functions
+`Widget::SetRgb_Led_Key` and `Widget::HID_write`) and confirmed on the hardware on
+2026-09-23. None of this comes from manufacturer documentation.
 
-## Transporte
+## Transport
 
-- Interface de configuração: usage page `0xFF00`, usage `0x01`, report ID `0x03`.
-- Output reports de 65 bytes (report ID + 64 de dados, zeros no resto), via
+- Configuration interface: usage page `0xFF00`, usage `0x01`, report ID `0x03`.
+- 65-byte output reports (report ID + 64 data bytes, zeros for the rest), via
   `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput, 0x03, buf, 65)`.
-- O dispositivo só responde ~250 ms depois de aberto.
-- Escritas com menos de ~150 ms de intervalo são descartadas em silêncio; use 300 ms.
+- The device only responds ~250 ms after being opened.
+- Writes less than ~150 ms apart are silently dropped; use 300 ms.
 
-## Sequência
+## Sequence
 
 ```
-03 FB FB FB                                     identificação; responde 03 FB 06 01 (6 teclas, 1 knob)
+03 FB FB FB                                     identify; answers 03 FB 06 01 (6 keys, 1 knob)
   300 ms
-03 FE B0 01 08 00 00 00 00 00 01 00 <cor<<4|modo>
+03 FE B0 01 08 00 00 00 00 00 01 00 <color<<4|mode>
 ```
 
-Sem a identificação logo antes, o comando de LED é ignorado. O commit
-`03 FD FE FF` que o app manda depois **não é necessário**: o próprio comando de
-LED já é persistido (a cor sobrevive a desplugar). Cada troca grava a flash.
+Without the identification right before it, the LED command is ignored. The
+`03 FD FE FF` commit the app sends afterwards **is not needed**: the LED command
+itself is already persisted (the color survives unplugging). Every change writes to flash.
 
-| byte | valor | significado |
+| byte | value | meaning |
 |---|---|---|
-| 1–2 | `FE B0` | comando de LED |
-| 3 | `01` | camada, começando em 1 |
-| 4 | `08` | tipo "LED" (o app usa `01` teclas, `02` mídia, `03`/`05` mouse) |
-| 10 | `01` | fixo |
-| 12 | `cor<<4 \| modo` | |
+| 1–2 | `FE B0` | LED command |
+| 3 | `01` | layer, starting at 1 |
+| 4 | `08` | "LED" type (the app uses `01` keys, `02` media, `03`/`05` mouse) |
+| 10 | `01` | fixed |
+| 12 | `color<<4 \| mode` | |
 
-Cores (tabela do app): `1` vermelho, `2` laranja, `3` amarelo, `4` verde,
-`5` ciano, `6` azul, `7` roxo. Cor `0` apaga no modo fixo e é **branco** no modo reativo.
+Colors (the app's table): `1` red, `2` orange, `3` yellow, `4` green,
+`5` cyan, `6` blue, `7` purple. Color `0` turns off in fixed mode and is **white** in reactive mode.
 
-Modos, como observados neste exemplar (o manual diz outra coisa para 2 e 3):
+Modes, as observed on this unit (the manual says otherwise for 2 and 3):
 
-| modo | efeito |
+| mode | effect |
 |---|---|
-| 0 | apagado |
-| 1 | cor fixa |
-| 2 | reativo: apagado; uma onda da cor passa por todas as teclas ao apertar e ao soltar (cor 0 = branca) |
-| 3 | reativo, igual ao 2 |
-| 4 | reativo, só a tecla apertada acende |
-| 5 | branco fixo (a cor é ignorada; `65` confirmado) |
+| 0 | off |
+| 1 | fixed color |
+| 2 | reactive: off; a wave of the color runs across all keys on press and on release (color 0 = white) |
+| 3 | reactive, same as 2 |
+| 4 | reactive, only the pressed key lights up |
+| 5 | fixed white (the color is ignored; `65` confirmed) |
 
-Não há animação contínua nem arco-íris: tudo que anima reage a teclas. Trocar a
-cor pelo host é lento (≥ 600 ms por troca, com identificação) e grava a flash a
-cada passo.
+There is no continuous animation and no rainbow: everything that animates reacts to keys. Changing
+the color from the host is slow (≥ 600 ms per change, with identification) and writes to flash at
+every step.
 
-## Comandos que nunca devem ser enviados
+## Commands that must never be sent
 
-Do mesmo canal, segundo outros projetos para este VID:PID:
+On the same channel, according to other projects for this VID:PID:
 
-- `03 FD <slot> …`: regrava o mapeamento de uma tecla na flash.
-- `03 FC FC …`: troca o modelo do teclado de forma persistente e irreversível.
-- 64 bytes zerados (o "init" do ch57x-keyboard-tool).
-- O formato com RGB por tecla (`03 FE B0 <camada-1> <modo> R G B …`) é de outro
-  firmware com o mesmo VID:PID; aqui não faz nada.
+- `03 FD <slot> …`: rewrites a key's mapping in flash.
+- `03 FC FC …`: changes the keyboard model persistently and irreversibly.
+- 64 zeroed bytes (the ch57x-keyboard-tool "init").
+- The per-key RGB format (`03 FE B0 <layer-1> <mode> R G B …`) belongs to another
+  firmware with the same VID:PID; here it does nothing.
 
-## Uso no agent-belt
+## Use in agent-belt
 
-`src/led.m`: uma thread aplica sempre o último estado desejado e pula escritas
-repetidas. Prioridade: gravando (branco fixo) > transcrevendo (ciano fixo) >
-agente aguardando você (vermelho) > agente terminou e não foi visto (verde) >
-base (onda branca reativa, `02`). `"led": false` na config desliga. Manual:
-`agb led <cor> <modo>`.
+`src/led.m`: a thread always applies the latest desired state and skips repeated
+writes. Priority: recording (fixed white) > transcribing (fixed cyan) >
+agent waiting for you (red) > agent finished and not yet seen (green) >
+base (reactive white wave, `02`). `"led": false` in the config turns it off. Manual:
+`agb led <color> <mode>`.

@@ -5,8 +5,8 @@
 <h1 align="center">Agent Belt</h1>
 
 <p align="center">
-  O cinto de utilidades de quem trabalha com coding agents 🦇<br>
-  Um macropad de 6 teclas + knob vira ditado por voz, troca entre agentes, luzes de aviso e atalhos para o Claude Code e o Codex, no macOS.
+  A utility belt for people who work with coding agents 🦇<br>
+  A 6-key macropad with a knob becomes voice dictation, agent switching, attention lights and shortcuts for Claude Code and Codex, on macOS.
 </p>
 
 <p align="center">
@@ -15,209 +15,213 @@
 </p>
 
 <p align="center">
-  <img src="assets/overlay.gif" width="560" alt="Overlay ouvindo a voz e decifrando a transcrição">
+  <img src="assets/overlay.gif" width="560" alt="Overlay listening to the voice and deciphering the transcript">
 </p>
 
-## O que tem no cinto
+## What's on the belt
 
-| Gadget | O que faz |
+| Gadget | What it does |
 |---|---|
-| 🎙️ **Ditado** | Segure a tecla, fale, solte: o Deepgram transcreve e o texto aparece onde está o cursor. |
-| 🔀 **Troca de agentes** | Um toque vai para o próximo agente, primeiro para quem espera uma decisão sua ou acabou de terminar. |
-| 📋 **Menu de agentes** | Todos os agentes, com estado, recap, tempo, custo, tokens e as cotas do Claude e do Codex. |
-| 🦇 **Novo agente por voz** | *"Crie um agente no Windows com Codex no coreum para investigar o login"*: abre a sessão pronta, em qualquer máquina do tailnet. |
-| 🚨 **Sinal** | As teclas acendem vermelho quando um agente aguarda você e verde quando um termina; longe do Mac, chega um aviso no WhatsApp. |
-| 🎛️ **Knob** | Girar rola a página; apertar leva todos os agentes de volta ao fim da saída. |
-| ⌨️ **Sem o tecladinho** | Atalhos no teclado do Mac e um menu na barra de menus fazem tudo o que o macropad faz. |
+| 🎙️ **Dictation** | Hold a key, speak, release: Deepgram transcribes and the text lands at the cursor. |
+| 🔀 **Agent switching** | One key jumps to the next agent, first to the one waiting for your decision or the one that just finished. |
+| 📋 **Agent menu** | Every agent with its state, recap, time, cost and tokens, plus Claude and Codex plan quotas. |
+| 🦇 **New agent by voice** | *"Create an agent on Windows with Codex in coreum to look into the login"*: the session opens ready, on any machine of your tailnet. |
+| 🚨 **Signal** | Keys turn red when an agent waits for you and green when one finishes; away from the Mac, a WhatsApp message arrives. |
+| 🎛️ **Knob** | Turn to scroll; press to bring every agent back to the bottom of its output. |
+| ⌨️ **No keypad** | Mac keyboard shortcuts and a menu bar menu do everything the macropad does. |
 
-## As teclas
+## The keys
 
 ```
 ┌──────┬──────┬──────┐   ╭────╮
-│  0   │  1   │  2   │   │knob│  girar: rolar · apertar: agentes de volta ao fim
+│  0   │  1   │  2   │   │knob│  turn: scroll · press: agents back to the bottom
 │ Esc  │ menu │Delete│   ╰────╯
 ├──────┼──────┼──────┤
 │  3   │  4   │  5   │
-│ fala │agente│Return│
+│ talk │agent │Return│
 └──────┴──────┴──────┘
 ```
 
-- **3, segurar:** ditado (com o menu de agentes aberto, vira um comando de voz).
-- **4:** próximo agente, priorizando quem aguarda você.
-- **1:** menu de agentes. Toque navega, duplo toque abre.
-- **0, 2, 5:** Esc, Delete e Return, que repetem ao segurar.
-- **fn+F5:** push-to-talk no teclado do Mac. Um toque começa a gravar e outro para; segurar
-  grava até soltar. A F5 sozinha, a do microfone, continua com o Ditado do macOS, que não
-  a libera. Quem preferir a F5 sozinha pode ativar "Usar F1, F2 etc. como teclas de função
-  padrão" em Teclado; aí o microfone passa para fn+F5. Sons discretos marcam o início e o
-  fim da gravação (`"sounds": false` desliga).
+- **3, hold:** dictation (with the agent menu open, a voice command).
+- **4:** next agent, those waiting for you first.
+- **1:** agent menu. A tap moves, a double tap opens.
+- **0, 2, 5:** Esc, Delete and Return, repeating while held.
+- **fn+F5 on the Mac keyboard:** push-to-talk too. A tap starts and the next tap stops;
+  holding records until release. Plain F5, the microphone key, stays with macOS Dictation,
+  which never lets it go; turn on "Use F1, F2, etc. keys as standard function keys" to swap
+  them. Soft sounds mark the start and end of a recording.
 
-## Instalação
+## Install
 
-Precisa de macOS 14+, Xcode Command Line Tools, `zig` (`brew install zig`) e uma chave do
-[Deepgram](https://deepgram.com).
+Needs macOS 14+, the Xcode Command Line Tools, `zig` (`brew install zig`) and a
+[Deepgram](https://deepgram.com) API key.
 
 ```sh
 export DEEPGRAM_API_KEY=...
 curl -fsSL https://raw.githubusercontent.com/feliperun/agent-belt/main/scripts/update.sh | bash
 ```
 
-O comando baixa a última release e roda o `./install.sh` dela. De um clone do repositório,
-basta rodar `./install.sh`. O instalador:
+That downloads the latest release and runs its `./install.sh`; from a clone, run
+`./install.sh`. The installer:
 
-- compila e monta `~/Applications/Agent Belt.app`, assinado com o seu certificado Apple
-  Development quando houver um, o que faz as permissões sobreviverem às atualizações;
-- guarda a chave do Deepgram no Keychain;
-- registra o LaunchAgent `com.frb.agentbelt`, que sobe no login e reinicia se cair;
-- instala a CLI `agb` e as ferramentas `work`, `work-session` e `tm` em `~/.local/bin`.
+- builds `~/Applications/Agent Belt.app` and signs it with your Apple Development
+  certificate when there is one, so privacy grants survive updates;
+- stores the Deepgram key in the Keychain;
+- registers the `com.frb.agentbelt` LaunchAgent, which starts at login and restarts if it dies;
+- installs the `agb` CLI.
 
-Na primeira vez, autorize **Agent Belt** em
-[Monitoramento de Entrada](x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent) e
-[Acessibilidade](x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility).
-O [Microfone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone) é pedido no primeiro
-ditado. O daemon abre sozinho a lista que faltar, e `agb permissions` abre as três.
-`agb status` confirma se está tudo certo.
+The first time, allow **Agent Belt** in
+[Input Monitoring](x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent) and
+[Accessibility](x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility);
+[Microphone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone) is asked on the first
+dictation. The daemon opens whichever list is still missing, and `agb permissions` opens all
+three. `agb status` confirms everything is in place.
 
-## Agentes
+## Agents
 
 <p align="center">
-  <img src="assets/menu.png" width="440" alt="Menu de agentes">
+  <img src="assets/menu.png" width="440" alt="Agent menu">
 </p>
 
-O Agent Belt enxerga os agentes que estão rodando em terminais do Orca
-e em sessões tmux do `work`, esteja o tmux dentro do Orca ou em outro terminal. Para cada
-um, ele mostra:
+Agent Belt sees the agents running in Orca terminals and in `agb` tmux sessions, whether the
+tmux client is inside Orca or another terminal. For each one it shows:
 
-- **Estado:** 🔴 aguardando uma decisão sua (prompt de aprovação na tela), 🟢 terminou e
-  você ainda não viu, 🔵 trabalhando, ⚪ ocioso.
-- **Título e recap:** o título que o próprio Claude Code dá à sessão, e o resumo ou o último
-  pedido.
-- **Tempo, custo e tokens:** somados dos transcripts, incluindo subagentes, pelo preço de
-  lista.
-- **Cotas:** janela de 5 h e semanal do Claude e do Codex.
+- **State:** 🔴 waiting for your decision (an approval prompt on screen), 🟢 finished and not
+  seen yet, 🔵 working, ⚪ idle.
+- **Title and recap:** the title Claude Code gives the session, and its summary or last request.
+- **Time, cost and tokens:** summed from the transcripts, subagents included, at list prices.
+- **Quotas:** the 5-hour and weekly windows of Claude and Codex.
 
-Os detalhes e as fontes de cada dado estão em [docs/agent-stats.md](docs/agent-stats.md).
+Details and sources for each number are in [docs/agent-stats.md](docs/agent-stats.md).
 
-A tecla 4 e o menu levam ao agente escolhido: trocam a aba no Orca, restauram a janela se
-estiver minimizada e trazem o app para frente.
+The switch key and the menu take you to the chosen agent: they switch the Orca tab, restore a
+minimized window and bring the app forward.
 
-### Novo agente por voz
+### Sessions on any machine
 
-Com o menu aberto, segure a tecla de fala e peça. Um Claude Haiku (`claude -p`, com a sua
-conta) entende máquina, agente, repositório e tarefa. Em seguida, um terminal novo no Orca
-roda o `work` com a instrução como primeiro prompt. O mesmo funciona pelo terminal, e
-também para outro agente:
+`agb` also creates and manages the sessions themselves: a git worktree, a tmux session and an
+agent inside, on any machine of your tailnet. Closing the terminal kills nothing; attaching
+again resumes.
 
 ```sh
-agb new --dry-run crie um agente no windows com codex no coreum para investigar o login
-# work felipe-windows investigar-login coreum --agent codex --prompt 'Investigue…'
+agb new --task login --repo coreum --host felipe-windows --agent codex --prompt "look into the login"
+agb new create an agent here with claude in agent-belt to review the README   # plain words
+agb sessions            # interactive picker across all machines
+agb ls                  # the same list, as text
+agb attach <session> [machine]
+agb hosts · agb doctor · agb deploy --all
 ```
 
-## Luzes
+### New agent by voice
 
-| Estado | Teclas |
+With the agent menu open, hold the talk key and ask. A Claude Haiku (`claude -p`, with your
+account) works out machine, agent, repository and task, then a new Orca terminal runs
+`agb new` with the instruction as the agent's first prompt. Without the keypad, the menu bar
+menu has **New agent…**, where you type the same sentence.
+
+## Lights
+
+| State | Keys |
 |---|---|
-| gravando | branco fixo |
-| transcrevendo | ciano fixo |
-| um agente aguarda você | **vermelho** |
-| um agente terminou | **verde** |
-| nada pendente | escuras, com uma onda branca a cada toque |
+| recording | solid white |
+| transcribing | solid cyan |
+| an agent waits for you | **red** |
+| an agent finished | **green** |
+| nothing pending | dark, with a white wave on every press |
 
-O protocolo dos LEDs foi obtido por engenharia reversa do configurador do fabricante; está em
-[docs/led-protocol.md](docs/led-protocol.md). Para trocar à mão: `agb led <cor> <modo>`.
+The LED protocol was reverse-engineered from the vendor's configurator; it is in
+[docs/led-protocol.md](docs/led-protocol.md). `agb led <color> <mode>` sets them by hand.
 
-## Sem o tecladinho
+## Without the keypad
 
-| Atalho | Ação |
+| Shortcut | Action |
 |---|---|
-| `⌃⌥Espaço` | menu de agentes; repetir navega, `↩` abre, `Esc` fecha, `↑` `↓` movem |
-| `⌃⌥↑` | próximo agente |
-| `⌃⌥↓` | agentes de volta ao fim |
+| `⌃⌥Space` | agent menu; repeat to move, `↩` opens, `Esc` closes, `↑` `↓` move |
+| `⌃⌥↑` | next agent |
+| `⌃⌥↓` | agents back to the bottom |
+| fn+F5 | push-to-talk |
 
-Na barra de menus, a fivela ganha 🔴, 🟢, 🎙️ ou ⏳ conforme o estado, e um clique abre o
-menu de agentes com linhas clicáveis. Se um agente espera por você há 3 minutos e o Mac está
-parado, um aviso vai para o WhatsApp via `ford-send`.
+In the menu bar, the belt's buckle light shows the state: orange recording, cyan
+transcribing, red an agent waits for you, green one finished. A click opens a menu with the
+agents (click one to open it), **New agent…**, the quotas, updates, permissions and the log.
+If an agent has been waiting for you for 3 minutes while the Mac sits idle, a WhatsApp alert
+goes out through `ford-send`.
 
-## Configuração
+## Configuration
 
-A configuração vive no código: os padrões ficam em [`src/config.zig`](src/config.zig), e
-`./install.sh` regenera `~/.config/agent-belt/config.json` a partir deles (`--keep-config`
-preserva o arquivo). Também dá para mudar na hora:
+Configuration lives in code: defaults are in [`src/config.zig`](src/config.zig), and
+`./install.sh` regenerates `~/.config/agent-belt/config.json` from them (`--keep-config`
+keeps the file). It can also change on the fly:
 
 ```sh
-agb bind 0 key escape            # teclas: escape, delete, return, tab, shift+tab, cmd+k, a-z, 0-9…
+agb bind 0 key escape            # keys: escape, delete, return, tab, shift+tab, cmd+k, a-z, 0-9…
 agb bind 3 ptt                   # push-to-talk
-agb bind 4 agents                # próximo agente (agents desktop inclui Codex/Claude Desktop)
-agb bind 1 menu                  # menu de agentes
+agb bind 4 agents                # next agent (agents desktop adds Codex/Claude Desktop windows)
+agb bind 1 menu                  # agent menu
 agb bind 2 command 'open -a Calculator'
-agb bind 5 text 'Olá!'
+agb bind 5 text 'Hello!'
 ```
 
-Knob e LEDs: `"knob": "scroll"` ou `"system"` (volume), `"knob_scroll_lines": 3` (negativo
-inverte o sentido) e `"led": true`.
+Other settings: `"knob": "scroll"` or `"system"` (volume), `"knob_scroll_lines": 3` (negative
+inverts), `"led": true`, `"f5_push_to_talk": true` and `"sounds": true`.
 
 ## CLI
 
 ```
-agb status                      daemon, permissões, dispositivo, chave, log
-agb agents list|next|bottom     agentes com estado e stats · próximo · voltar ao fim
-agb new [--dry-run] <pedido>    cria um agente a partir de linguagem natural
-agb led <cor 0-7> <modo 0-5>    luzes à mão
-agb permissions                 abre as listas de privacidade do macOS
-agb version · agb update [tag]  versão · atualizar agora
-agb preview                     mostra a animação do ditado sem microfone
+agb status                        daemon, permissions, device, key, log
+agb agents list|next|bottom       agents with state and stats · next · back to the bottom
+agb new <words> | --task …        create an agent session (plain words or flags)
+agb sessions|ls|attach|hosts      agent sessions across machines
+agb doctor|adopt|deploy|tm        session engine housekeeping
+agb led <color 0-7> <mode 0-5>    lights by hand
+agb permissions                   open the macOS privacy lists
+agb version · agb update [tag]    version · update now
+agb preview                       show the dictation animation without a microphone
 ```
 
-## Atualizações
+## Updates
 
-A cada 6 h o Agent Belt consulta as releases no GitHub. Quando há uma versão nova, aparece
-uma notificação com as notas e o botão **Atualizar**, e o rodapé do menu avisa. O
-`agb update` faz o mesmo na hora. A atualização compila a release a partir do código e
-assina localmente, então as permissões continuam valendo.
+Every 6 hours Agent Belt checks the GitHub releases. A newer one shows a notification with
+its notes and an **Update** button, and the menus offer it too; `agb update` does it right
+away. Updating builds the release from source and signs it locally, so privacy grants keep
+working.
 
-As versões saem pelo [release-please](https://github.com/googleapis/release-please): cada
-commit `feat:`/`fix:` entra num PR de release, e o merge publica a tag, o
-[CHANGELOG](CHANGELOG.md) e um `.zip` do app.
+Versions come from [release-please](https://github.com/googleapis/release-please): every
+`feat:`/`fix:` commit joins a release PR, and merging it publishes the tag, the
+[CHANGELOG](CHANGELOG.md) and a zipped app.
 
-## work
+## How it works
 
-[`work/`](work/README.md) cria, em qualquer máquina do tailnet, uma sessão tmux com um
-worktree e um agente dentro. Fechar o terminal não mata nada: basta rodar `work` de novo
-para reanexar.
+- **Input:** a rootless HID monitor reads the macropad (VID `0x514c`, PID `0x8850`); a
+  CGEvent tap swallows the letters it would type, the knob's volume keys and the global
+  shortcuts.
+- **Dictation:** mono 16 kHz PCM in memory, sent to Deepgram (`nova-3`); the text is typed as
+  Unicode key events only after the overlay is gone.
+- **Agents:** Orca's `terminal list`, tmux clients (matched to Orca through
+  `ORCA_TERMINAL_HANDLE`), the titles agents write to the terminal and the transcripts in
+  `~/.claude`.
+- **Sessions:** the portable bash engine in [`work/`](work/README.md), which also runs on the
+  Linux and Windows machines.
+- **Lights:** vendor HID reports on the `0xFF00` interface.
 
-```sh
-work <tarefa> [repo]                          # aqui
-work <máquina> <tarefa> [repo] --codex        # em outra máquina
-work felipe-windows login coreum --prompt "investigue o login"
-```
+Architecture, vocabulary and decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/ABSTRACTIONS.md](docs/ABSTRACTIONS.md), [docs/adr/](docs/adr/README.md). Contributors
+and agents start at [AGENTS.md](AGENTS.md).
 
-Para instalar nas outras máquinas: `work/scripts/deploy.sh --all`.
-
-## Como funciona
-
-- **Captura:** um monitor HID sem root lê o macropad (VID `0x514c`, PID `0x8850`). Um
-  CGEvent tap engole as letras que ele digitaria e o volume do knob, e trata os atalhos
-  globais.
-- **Ditado:** PCM mono 16 kHz em memória, enviado ao Deepgram (`nova-3`). O texto é inserido
-  com eventos Unicode só depois que o overlay some.
-- **Agentes:** junta o `terminal list` do Orca, os clientes tmux (casados com o Orca pelo
-  `ORCA_TERMINAL_HANDLE`), os títulos que os agentes escrevem no terminal e os transcripts
-  em `~/.claude`.
-- **Luzes:** relatórios HID do fabricante na interface `0xFF00`.
-
-## Desenvolvimento
+## Development
 
 ```sh
 zig build -Doptimize=ReleaseSafe && zig build test
-AGENT_BELT_DEBUG_INPUT=1 zig-out/bin/agb daemon   # mostra cada tecla, knob e evento do tap
-tools/make-icon.sh        # regenera o ícone
-tools/render-overlay.sh   # regenera assets/overlay.gif
-tools/render-menu.sh      # regenera assets/menu.png
+sentrux check . && sentrux gate .                  # structural gate
+AGENT_BELT_DEBUG_INPUT=1 zig-out/bin/agb daemon    # every key, knob and tap event
+tools/make-icon.sh        # regenerate the icon
+tools/render-overlay.sh   # regenerate assets/overlay.gif
+tools/render-menu.sh      # regenerate assets/menu.png
 ```
 
-O log fica em `~/Library/Logs/agent-belt.log`. Para desinstalar: `./install.sh --uninstall`.
+The log is `~/Library/Logs/agent-belt.log`. To uninstall: `./install.sh --uninstall`.
 
 ---
 
-<sub>O nome é uma homenagem ao cinto de utilidades 🦇. O projeto não tem relação com a DC
-nem com a Warner.</sub>
+<sub>The name is a nod to the utility belt 🦇. This project is not affiliated with DC or
+Warner Bros.</sub>

@@ -1,28 +1,28 @@
-# Estatísticas e cotas dos agentes
+# Agent stats and quotas
 
-O menu de agentes mostra, por sessão, título, recap, tempo, custo e tokens, e as
-cotas dos planos no rodapé. Tudo vem de arquivos locais dos próprios agentes;
-nada é enviado nem autenticado. Código em `src/agent_stats.m`.
+The agents menu shows, per session, the title, recap, time, cost and tokens, and the
+plan quotas in the footer. Everything comes from the agents' own local files;
+nothing is sent or authenticated. Code in `src/agent_stats.m`.
 
-| Dado | Fonte |
+| Data | Source |
 |---|---|
-| sessão viva → transcript | `~/.claude/sessions/<pid>.json` (`sessionId`, `tmux` com o pane, `startedAt`, `parkedJobId`/`jobId` para sessões estacionadas em processo de fundo) |
-| casar com o terminal | pane do tmux (`%24`) ou `ORCA_TERMINAL_HANDLE` do processo |
-| título | último `custom-title`, senão `ai-title` do transcript |
-| recap | último `system/away_summary`, senão `last-prompt` |
-| tokens e custo | `message.usage` de cada `assistant`, **deduplicado por `message.id`** (uma linha por bloco, usage repetido), mais `subagents/*.jsonl`; preço de lista da Anthropic (tabela no código, 2026-09-23) |
-| tempo | `startedAt` do processo |
-| cota Claude | só existe no JSON que o Claude Code passa ao statusline: `~/.claude/statusline-command.sh` salva o último em `~/Library/Caches/agent-belt/claude-statusline.json` (`rate_limits.five_hour`/`seven_day`) |
-| cota Codex | último `token_count` com `rate_limits.primary` (5 h) e `secondary` (7 d) nos rollouts de `~/.codex/sessions` |
+| live session → transcript | `~/.claude/sessions/<pid>.json` (`sessionId`, `tmux` with the pane, `startedAt`, `parkedJobId`/`jobId` for sessions parked in a background process) |
+| match to the terminal | tmux pane (`%24`) or the process's `ORCA_TERMINAL_HANDLE` |
+| title | last `custom-title`, otherwise the transcript's `ai-title` |
+| recap | last `system/away_summary`, otherwise `last-prompt` |
+| tokens and cost | `message.usage` of each `assistant`, **deduplicated by `message.id`** (one line per block, repeated usage), plus `subagents/*.jsonl`; Anthropic list price (table in the code, 2026-09-23) |
+| time | the process's `startedAt` |
+| Claude quota | only exists in the JSON Claude Code passes to the statusline: `~/.claude/statusline-command.sh` saves the latest one to `~/Library/Caches/agent-belt/claude-statusline.json` (`rate_limits.five_hour`/`seven_day`) |
+| Codex quota | last `token_count` with `rate_limits.primary` (5 h) and `secondary` (7 d) in the rollouts under `~/.codex/sessions` |
 
-Os transcripts são lidos de forma incremental (offset por arquivo) e só as linhas
-com marcadores relevantes passam pelo parser. O custo é o equivalente em API:
-em planos de assinatura, não é cobrança.
+Transcripts are read incrementally (offset per file) and only lines with relevant
+markers go through the parser. The cost is the API equivalent:
+on subscription plans, it is not a charge.
 
-Sessões do Codex ainda não têm título/custo por sessão (o mapeamento processo →
-rollout não foi verificado com um Codex vivo); a cota do Codex aparece.
+Codex sessions don't have per-session title/cost yet (the process →
+rollout mapping hasn't been verified against a live Codex); the Codex quota does show.
 
-## Aviso no WhatsApp
+## WhatsApp alert
 
-Um agente aguardando uma decisão por 3 min, com o Mac sem uso por 2 min, gera uma
-mensagem via `ford-send` com o título da sessão, uma vez por espera.
+An agent waiting on a decision for 3 min, with the Mac idle for 2 min, triggers a
+message via `ford-send` with the session title, once per wait.
