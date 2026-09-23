@@ -93,7 +93,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
     var owned_value: ?[]const u8 = null;
     defer if (owned_value) |value| allocator.free(value);
     const value = switch (action) {
-        .disabled, .push_to_talk => "",
+        .disabled, .push_to_talk, .agents_menu => "",
         .cycle_agents => if (args.len > 2 and std.mem.eql(u8, args[2], "desktop")) "desktop" else if (args.len > 2) return usage() else "",
         .key => if (args.len == 3 and config.keyChord(args[2]) != null) args[2] else return usage(),
         .command, .script, .text => blk: {
@@ -106,6 +106,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
         .disabled => .{ .action = "disabled", .value = value },
         .push_to_talk => .{ .action = "push_to_talk", .value = value },
         .cycle_agents => .{ .action = "cycle_agents", .value = value },
+        .agents_menu => .{ .action = "agents_menu", .value = value },
         .key => .{ .action = "key", .value = value },
         .command => .{ .action = "command", .value = value },
         .script => .{ .action = "script", .value = value },
@@ -127,6 +128,7 @@ fn usage() !void {
         "  minikeyboard init\n" ++
         "  minikeyboard bind <a-f> ptt\n" ++
         "  minikeyboard bind <0-5|a-f> agents [desktop]\n" ++
+        "  minikeyboard bind <0-5|a-f> menu\n" ++
         "  minikeyboard bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
         "  minikeyboard bind <a-f> command <comando>\n" ++
         "  minikeyboard bind <a-f> script <comando-ou-script>\n" ++

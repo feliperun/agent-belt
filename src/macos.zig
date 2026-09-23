@@ -69,6 +69,10 @@ pub fn ledSet(vendor_id: u16, product_id: u16, color: u8, mode: u8) !void {
     };
 }
 
+pub fn agentsMenuPress() void {
+    c.mk_agents_menu_press();
+}
+
 pub fn agentsMonitor() void {
     c.mk_agents_monitor();
 }

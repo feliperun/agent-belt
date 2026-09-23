@@ -133,6 +133,13 @@ zig-out/bin/minikeyboard agents next
 zig-out/bin/minikeyboard agents bottom
 ```
 
+## Menu de agentes (tecla 1)
+
+Um toque abre um menu flutuante com todos os agentes e o estado de cada um: vermelho
+aguardando uma decisão sua, verde terminou, azul trabalhando, cinza ocioso. Ele já começa
+em quem mais precisa de você. Com o menu aberto, um toque desce para o próximo e um duplo
+toque rápido abre o destacado. Some sozinho depois de 6 s sem toques.
+
 ## Knob
 
 O knob chega como Consumer Control (volume +/− e mute). O daemon transforma:

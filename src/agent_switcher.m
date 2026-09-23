@@ -537,27 +537,38 @@ static void MKShowHud(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
     if (others) [detail appendFormat:@" · mais %lu pedindo atenção", (unsigned long)others];
     mk_hud_show(target.label.UTF8String, detail.UTF8String, (int)target.state);
 }
+// Focus succeeded: remember it, clear "finished", refresh HUD-less state.
+static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
+    [target.key writeToFile:MKLastKeyPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [mk_done removeObject:target.key]; // seen
+    if (target.state == MKStateDone) target.state = MKStateIdle;
+    MKUpdateLed(ring);
+    fprintf(stderr, "[minikeyboard] AGENT → %s\n", target.label.UTF8String);
+}
+
+// Discovery plus states, with each target's place in the ring.
+static NSArray<MKAgentTarget *> *MKRefreshRing(BOOL desktop) {
+    mk_ring = MKStableRing(mk_ring, MKDiscover(desktop));
+    for (NSUInteger i = 0; i < mk_ring.count; i++) mk_ring[i].position = i + 1;
+    MKObserve(mk_ring);
+    MKDetectWaiting(mk_ring);
+    return mk_ring;
+}
+
 static int MKCycle(BOOL desktop) {
     if (!AXIsProcessTrusted()) {
         fprintf(stderr, "[minikeyboard] alternar agents requer permissão de Accessibility\n");
         return -1;
     }
-    mk_ring = MKStableRing(mk_ring, MKDiscover(desktop));
+    MKRefreshRing(desktop);
     if (!mk_ring.count) { fprintf(stderr, "[minikeyboard] nenhum terminal com coding agent (Orca ou work)\n"); return -1; }
     NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
-    for (NSUInteger i = 0; i < mk_ring.count; i++) mk_ring[i].position = i + 1;
-    MKObserve(mk_ring);
-    MKDetectWaiting(mk_ring);
     NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
         MKAgentTarget *target = mk_ring[(start + offset) % mk_ring.count];
         if (!MKFocus(target)) continue; // app/tab may have closed after discovery
-        [target.key writeToFile:MKLastKeyPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        [mk_done removeObject:target.key]; // seen
-        if (target.state == MKStateDone) target.state = MKStateIdle;
+        MKOpened(target, mk_ring);
         MKShowHud(target, mk_ring);
-        MKUpdateLed(mk_ring);
-        fprintf(stderr, "[minikeyboard] AGENT → %s\n", target.label.UTF8String);
         return 0;
     }
     fprintf(stderr, "[minikeyboard] não consegui focar as sessões; confira Accessibility\n");
@@ -579,6 +590,94 @@ void mk_agents_next(int desktop) {
     dispatch_async(mk_agents_queue, ^{
         @autoreleasepool { MKCycle(desktop != 0); }
         atomic_fetch_sub(&pending, 1);
+    });
+}
+
+// Agent menu on one key: a press shows it, a later press moves the selection,
+// a quick double press opens the selected agent. A single press waits out the
+// double-press window before moving, so a double press opens what was
+// highlighted rather than the next row.
+typedef NS_ENUM(NSInteger, MKMenuAction) { MKMenuShow, MKMenuMove, MKMenuOpen };
+static const double mk_menu_double = 0.35, mk_menu_timeout = 6;
+
+static MKMenuAction MKMenuDecide(BOOL visible, double sinceLastPress) {
+    if (!visible) return MKMenuShow;
+    return sinceLastPress < mk_menu_double ? MKMenuOpen : MKMenuMove;
+}
+
+// Agents queue only.
+static NSArray<MKAgentTarget *> *mk_menu_ring;
+static NSUInteger mk_menu_selected;
+static BOOL mk_menu_visible;
+static double mk_menu_last_press = -1;
+static NSUInteger mk_menu_generation; // invalidates pending moves and timeouts
+
+static void MKMenuRender(void) {
+    NSUInteger count = mk_menu_ring.count;
+    const char *labels[count ? count : 1];
+    int tones[count ? count : 1];
+    for (NSUInteger i = 0; i < count; i++) {
+        labels[i] = mk_menu_ring[i].label.UTF8String;
+        tones[i] = (int)mk_menu_ring[i].state;
+    }
+    mk_menu_show(labels, tones, (int)count, (int)mk_menu_selected);
+}
+
+static void MKMenuClose(void) {
+    mk_menu_visible = NO;
+    mk_menu_generation++;
+    mk_menu_hide();
+}
+
+static void MKMenuArmTimeout(void) {
+    NSUInteger generation = ++mk_menu_generation;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(mk_menu_timeout * NSEC_PER_SEC)), mk_agents_queue, ^{
+        if (generation == mk_menu_generation && mk_menu_visible) MKMenuClose();
+    });
+}
+
+static void MKMenuPress(void) {
+    const double now = NSProcessInfo.processInfo.systemUptime;
+    const double since = mk_menu_last_press < 0 ? INFINITY : now - mk_menu_last_press;
+    mk_menu_last_press = now;
+    switch (MKMenuDecide(mk_menu_visible, since)) {
+    case MKMenuShow: {
+        if (!AXIsProcessTrusted()) { fprintf(stderr, "[minikeyboard] menu de agents requer Accessibility\n"); return; }
+        mk_menu_ring = MKRefreshRing(NO);
+        if (!mk_menu_ring.count) { mk_hud_show("Nenhum coding agent", "Orca ou work", 0); return; }
+        NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
+        mk_menu_selected = MKPickIndex(mk_menu_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
+        mk_menu_visible = YES;
+        MKMenuRender();
+        MKMenuArmTimeout();
+        return;
+    }
+    case MKMenuMove: {
+        NSUInteger generation = ++mk_menu_generation;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(mk_menu_double * NSEC_PER_SEC)), mk_agents_queue, ^{
+            if (generation != mk_menu_generation || !mk_menu_visible) return; // became a double press
+            mk_menu_selected = (mk_menu_selected + 1) % mk_menu_ring.count;
+            MKMenuRender();
+            MKMenuArmTimeout();
+        });
+        return;
+    }
+    case MKMenuOpen: {
+        mk_menu_last_press = -1; // a third quick press starts over
+        MKAgentTarget *target = mk_menu_ring[mk_menu_selected];
+        MKMenuClose();
+        if (MKFocus(target)) MKOpened(target, mk_menu_ring);
+        else mk_hud_show(target.label.UTF8String, "não consegui abrir; a sessão ainda existe?", 3);
+        return;
+    }
+    }
+}
+
+void mk_agents_menu_press(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, MKCreateAgentsQueue);
+    dispatch_async(mk_agents_queue, ^{
+        @autoreleasepool { MKMenuPress(); }
     });
 }
 

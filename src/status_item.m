@@ -341,11 +341,11 @@ int mk_status_preview(void) {
     [mk_ink(0.16) setStroke];
     shell.lineWidth = 0.75;
     [shell stroke];
-    // Amber waits for you, green finished, blue works, grey idles.
+    // Red waits for you, green finished, blue works, grey idles (as the key LEDs).
     NSColor *dot = @[mk_ink(0.35),
                      [NSColor colorWithSRGBRed:0.45 green:0.66 blue:1.0 alpha:1],
                      [NSColor colorWithSRGBRed:0.42 green:0.86 blue:0.6 alpha:1],
-                     [NSColor colorWithSRGBRed:1.0 green:0.72 blue:0.32 alpha:1]][MAX(0, MIN(3, self.tone))];
+                     [NSColor colorWithSRGBRed:1.0 green:0.42 blue:0.38 alpha:1]][MAX(0, MIN(3, self.tone))];
     const NSRect dotRect = NSMakeRect(20, NSMidY(self.bounds) - 4, 8, 8);
     [[dot colorWithAlphaComponent:0.22] setFill];
     [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(dotRect, -4, -4)] fill];
@@ -423,5 +423,127 @@ void mk_hud_show(const char *title, const char *detail, int tone) {
             });
         }
     });
+    CFRunLoopWakeUp(mk_status_runloop);
+}
+
+// Agent menu: every agent with its state; the selection moves with the key.
+static NSColor *mk_tone(int tone) {
+    return @[mk_ink(0.35),
+             [NSColor colorWithSRGBRed:0.45 green:0.66 blue:1.0 alpha:1],
+             [NSColor colorWithSRGBRed:0.42 green:0.86 blue:0.6 alpha:1],
+             [NSColor colorWithSRGBRed:1.0 green:0.42 blue:0.38 alpha:1]][MAX(0, MIN(3, tone))];
+}
+
+@interface MKMenuView : NSView
+@property(nonatomic, copy) NSArray<NSString *> *labels;
+@property(nonatomic, copy) NSArray<NSNumber *> *tones;
+@property(nonatomic) NSInteger selected;
+@end
+
+static const CGFloat mk_menu_width = 330, mk_menu_row = 32, mk_menu_header = 34, mk_menu_pad = 8;
+
+@implementation MKMenuView
+- (BOOL)isOpaque { return NO; }
+- (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    NSBezierPath *shell = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 2, 2) xRadius:18 yRadius:18];
+    NSGradient *surface = [[NSGradient alloc]
+        initWithStartingColor:[NSColor colorWithSRGBRed:0.115 green:0.125 blue:0.16 alpha:0.98]
+                  endingColor:[NSColor colorWithSRGBRed:0.065 green:0.075 blue:0.1 alpha:0.98]];
+    [surface drawInBezierPath:shell angle:90];
+    [mk_ink(0.16) setStroke];
+    shell.lineWidth = 0.75;
+    [shell stroke];
+
+    NSMutableParagraphStyle *clip = [NSMutableParagraphStyle new];
+    clip.lineBreakMode = NSLineBreakByTruncatingTail;
+    NSMutableParagraphStyle *right = [clip mutableCopy];
+    right.alignment = NSTextAlignmentRight;
+    [@"Agentes" drawInRect:NSMakeRect(18, 11, 120, 16) withAttributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:11.5 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: mk_ink(0.6)}];
+    [@"toque: próximo · 2×: abrir" drawInRect:NSMakeRect(130, 12, mk_menu_width - 148, 14) withAttributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:10 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: mk_ink(0.38), NSParagraphStyleAttributeName: right}];
+
+    NSArray *states = @[@"ocioso", @"trabalhando", @"terminou", @"aguardando você"];
+    for (NSUInteger i = 0; i < self.labels.count; i++) {
+        const CGFloat y = mk_menu_header + i * mk_menu_row;
+        const int tone = self.tones[i].intValue;
+        const BOOL selected = (NSInteger)i == self.selected;
+        if (selected) {
+            [mk_ink(0.1) setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(mk_menu_pad, y + 2, mk_menu_width - 2 * mk_menu_pad, mk_menu_row - 4)
+                                             xRadius:10 yRadius:10] fill];
+        }
+        NSColor *dot = mk_tone(tone);
+        const NSRect dotRect = NSMakeRect(20, y + mk_menu_row / 2 - 4, 8, 8);
+        if (tone >= 2) {
+            [[dot colorWithAlphaComponent:0.22] setFill];
+            [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(dotRect, -4, -4)] fill];
+        }
+        [dot setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:dotRect] fill];
+        [self.labels[i] drawInRect:NSMakeRect(40, y + 8, mk_menu_width - 160, 17) withAttributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:selected ? NSFontWeightSemibold : NSFontWeightMedium],
+            NSForegroundColorAttributeName: mk_ink(selected ? 0.97 : 0.78), NSParagraphStyleAttributeName: clip}];
+        [states[MAX(0, MIN(3, tone))] drawInRect:NSMakeRect(mk_menu_width - 128, y + 9, 108, 15) withAttributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:10.5 weight:NSFontWeightMedium],
+            NSForegroundColorAttributeName: tone >= 2 ? dot : mk_ink(0.42), NSParagraphStyleAttributeName: right}];
+    }
+}
+@end
+
+static NSPanel *mk_menu_panel;
+static MKMenuView *mk_menu_view;
+
+void mk_menu_show(const char *const *labels, const int *tones, int count, int selected) {
+    if (!mk_status_runloop) return;
+    NSMutableArray *labelList = [NSMutableArray array], *toneList = [NSMutableArray array];
+    for (int i = 0; i < count; i++) {
+        [labelList addObject:@(labels[i])];
+        [toneList addObject:@(tones[i])];
+    }
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        @autoreleasepool {
+            const CGFloat height = mk_menu_header + count * mk_menu_row + mk_menu_pad;
+            if (!mk_menu_panel) {
+                mk_menu_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, mk_menu_width, height)
+                    styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                    backing:NSBackingStoreBuffered defer:NO];
+                mk_menu_panel.opaque = NO;
+                mk_menu_panel.backgroundColor = [NSColor clearColor];
+                mk_menu_panel.hasShadow = YES;
+                mk_menu_panel.level = NSStatusWindowLevel;
+                mk_menu_panel.ignoresMouseEvents = YES;
+                mk_menu_panel.hidesOnDeactivate = NO;
+                mk_menu_panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                                   NSWindowCollectionBehaviorFullScreenAuxiliary;
+                mk_menu_view = [[MKMenuView alloc] initWithFrame:NSMakeRect(0, 0, mk_menu_width, height)];
+                mk_menu_panel.contentView = mk_menu_view;
+            }
+            [mk_hud_panel orderOut:nil]; // the menu already says it all
+            mk_menu_view.labels = labelList;
+            mk_menu_view.tones = toneList;
+            mk_menu_view.selected = selected;
+            [mk_menu_view setNeedsDisplay:YES];
+            NSScreen *screen = [NSScreen mainScreen];
+            const NSPoint mouse = [NSEvent mouseLocation];
+            for (NSScreen *candidate in [NSScreen screens])
+                if (NSPointInRect(mouse, candidate.frame)) { screen = candidate; break; }
+            const NSRect visible = screen.visibleFrame;
+            [mk_menu_panel setFrame:NSMakeRect(NSMaxX(visible) - mk_menu_width - 18, NSMaxY(visible) - height - 14,
+                                               mk_menu_width, height) display:YES];
+            mk_menu_panel.alphaValue = 1;
+            [mk_menu_panel orderFrontRegardless];
+        }
+    });
+    CFRunLoopWakeUp(mk_status_runloop);
+}
+
+void mk_menu_hide(void) {
+    if (!mk_status_runloop) return;
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{ [mk_menu_panel orderOut:nil]; });
     CFRunLoopWakeUp(mk_status_runloop);
 }

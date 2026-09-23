@@ -40,6 +40,7 @@ const Daemon = struct {
             .disabled => {},
             .push_to_talk => try self.handlePushToTalk(event),
             .cycle_agents => if (event.pressed) macos.cycleAgents(std.mem.eql(u8, binding.value, "desktop")),
+            .agents_menu => if (event.pressed) macos.agentsMenuPress(),
             .key => macos.pressKey(@import("config.zig").keyChord(binding.value) orelse return error.UnknownKey, event.pressed),
             .command => if (event.pressed) try runShell(self.io, binding.value),
             .script => if (event.pressed) try runShell(self.io, binding.value),

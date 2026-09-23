@@ -4,6 +4,7 @@ pub const ActionType = enum {
     disabled,
     push_to_talk,
     cycle_agents,
+    agents_menu,
     key,
     command,
     script,
@@ -31,7 +32,7 @@ pub const Config = struct {
     led: bool = true,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
-        .{ .action = "key", .value = "shift+tab" },
+        .{ .action = "agents_menu" },
         .{ .action = "key", .value = "delete" },
         .{ .action = "push_to_talk" },
         .{ .action = "cycle_agents" },
@@ -107,7 +108,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"led\": true,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
-        "    {\"action\": \"key\", \"value\": \"shift+tab\"},\n" ++
+        "    {\"action\": \"agents_menu\", \"value\": \"\"},\n" ++
         "    {\"action\": \"key\", \"value\": \"delete\"},\n" ++
         "    {\"action\": \"push_to_talk\", \"value\": \"\"},\n" ++
         "    {\"action\": \"cycle_agents\", \"value\": \"\"},\n" ++
@@ -127,6 +128,7 @@ pub fn actionType(name: []const u8) !ActionType {
     if (std.mem.eql(u8, name, "disabled")) return .disabled;
     if (std.mem.eql(u8, name, "ptt") or std.mem.eql(u8, name, "push_to_talk")) return .push_to_talk;
     if (std.mem.eql(u8, name, "agents") or std.mem.eql(u8, name, "cycle_agents")) return .cycle_agents;
+    if (std.mem.eql(u8, name, "menu") or std.mem.eql(u8, name, "agents_menu")) return .agents_menu;
     if (std.mem.eql(u8, name, "key")) return .key;
     if (std.mem.eql(u8, name, "command")) return .command;
     if (std.mem.eql(u8, name, "script")) return .script;
@@ -222,7 +224,7 @@ test "numbered keys are zero-based aliases and agents action is configurable" {
     try std.testing.expectEqual(ActionType.cycle_agents, try actionType("cycle_agents"));
 }
 
-test "default JSON and struct agree: Esc 0, Shift+Tab 1, Delete 2, PTT 3, agents 4, Return 5" {
+test "default JSON and struct agree: Esc 0, menu 1, Delete 2, PTT 3, agents 4, Return 5" {
     const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, defaultConfigJson(), .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
@@ -233,7 +235,8 @@ test "default JSON and struct agree: Esc 0, Shift+Tab 1, Delete 2, PTT 3, agents
         const action = try actionType(actual.action);
         try std.testing.expectEqualStrings(expected.value, actual.value);
         try std.testing.expectEqual(switch (index) {
-            0, 1, 2, 5 => ActionType.key,
+            0, 2, 5 => ActionType.key,
+            1 => ActionType.agents_menu,
             3 => ActionType.push_to_talk,
             4 => ActionType.cycle_agents,
             else => ActionType.disabled,

@@ -4,6 +4,8 @@
 void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
 void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (void)tone; } // status_item.m
 void mk_led_agents(int attention) { (void)attention; } // led.m
+void mk_menu_show(const char *const *l, const int *t, int c, int s) { (void)l; (void)t; (void)c; (void)s; }
+void mk_menu_hide(void) {}
 
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     MKAgentTarget *t = [MKAgentTarget new];
@@ -89,6 +91,12 @@ int main(void) {
         assert(!MKSessionTabGroup(@"Período"));
         assert(!MKSessionTabGroup(@"Visualização de estatísticas"));
 
+        assert(MKMenuDecide(NO, INFINITY) == MKMenuShow);
+        assert(MKMenuDecide(NO, 0.1) == MKMenuShow);   // hidden: any press shows
+        assert(MKMenuDecide(YES, 1.0) == MKMenuMove);
+        assert(MKMenuDecide(YES, 0.2) == MKMenuOpen);  // quick second press
+        assert(MKMenuDecide(YES, 0.35) == MKMenuMove); // window is exclusive
+
         assert(MKTitleWorking(@"◐ Refatorar"));
         assert(MKTitleWorking(@"⠋ build"));
         assert(!MKTitleWorking(@"✳ Refatorar"));
@@ -127,6 +135,6 @@ int main(void) {
         w.state = y.state = MKStateIdle;
         assert(MKPickIndex(agentRing, @"x", @"orca") == 2); // plain ring order
 
-        puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states and priority OK");
+        puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states, priority and menu presses OK");
     }
 }

@@ -21,6 +21,10 @@ void mk_scroll_down(int32_t lines);
 int mk_system_media_key(const void *event, int *key, int *pressed);
 void mk_agents_bottom(void);
 void mk_agents_monitor(void);
+void mk_agents_menu_press(void);
+/* Agent menu overlay; tones as mk_hud_show. */
+void mk_menu_show(const char *const *labels, const int *tones, int count, int selected);
+void mk_menu_hide(void);
 void mk_led_start(uint16_t vendor_id, uint16_t product_id);
 void mk_led_status(int status);
 /* 0 nothing, 1 an agent finished, 2 an agent waits for you */
