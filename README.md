@@ -5,13 +5,13 @@ Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráve
 ## Estado atual
 
 - monitoramento do teclado HID `VID=0x514c`, `PID=0x8850`;
-- seis teclas (`a` a `f`) descobertas pelo uso HID `0x07/0x04..0x09`;
-- `a` configurada como push-to-talk por padrão;
+- seis teclas (`a` a `f`, ou `0` a `5`) descobertas pelo uso HID `0x07/0x04..0x09`;
+- tecla `3` (`d`) como push-to-talk e tecla `4` (`e`) alternando coding agents por padrão;
 - gravação PCM mono 16 kHz em memória, empacotada como WAV;
 - transcrição via Deepgram REST (`nova-3`, `smart_format` e `mip_opt_out`);
 - inserção do resultado no aplicativo em foco usando eventos Unicode do macOS;
 - cápsula flutuante no canto superior direito, com ondas que respondem ao áudio e se transformam em traços de texto durante a transcrição;
-- bindings de `ptt`, `command`, `script`, `text` e `disabled`;
+- bindings de `ptt`, `agents`, `command`, `script`, `text` e `disabled`;
 - instalação opcional como LaunchAgent;
 - indicador na barra de menus: `🔴 REC` enquanto grava, `⏳` durante a transcrição e `⚠︎` em caso de erro.
 
@@ -77,6 +77,7 @@ zig-out/bin/minikeyboard bind b command 'open -a Calculator'
 zig-out/bin/minikeyboard bind c script '/Users/frb/bin/meu-script.sh'
 zig-out/bin/minikeyboard bind d text 'Olá!'
 zig-out/bin/minikeyboard bind e disabled
+zig-out/bin/minikeyboard bind 4 agents
 ```
 
 Para rodar no login, compile o binário e execute `zig-out/bin/minikeyboard install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
@@ -88,3 +89,21 @@ suprimir os eventos `a`–`f` correlacionados ao minikeyboard, evitando que eles
 também sejam digitados no aplicativo ativo.
 Após soltar uma tecla, ele mantém a supressão por 100 ms para absorver eventos
 de repetição atrasados do macOS.
+
+## Alternar coding agents
+
+A ação `agents` funciona como um alt-tab entre terminais com agentes rodando:
+
+- terminais do Orca em que o próprio Orca reconhece um agente;
+- terminais do Orca anexados a uma sessão tmux do `work` (o daemon lê `ORCA_TERMINAL_HANDLE` do cliente `tmux attach`);
+- sessões do `work` anexadas em outro app de terminal, que vem para frente.
+
+Uma sessão só conta enquanto algum pane roda `claude`, `codex`, `opencode`, `gemini` etc.;
+se o agente encerrar, ela sai do anel. A ordem é estável e a posição fica em
+`~/Library/Caches/minikeyboard/last-agent`. Para incluir também as janelas do Codex e
+do Claude Desktop: `bind 4 agents desktop`. Requer Accessibility.
+
+```sh
+zig-out/bin/minikeyboard agents list
+zig-out/bin/minikeyboard agents next
+```

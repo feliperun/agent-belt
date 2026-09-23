@@ -11,6 +11,7 @@ const Daemon = struct {
     recording: ?macos.Recorder = null,
     recording_key: ?usize = null,
     busy: bool = false,
+    keys: @import("key_edges.zig").KeyEdges = .{},
 
     fn onHidEvent(context: *anyopaque, event: macos.HidEvent) void {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
@@ -21,11 +22,13 @@ const Daemon = struct {
     }
 
     fn handleEvent(self: *Daemon, event: macos.HidEvent) !void {
+        if (!self.keys.update(event.key, event.pressed)) return;
         const binding = self.config.bindings[event.key];
         const action = @import("config.zig").actionType(binding.action) catch .disabled;
         switch (action) {
             .disabled => {},
             .push_to_talk => try self.handlePushToTalk(event),
+            .cycle_agents => if (event.pressed) macos.cycleAgents(std.mem.eql(u8, binding.value, "desktop")),
             .command => if (event.pressed) try runShell(self.io, binding.value),
             .script => if (event.pressed) try runShell(self.io, binding.value),
             .text => if (event.pressed) try macos.insertText(binding.value),

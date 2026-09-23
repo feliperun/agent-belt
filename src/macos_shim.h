@@ -19,6 +19,8 @@ int mk_status_init(void);
 void mk_status_set(int status);
 int mk_status_dismiss(void);
 int mk_status_preview(void);
+void mk_agents_next(int desktop);
+int mk_agents_command(int next, int desktop);
 uint64_t mk_monotonic_ns(void);
 
 typedef struct mk_recorder mk_recorder;

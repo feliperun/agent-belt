@@ -21,6 +21,10 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-fobjc-arc"},
     });
     exe.root_module.addIncludePath(b.path("src"));
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/agent_switcher.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
 
     exe.root_module.linkFramework("CoreFoundation", .{});
     exe.root_module.linkFramework("CoreGraphics", .{});
@@ -28,6 +32,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkFramework("AudioToolbox", .{});
     exe.root_module.linkFramework("IOKit", .{});
     exe.root_module.linkFramework("AppKit", .{});
+    exe.root_module.linkFramework("ApplicationServices", .{});
 
     b.installArtifact(exe);
 
@@ -50,5 +55,26 @@ pub fn build(b: *std.Build) void {
     overlay_test.root_module.linkFramework("AppKit", .{});
     overlay_test.root_module.linkFramework("CoreFoundation", .{});
     const test_cmd = b.addRunArtifact(overlay_test);
-    b.step("test", "Test overlay placement, audio response and dismissal (macOS GUI)").dependOn(&test_cmd.step);
+    const test_step = b.step("test", "Test bindings, agent switching and overlay (macOS GUI)");
+    test_step.dependOn(&test_cmd.step);
+    const agent_test = b.addExecutable(.{
+        .name = "agent-switcher-test",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    agent_test.root_module.addCSourceFile(.{
+        .file = b.path("tests/agent_switcher_test.m"),
+        .flags = &.{ "-fobjc-arc", "-UNDEBUG" },
+    });
+    agent_test.root_module.addIncludePath(b.path("src"));
+    agent_test.root_module.linkFramework("AppKit", .{});
+    agent_test.root_module.linkFramework("ApplicationServices", .{});
+    test_step.dependOn(&b.addRunArtifact(agent_test).step);
+    inline for (.{ "src/config.zig", "src/key_edges.zig" }) |path| {
+        const unit_test = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(path), .target = target, .optimize = optimize,
+            }),
+        });
+        test_step.dependOn(&b.addRunArtifact(unit_test).step);
+    }
 }

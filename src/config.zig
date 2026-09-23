@@ -3,6 +3,7 @@ const std = @import("std");
 pub const ActionType = enum {
     disabled,
     push_to_talk,
+    cycle_agents,
     command,
     script,
     text,
@@ -22,11 +23,11 @@ pub const Config = struct {
     deepgram_smart_format: bool = true,
     deepgram_mip_opt_out: bool = true,
     bindings: [6]Binding = .{
+        .{},
+        .{},
+        .{},
         .{ .action = "push_to_talk" },
-        .{},
-        .{},
-        .{},
-        .{},
+        .{ .action = "cycle_agents" },
         .{},
     },
 };
@@ -95,26 +96,55 @@ pub fn defaultConfigJson() []const u8 {
         "  \"deepgram_smart_format\": true,\n" ++
         "  \"deepgram_mip_opt_out\": true,\n" ++
         "  \"bindings\": [\n" ++
+        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
+        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
+        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
         "    {\"action\": \"push_to_talk\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
+        "    {\"action\": \"cycle_agents\", \"value\": \"\"},\n" ++
         "    {\"action\": \"disabled\", \"value\": \"\"}\n" ++
         "  ]\n" ++
         "}\n";
 }
 
 pub fn bindingIndex(key: []const u8) !usize {
-    if (key.len != 1 or key[0] < 'a' or key[0] > 'f') return error.InvalidKey;
-    return key[0] - 'a';
+    if (key.len != 1) return error.InvalidKey;
+    if (key[0] >= 'a' and key[0] <= 'f') return key[0] - 'a';
+    if (key[0] >= '0' and key[0] <= '5') return key[0] - '0';
+    return error.InvalidKey;
 }
 
 pub fn actionType(name: []const u8) !ActionType {
     if (std.mem.eql(u8, name, "disabled")) return .disabled;
     if (std.mem.eql(u8, name, "ptt") or std.mem.eql(u8, name, "push_to_talk")) return .push_to_talk;
+    if (std.mem.eql(u8, name, "agents") or std.mem.eql(u8, name, "cycle_agents")) return .cycle_agents;
     if (std.mem.eql(u8, name, "command")) return .command;
     if (std.mem.eql(u8, name, "script")) return .script;
     if (std.mem.eql(u8, name, "text")) return .text;
     return error.InvalidAction;
+}
+
+test "numbered keys are zero-based aliases and agents action is configurable" {
+    for ("012345", "abcdef", 0..) |digit, letter, index| {
+        try std.testing.expectEqual(index, try bindingIndex(&.{digit}));
+        try std.testing.expectEqual(index, try bindingIndex(&.{letter}));
+    }
+    try std.testing.expectError(error.InvalidKey, bindingIndex("6"));
+    try std.testing.expectError(error.InvalidKey, bindingIndex(""));
+    try std.testing.expectError(error.InvalidKey, bindingIndex("00"));
+    try std.testing.expectEqual(ActionType.cycle_agents, try actionType("agents"));
+    try std.testing.expectEqual(ActionType.cycle_agents, try actionType("cycle_agents"));
+}
+
+test "default JSON and struct agree on PTT 3 and agents 4" {
+    const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, defaultConfigJson(), .{});
+    defer parsed.deinit();
+    for ((Config{}).bindings, parsed.value.bindings, 0..) |expected, actual, index| {
+        try std.testing.expectEqualStrings(expected.action, actual.action);
+        const action = try actionType(actual.action);
+        try std.testing.expectEqual(switch (index) {
+            3 => ActionType.push_to_talk,
+            4 => ActionType.cycle_agents,
+            else => ActionType.disabled,
+        }, action);
+    }
 }

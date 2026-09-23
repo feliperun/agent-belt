@@ -34,6 +34,14 @@ pub fn previewOverlay() !void {
     if (c.mk_status_preview() != 0) return error.OverlayPreviewFailed;
 }
 
+pub fn cycleAgents(desktop: bool) void {
+    c.mk_agents_next(@intFromBool(desktop));
+}
+
+pub fn agentsCommand(next: bool, desktop: bool) !void {
+    if (c.mk_agents_command(@intFromBool(next), @intFromBool(desktop)) != 0) return error.AgentSwitchFailed;
+}
+
 pub const HidListener = struct {
     allocator: std.mem.Allocator,
     vendor_id: u16,

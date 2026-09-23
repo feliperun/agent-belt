@@ -37,6 +37,15 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, argv[1], "agents")) {
+        if (argc != 3 and argc != 4) return usage();
+        const desktop = argc == 4 and std.mem.eql(u8, argv[3], "desktop");
+        if (argc == 4 and !desktop) return usage();
+        if (std.mem.eql(u8, argv[2], "list")) return macos.agentsCommand(false, desktop);
+        if (std.mem.eql(u8, argv[2], "next")) return macos.agentsCommand(true, desktop);
+        return usage();
+    }
+
     if (std.mem.eql(u8, argv[1], "bind")) {
         try bindCommand(allocator, store, argv[2..argc]);
         return;
@@ -70,6 +79,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
     defer if (owned_value) |value| allocator.free(value);
     const value = switch (action) {
         .disabled, .push_to_talk => "",
+        .cycle_agents => if (args.len > 2 and std.mem.eql(u8, args[2], "desktop")) "desktop" else if (args.len > 2) return usage() else "",
         .command, .script, .text => blk: {
             const joined = try joinArgs(allocator, args[2..]);
             owned_value = joined;
@@ -79,6 +89,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
     cfg.bindings[index] = switch (action) {
         .disabled => .{ .action = "disabled", .value = value },
         .push_to_talk => .{ .action = "push_to_talk", .value = value },
+        .cycle_agents => .{ .action = "cycle_agents", .value = value },
         .command => .{ .action = "command", .value = value },
         .script => .{ .action = "script", .value = value },
         .text => .{ .action = "text", .value = value },
@@ -132,6 +143,7 @@ fn usage() !void {
         "uso:\n" ++
         "  minikeyboard init\n" ++
         "  minikeyboard bind <a-f> ptt\n" ++
+        "  minikeyboard bind <0-5|a-f> agents [desktop]\n" ++
         "  minikeyboard bind <a-f> command <comando>\n" ++
         "  minikeyboard bind <a-f> script <comando-ou-script>\n" ++
         "  minikeyboard bind <a-f> text <texto>\n" ++
@@ -139,6 +151,7 @@ fn usage() !void {
         "  minikeyboard devices\n" ++
         "  minikeyboard daemon\n" ++
         "  minikeyboard preview\n" ++
+        "  minikeyboard agents <list|next> [desktop]\n" ++
         "  minikeyboard install\n", .{});
     return error.InvalidArguments;
 }
