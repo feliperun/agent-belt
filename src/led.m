@@ -10,7 +10,8 @@
 //   03 FE B0 01 08 00 00 00 00 00 01 00 <c<<4|m>  300 ms later
 // Every LED write is persisted by the firmware, so identical writes are skipped.
 
-enum { MKLedRed = 1, MKLedOrange, MKLedYellow, MKLedGreen, MKLedCyan, MKLedBlue, MKLedPurple };
+// Color 0 is white in reactive mode and off in static mode.
+enum { MKLedWhite = 0, MKLedRed, MKLedOrange, MKLedYellow, MKLedGreen, MKLedCyan, MKLedBlue, MKLedPurple };
 enum { MKModeOff = 0, MKModeStatic = 1, MKModeReactive = 2 };
 static const useconds_t mk_led_gap = 300 * 1000; // shorter gaps are dropped silently
 
@@ -56,13 +57,13 @@ static int mk_led_agents_value;          // 0 nothing, 1 an agent finished, 2 an
 static int mk_led_applied = -1;
 static uint16_t mk_led_vendor, mk_led_product;
 
-// Priority: recording > transcribing > waiting > finished > reactive base.
+// Priority: recording > transcribing > waiting > finished > white reactive base.
 static int MKLedWanted(void) {
     if (mk_led_status_value == 1) return -2; // animated
     if (mk_led_status_value == 2) return MKLedCyan << 4 | MKModeStatic;
     if (mk_led_agents_value == 2) return MKLedRed << 4 | MKModeStatic;
     if (mk_led_agents_value == 1) return MKLedGreen << 4 | MKModeStatic;
-    return MKLedCyan << 4 | MKModeReactive;
+    return MKLedWhite << 4 | MKModeReactive;
 }
 
 static void *MKLedWorker(void *unused) {

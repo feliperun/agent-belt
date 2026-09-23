@@ -34,7 +34,7 @@ LED já é persistido (a cor sobrevive a desplugar). Cada troca grava a flash.
 | 12 | `cor<<4 \| modo` | |
 
 Cores (tabela do app): `1` vermelho, `2` laranja, `3` amarelo, `4` verde,
-`5` ciano, `6` azul, `7` roxo. Cor `0` apaga.
+`5` ciano, `6` azul, `7` roxo. Cor `0` apaga no modo fixo e é **branco** no modo reativo.
 
 Modos, como observados neste exemplar (o manual diz outra coisa para 2 e 3):
 
@@ -42,7 +42,7 @@ Modos, como observados neste exemplar (o manual diz outra coisa para 2 e 3):
 |---|---|
 | 0 | apagado |
 | 1 | cor fixa |
-| 2 | reativo: apagado; uma onda da cor passa ao apertar e ao soltar uma tecla |
+| 2 | reativo: apagado; uma onda da cor passa ao apertar e ao soltar uma tecla (cor 0 = branca) |
 | 5 | branco fixo |
 
 Os modos 3 e 4 não foram testados. Não há arco-íris no firmware; o daemon faz a
@@ -63,5 +63,5 @@ Do mesmo canal, segundo outros projetos para este VID:PID:
 `src/led.m`: uma thread aplica sempre o último estado desejado e pula escritas
 repetidas. Prioridade: gravando (arco-íris) > transcrevendo (ciano fixo) >
 agente aguardando você (vermelho) > agente terminou e não foi visto (verde) >
-base (ciano reativo). `"led": false` na config desliga. Manual:
+base (onda branca reativa, `02`). `"led": false` na config desliga. Manual:
 `minikeyboard led <cor> <modo>`.
