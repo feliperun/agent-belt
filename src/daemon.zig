@@ -75,10 +75,8 @@ const Daemon = struct {
         defer self.allocator.free(wav);
         if (wav.len <= 44) return error.EmptyRecording;
 
-        var env_name: [256]u8 = undefined;
-        const env_name_z = std.fmt.bufPrintZ(&env_name, "{s}", .{self.config.deepgram_api_key_env}) catch return error.DeepgramApiKeyMissing;
-        const api_key_ptr = std.c.getenv(env_name_z) orelse return error.DeepgramApiKeyMissing;
-        const api_key = std.mem.span(api_key_ptr);
+        const api_key = try macos.deepgramKey(self.allocator, self.config.deepgram_api_key_env);
+        defer self.allocator.free(api_key);
         const dg = deepgram.Client{
             .io = self.io,
             .allocator = self.allocator,
@@ -102,6 +100,11 @@ const Daemon = struct {
 };
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
+    macos.singleInstance() catch |err| {
+        std.debug.print("[minikeyboard] outro daemon já está rodando (launchctl print gui/$UID/com.frb.minikeyboard)\n", .{});
+        return err;
+    };
+    macos.waitPermissions();
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
     // "system" leaves the knob as the device's volume control.
     macos.setKnobIntercept(!std.mem.eql(u8, config.knob, "system"));

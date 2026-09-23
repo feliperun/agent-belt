@@ -2,6 +2,24 @@
 
 Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráveis.
 
+## Instalação
+
+```sh
+./install.sh
+```
+
+Compila, empacota em `~/Applications/Minikeyboard.app` (assinado com o seu certificado
+Apple Development, para as permissões sobreviverem a cada atualização), guarda
+`DEEPGRAM_API_KEY` no Keychain e registra o LaunchAgent `com.frb.minikeyboard`, que sobe
+no login e renasce se cair. Na primeira vez, autorize "Minikeyboard" em Monitoramento de
+Entrada e Acessibilidade; o daemon espera até lá. O Microfone é pedido no primeiro
+push-to-talk.
+
+A configuração vem do código: edite os padrões em `src/config.zig` e rode `./install.sh`
+de novo, que regenera `~/.config/minikeyboard/config.json` (`--keep-config` preserva o
+arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica em
+`~/Library/Logs/minikeyboard.log` e o CLI em `~/.local/bin/minikeyboard`.
+
 ## Estado atual
 
 - monitoramento do teclado HID `VID=0x514c`, `PID=0x8850`;

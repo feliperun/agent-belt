@@ -29,6 +29,10 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/knob.m"),
         .flags = &.{"-fobjc-arc"},
     });
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/system.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
 
     exe.root_module.linkFramework("CoreFoundation", .{});
     exe.root_module.linkFramework("CoreGraphics", .{});
@@ -37,6 +41,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkFramework("IOKit", .{});
     exe.root_module.linkFramework("AppKit", .{});
     exe.root_module.linkFramework("ApplicationServices", .{});
+    exe.root_module.linkFramework("Security", .{});
 
     b.installArtifact(exe);
 

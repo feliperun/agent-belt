@@ -21,6 +21,24 @@ pub const KnobEvent = enum(i8) {
     clockwise = 1,
 };
 
+/// Environment first (terminal runs), then the login Keychain (LaunchAgent).
+pub fn deepgramKey(allocator: std.mem.Allocator, env_name: []const u8) ![]u8 {
+    var name: [256]u8 = undefined;
+    const name_z = std.fmt.bufPrintZ(&name, "{s}", .{env_name}) catch return error.DeepgramApiKeyMissing;
+    if (std.c.getenv(name_z)) |value| return allocator.dupe(u8, std.mem.span(value));
+    const secret = c.mk_keychain_secret("minikeyboard", "deepgram") orelse return error.DeepgramApiKeyMissing;
+    defer c.mk_free_buffer(@ptrCast(secret));
+    return allocator.dupe(u8, std.mem.span(secret));
+}
+
+pub fn singleInstance() !void {
+    if (c.mk_single_instance() != 0) return error.DaemonAlreadyRunning;
+}
+
+pub fn waitPermissions() void {
+    c.mk_wait_permissions();
+}
+
 pub fn setKnobIntercept(intercept: bool) void {
     c.mk_knob_set_intercept(@intFromBool(intercept));
 }
