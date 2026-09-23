@@ -1,6 +1,8 @@
 #import "../src/agent_switcher.m"
 #include <assert.h>
 
+void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
+
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     MKAgentTarget *t = [MKAgentTarget new];
     t.key = key;

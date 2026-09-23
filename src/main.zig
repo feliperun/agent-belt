@@ -41,9 +41,8 @@ pub fn main(init: std.process.Init) !void {
         if (argc != 3 and argc != 4) return usage();
         const desktop = argc == 4 and std.mem.eql(u8, argv[3], "desktop");
         if (argc == 4 and !desktop) return usage();
-        if (std.mem.eql(u8, argv[2], "list")) return macos.agentsCommand(false, desktop);
-        if (std.mem.eql(u8, argv[2], "next")) return macos.agentsCommand(true, desktop);
-        return usage();
+        const mode = std.meta.stringToEnum(macos.AgentsMode, argv[2]) orelse return usage();
+        return macos.agentsCommand(mode, desktop);
     }
 
     if (std.mem.eql(u8, argv[1], "bind")) {
@@ -151,7 +150,7 @@ fn usage() !void {
         "  minikeyboard devices\n" ++
         "  minikeyboard daemon\n" ++
         "  minikeyboard preview\n" ++
-        "  minikeyboard agents <list|next> [desktop]\n" ++
+        "  minikeyboard agents <list|next|bottom> [desktop]\n" ++
         "  minikeyboard install\n", .{});
     return error.InvalidArguments;
 }

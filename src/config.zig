@@ -22,6 +22,10 @@ pub const Config = struct {
     deepgram_language: []const u8 = "pt-BR",
     deepgram_smart_format: bool = true,
     deepgram_mip_opt_out: bool = true,
+    /// "scroll": knob scrolls, its button returns agents to the bottom. "system": volume.
+    knob: []const u8 = "scroll",
+    /// Lines per detent; negative inverts the direction.
+    knob_scroll_lines: i32 = 3,
     bindings: [6]Binding = .{
         .{},
         .{},
@@ -95,6 +99,8 @@ pub fn defaultConfigJson() []const u8 {
         "  \"deepgram_language\": \"pt-BR\",\n" ++
         "  \"deepgram_smart_format\": true,\n" ++
         "  \"deepgram_mip_opt_out\": true,\n" ++
+        "  \"knob\": \"scroll\",\n" ++
+        "  \"knob_scroll_lines\": 3,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
         "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
@@ -138,6 +144,8 @@ test "numbered keys are zero-based aliases and agents action is configurable" {
 test "default JSON and struct agree on PTT 3 and agents 4" {
     const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, defaultConfigJson(), .{});
     defer parsed.deinit();
+    try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
+    try std.testing.expectEqual((Config{}).knob_scroll_lines, parsed.value.knob_scroll_lines);
     for ((Config{}).bindings, parsed.value.bindings, 0..) |expected, actual, index| {
         try std.testing.expectEqualStrings(expected.action, actual.action);
         const action = try actionType(actual.action);

@@ -12,6 +12,17 @@ const Daemon = struct {
     recording_key: ?usize = null,
     busy: bool = false,
     keys: @import("key_edges.zig").KeyEdges = .{},
+    knob: @import("knob.zig").Knob = .{},
+
+    fn onKnob(context: *anyopaque, event: macos.KnobEvent) void {
+        const daemon: *Daemon = @ptrCast(@alignCast(context));
+        switch (event) {
+            .press => macos.agentsBottom(),
+            .clockwise, .counter_clockwise => macos.scrollDown(
+                daemon.knob.step(@intFromEnum(event), macos.monotonicNs(), daemon.config.knob_scroll_lines),
+            ),
+        }
+    }
 
     fn onHidEvent(context: *anyopaque, event: macos.HidEvent) void {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
@@ -91,11 +102,14 @@ const Daemon = struct {
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
+    // "system" leaves the knob as the device's volume control.
+    macos.setKnobIntercept(!std.mem.eql(u8, config.knob, "system"));
     var listener = macos.HidListener{
         .allocator = allocator,
         .vendor_id = config.vendor_id,
         .product_id = config.product_id,
         .on_event = Daemon.onHidEvent,
+        .on_knob = Daemon.onKnob,
         .context = @ptrCast(&daemon),
     };
     try listener.run();

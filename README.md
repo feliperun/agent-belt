@@ -12,6 +12,7 @@ Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráve
 - inserção do resultado no aplicativo em foco usando eventos Unicode do macOS;
 - cápsula flutuante no canto superior direito, com ondas que respondem ao áudio e se transformam em traços de texto durante a transcrição;
 - bindings de `ptt`, `agents`, `command`, `script`, `text` e `disabled`;
+- knob: girar rola a página e apertar leva os coding agents de volta ao fim;
 - instalação opcional como LaunchAgent;
 - indicador na barra de menus: `🔴 REC` enquanto grava, `⏳` durante a transcrição e `⚠︎` em caso de erro.
 
@@ -106,4 +107,25 @@ do Claude Desktop: `bind 4 agents desktop`. Requer Accessibility.
 ```sh
 zig-out/bin/minikeyboard agents list
 zig-out/bin/minikeyboard agents next
+zig-out/bin/minikeyboard agents bottom
 ```
+
+## Knob
+
+O knob chega como Consumer Control (volume +/− e mute). O daemon transforma:
+
+- **girar** em scroll de linhas sob o ponteiro (horário desce). Giros rápidos aceleram até 4x;
+- **apertar** em "voltar ao fim": todo pane tmux de agente que esteja no histórico
+  (copy-mode) volta para a saída ao vivo, e a view de agente sob o ponteiro rola até o final.
+
+O volume e o mute do knob são bloqueados no event tap enquanto o HID acabou de
+registrar o knob; as teclas de volume do próprio Mac continuam funcionando. No config:
+
+```json
+"knob": "scroll",
+"knob_scroll_lines": 3
+```
+
+`"knob": "system"` devolve o controle de volume; um `knob_scroll_lines` negativo inverte
+o sentido. Nas sessões `work`, o tmux precisa de `mouse on` (o `work` já liga) para a
+roda rolar o copy-mode em vez de virar setas no prompt do agente.

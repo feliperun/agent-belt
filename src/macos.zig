@@ -15,6 +15,28 @@ pub const HidEvent = struct {
     pressed: bool,
 };
 
+pub const KnobEvent = enum(i8) {
+    counter_clockwise = -1,
+    press = 0,
+    clockwise = 1,
+};
+
+pub fn setKnobIntercept(intercept: bool) void {
+    c.mk_knob_set_intercept(@intFromBool(intercept));
+}
+
+pub fn scrollDown(lines: i32) void {
+    c.mk_scroll_down(lines);
+}
+
+pub fn agentsBottom() void {
+    c.mk_agents_bottom();
+}
+
+pub fn monotonicNs() u64 {
+    return c.mk_monotonic_ns();
+}
+
 pub const Status = enum(c_int) {
     ready = 0,
     recording = 1,
@@ -38,8 +60,10 @@ pub fn cycleAgents(desktop: bool) void {
     c.mk_agents_next(@intFromBool(desktop));
 }
 
-pub fn agentsCommand(next: bool, desktop: bool) !void {
-    if (c.mk_agents_command(@intFromBool(next), @intFromBool(desktop)) != 0) return error.AgentSwitchFailed;
+pub const AgentsMode = enum(c_int) { list = 0, next = 1, bottom = 2 };
+
+pub fn agentsCommand(mode: AgentsMode, desktop: bool) !void {
+    if (c.mk_agents_command(@intFromEnum(mode), @intFromBool(desktop)) != 0) return error.AgentSwitchFailed;
 }
 
 pub const HidListener = struct {
@@ -47,6 +71,7 @@ pub const HidListener = struct {
     vendor_id: u16,
     product_id: u16,
     on_event: *const fn (context: *anyopaque, event: HidEvent) void,
+    on_knob: *const fn (context: *anyopaque, event: KnobEvent) void,
     context: *anyopaque,
     pressed: std.atomic.Value(u8) = .init(0),
     release_until_ns: [6]std.atomic.Value(u64) = .{
@@ -76,7 +101,7 @@ pub const HidListener = struct {
 };
 
 fn hidThread(listener: *HidListener) void {
-    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, listener);
+    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, listener);
     if (result != 0) {
         std.log.err("não consegui abrir o monitor HID (código={d}); dê ao binário a permissão de Input Monitoring", .{result});
     } else {
@@ -91,6 +116,13 @@ fn hidCallback(context: ?*anyopaque, key: u8, pressed: u8) callconv(.c) void {
         std.debug.print("[minikeyboard] HID key={d} {s}\n", .{ key, if (pressed != 0) "down" else "up" });
     }
     listener.on_event(listener.context, .{ .key = key, .pressed = pressed != 0 });
+}
+
+fn knobCallback(context: ?*anyopaque, event: i8) callconv(.c) void {
+    const listener: *HidListener = @ptrCast(@alignCast(context.?));
+    const knob: KnobEvent = @enumFromInt(event);
+    if (listener.debug_input) std.debug.print("[minikeyboard] KNOB {s}\n", .{@tagName(knob)});
+    listener.on_knob(listener.context, knob);
 }
 
 fn noteKey(self: *HidListener, key: u8, pressed: bool) void {

@@ -405,6 +405,7 @@ static NSString *MKLastKeyPath(void) {
     return [dir stringByAppendingPathComponent:@"last-agent"];
 }
 
+static void MKBottom(void);
 static NSArray<MKAgentTarget *> *mk_ring;
 static int MKCycle(BOOL desktop) {
     if (!AXIsProcessTrusted()) {
@@ -444,9 +445,10 @@ void mk_agents_next(int desktop) {
     });
 }
 
-int mk_agents_command(int next, int desktop) {
+int mk_agents_command(int mode, int desktop) {
     @autoreleasepool {
-        if (next) return MKCycle(desktop != 0);
+        if (mode == 2) { MKBottom(); return 0; }
+        if (mode == 1) return MKCycle(desktop != 0);
         if (!AXIsProcessTrusted()) {
             fprintf(stderr, "[minikeyboard] agents list requer Accessibility\n");
             return -1;
@@ -457,4 +459,35 @@ int mk_agents_command(int next, int desktop) {
         if (!targets.count) printf("Nenhum terminal com coding agent (Orca ou work).\n");
         return 0;
     }
+}
+
+// Hosts where "back to the bottom" may scroll the view under the pointer.
+static BOOL MKAgentHost(NSString *bundle) {
+    return [@[@"com.stablyai.orca", @"com.openai.codex", @"com.anthropic.claudefordesktop",
+              @"com.mitchellh.ghostty", @"com.apple.Terminal", @"com.googlecode.iterm2",
+              @"com.github.wez.wezterm", @"net.kovidgoyal.kitty", @"org.alacritty",
+              @"dev.warp.Warp-Stable"] containsObject:bundle];
+}
+
+// Knob button: every agent pane scrolled back into tmux history returns to
+// live output, and the agent view under the pointer scrolls to its end.
+static void MKBottom(void) {
+    NSUInteger cancelled = 0;
+    for (NSArray<NSString *> *pane in MKTmux(@[@"list-panes", @"-a", @"-F",
+                                               @"#{pane_id}\t#{pane_in_mode}\t#{pane_current_command}"])) {
+        if (pane.count < 3 || ![pane[1] isEqual:@"1"] || !MKAgentCommand(pane[2])) continue;
+        MKTmux(@[@"send-keys", @"-t", pane[0], @"-X", @"cancel"]);
+        cancelled++;
+    }
+    if (MKAgentHost(NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier))
+        for (int i = 0; i < 4; i++) mk_scroll_down(5000);
+    fprintf(stderr, "[minikeyboard] AGENTS ↓ fim (%lu pane(s) tmux)\n", (unsigned long)cancelled);
+}
+
+void mk_agents_bottom(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, MKCreateAgentsQueue);
+    dispatch_async(mk_agents_queue, ^{
+        @autoreleasepool { MKBottom(); }
+    });
 }

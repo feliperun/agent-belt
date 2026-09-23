@@ -25,6 +25,10 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/agent_switcher.m"),
         .flags = &.{"-fobjc-arc"},
     });
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/knob.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
 
     exe.root_module.linkFramework("CoreFoundation", .{});
     exe.root_module.linkFramework("CoreGraphics", .{});
@@ -69,7 +73,7 @@ pub fn build(b: *std.Build) void {
     agent_test.root_module.linkFramework("AppKit", .{});
     agent_test.root_module.linkFramework("ApplicationServices", .{});
     test_step.dependOn(&b.addRunArtifact(agent_test).step);
-    inline for (.{ "src/config.zig", "src/key_edges.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(path), .target = target, .optimize = optimize,

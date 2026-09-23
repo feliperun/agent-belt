@@ -4,6 +4,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
 #include <IOKit/hid/IOHIDManager.h>
+#include <IOKit/hidsystem/IOLLEvent.h>
 #include <AudioToolbox/AudioQueue.h>
 #include <mach-o/dyld.h>
 
@@ -19,12 +20,37 @@ uint64_t mk_monotonic_ns(void) {
 
 struct mk_hid_context {
     mk_hid_callback callback;
+    mk_knob_callback knob;
     mk_event_filter_callback filter;
     void *context;
     CFMachPortRef event_tap;
 };
 
 static const int64_t mk_injected_event_marker = 0x6d696e696b657962LL;
+
+// The knob reports Consumer Control volume/mute usages. WindowServer turns them
+// into system-defined media keys that no device filter can tell apart from the
+// Mac's own volume keys, so the tap only drops those arriving while the knob
+// was just active on the HID side.
+static atomic_int mk_knob_intercept = 1;
+static _Atomic uint64_t mk_knob_active_until_ns;
+enum { mk_media_sound_up = 0, mk_media_sound_down = 1, mk_media_mute = 7 };
+
+void mk_knob_set_intercept(int intercept) {
+    atomic_store(&mk_knob_intercept, intercept);
+}
+
+static int mk_knob_recent(void) {
+    return mk_monotonic_ns() <= atomic_load(&mk_knob_active_until_ns);
+}
+
+void mk_scroll_down(int32_t lines) {
+    CGEventRef scroll = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 1, -lines);
+    if (!scroll) return;
+    CGEventSetIntegerValueField(scroll, kCGEventSourceUserData, mk_injected_event_marker);
+    CGEventPost(kCGHIDEventTap, scroll);
+    CFRelease(scroll);
+}
 
 static int mk_is_tracked_keycode(uint16_t keycode) {
     return keycode == 0 || keycode == 11 || keycode == 8 ||
@@ -45,6 +71,14 @@ static CGEventRef mk_event_tap_callback(
     }
     if (CGEventGetIntegerValueField(event, kCGEventSourceUserData) == mk_injected_event_marker) {
         return event;
+    }
+    int media_key, media_pressed;
+    if (type == (CGEventType)NX_SYSDEFINED && atomic_load(&mk_knob_intercept) &&
+        mk_system_media_key(event, &media_key, &media_pressed) &&
+        (media_key == mk_media_sound_up || media_key == mk_media_sound_down || media_key == mk_media_mute)) {
+        // Same race as the keys below: give the HID callback time to mark the knob.
+        for (int wait = 0; wait < 20 && !mk_knob_recent(); wait++) usleep(1000);
+        if (mk_knob_recent()) return NULL;
     }
     if ((type == kCGEventKeyDown || type == kCGEventKeyUp) && state->filter) {
         const uint16_t keycode = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
@@ -73,6 +107,14 @@ static void mk_input_value_callback(
 
     const uint32_t usage_page = IOHIDElementGetUsagePage(element);
     const uint32_t usage = IOHIDElementGetUsage(element);
+    // Consumer page: Volume Increment/Decrement are the knob's detents, Mute its button.
+    if (usage_page == 0x0c && (usage == 0xe9 || usage == 0xea || usage == 0xe2)) {
+        if (!atomic_load(&mk_knob_intercept)) return;
+        atomic_store(&mk_knob_active_until_ns, mk_monotonic_ns() + 150 * 1000 * 1000ULL);
+        if (IOHIDValueGetIntegerValue(value) != 0 && state->knob)
+            state->knob(state->context, usage == 0xe9 ? 1 : usage == 0xea ? -1 : 0);
+        return;
+    }
     // USB HID Keyboard/Keypad page. Usages 0x04..0x09 are a..f.
     if (usage_page != 0x07 || usage < 0x04 || usage > 0x09) return;
 
@@ -83,6 +125,7 @@ int mk_hid_run(
     uint16_t vendor_id,
     uint16_t product_id,
     mk_hid_callback callback,
+    mk_knob_callback knob,
     void *context
 ) {
     IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
@@ -116,7 +159,7 @@ int mk_hid_run(
         return -3;
     }
 
-    struct mk_hid_context state = { callback, NULL, context, NULL };
+    struct mk_hid_context state = { callback, knob, NULL, context, NULL };
     IOHIDManagerSetDeviceMatching(manager, matching);
     IOHIDManagerRegisterInputValueCallback(manager, mk_input_value_callback, &state);
     IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
@@ -134,8 +177,8 @@ int mk_hid_run(
 }
 
 int mk_event_tap_run(mk_event_filter_callback filter, void *context) {
-    struct mk_hid_context state = { NULL, filter, context, NULL };
-    CGEventMask event_mask = (1ULL << kCGEventKeyDown) | (1ULL << kCGEventKeyUp);
+    struct mk_hid_context state = { NULL, NULL, filter, context, NULL };
+    CGEventMask event_mask = (1ULL << kCGEventKeyDown) | (1ULL << kCGEventKeyUp) | (1ULL << NX_SYSDEFINED);
     CFMachPortRef event_tap = CGEventTapCreate(
         kCGHIDEventTap,
         kCGHeadInsertEventTap,
