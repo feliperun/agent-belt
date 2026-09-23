@@ -32,6 +32,13 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    if (std.mem.eql(u8, argv[1], "status")) {
+        var parsed = try store.load();
+        defer parsed.deinit();
+        const cfg = parsed.value;
+        return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
+    }
+
     if (std.mem.eql(u8, argv[1], "preview")) {
         try macos.previewOverlay();
         return;
@@ -117,6 +124,7 @@ fn usage() !void {
         "  minikeyboard bind <a-f> text <texto>\n" ++
         "  minikeyboard bind <a-f> disabled\n" ++
         "  minikeyboard devices\n" ++
+        "  minikeyboard status\n" ++
         "  minikeyboard daemon\n" ++
         "  minikeyboard preview\n" ++
         "  minikeyboard agents <list|next|bottom> [desktop]\n" ++

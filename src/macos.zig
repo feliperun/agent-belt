@@ -35,6 +35,16 @@ pub fn singleInstance() !void {
     if (c.mk_single_instance() != 0) return error.DaemonAlreadyRunning;
 }
 
+pub fn trimLog() void {
+    c.mk_trim_log();
+}
+
+pub fn statusReport(vendor_id: u16, product_id: u16, key_env: []const u8) !void {
+    var name: [256]u8 = undefined;
+    const name_z = try std.fmt.bufPrintZ(&name, "{s}", .{key_env});
+    _ = c.mk_status_report(vendor_id, product_id, name_z.ptr);
+}
+
 pub fn checkPermissions() !void {
     if (c.mk_check_permissions() != 0) return error.PermissionsMissing;
 }

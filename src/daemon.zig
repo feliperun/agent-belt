@@ -100,6 +100,7 @@ const Daemon = struct {
 };
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
+    macos.trimLog();
     macos.singleInstance() catch |err| {
         std.debug.print("[minikeyboard] outro daemon já está rodando (launchctl print gui/$UID/com.frb.minikeyboard)\n", .{});
         return err;
