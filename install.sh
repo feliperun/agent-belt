@@ -67,8 +67,6 @@ stage="$(mktemp -d)/Agent Belt.app"
 mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
 cp "$src/assets/AppIcon.icns" "$stage/Contents/Resources/AppIcon.icns"
 cp "$src/scripts/update.sh" "$stage/Contents/Resources/update.sh"
-# The work engine behind agb sessions/new/ls/attach/tm/deploy.
-rsync -a --exclude .claude "$src/work/" "$stage/Contents/Resources/work/"
 cp "$src/zig-out/bin/agb" "$stage/Contents/MacOS/agb"
 cat > "$stage/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -125,9 +123,8 @@ rm -rf "$HOME/Applications/Minikeyboard.app"
 [ -f "$HOME/.config/minikeyboard/config.json" ] && [ ! -f "$HOME/.config/agent-belt/config.json" ] &&
   mkdir -p "$HOME/.config/agent-belt" && cp "$HOME/.config/minikeyboard/config.json" "$HOME/.config/agent-belt/"
 
-# work/tm: tmux sessions with an agent inside, on any machine of the tailnet.
-say "instalando work, work-session e tm"
-"$src/work/install.sh" --no-discover >/dev/null
+# agb now runs agent sessions itself: drop the old bash work/work-session/tm.
+rm -f "$HOME/.local/bin/work" "$HOME/.local/bin/work-session" "$HOME/.local/bin/tm"
 
 if [ "$keep_config" = 0 ]; then
   say "config regenerada a partir de src/config.zig"

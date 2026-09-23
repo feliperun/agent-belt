@@ -13,4 +13,8 @@ jobs:
           version: 0.16.0
       - run: zig build -Doptimize=ReleaseSafe
       - run: zig build test
-      - run: bash -n install.sh && bash -n scripts/update.sh && bash -n work/bin/work && bash -n work/bin/work-session
+      - run: bash -n install.sh && bash -n scripts/update.sh && bash -n scripts/mesh-keys.sh
+      # agb is the session CLI on Linux and Windows too: keep those builds green.
+      - run: zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe --prefix zig-out/linux
+      - run: zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseSafe --prefix zig-out/linux-arm
+      - run: zig build -Dtarget=x86_64-windows-gnu -Doptimize=ReleaseSafe --prefix zig-out/windows

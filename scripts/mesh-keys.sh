@@ -25,7 +25,7 @@ dry=0
 
 die() { printf 'mesh-keys: %s\n' "$*" >&2; exit 1; }
 
-[ -f "$CONFIG" ] || die "sem registro em $CONFIG (rode: work hosts discover)"
+[ -f "$CONFIG" ] || die "sem registro em $CONFIG (run: agb hosts discover)"
 
 NAMES=(); TARGETS=(); KINDS=(); SELF=""
 while read -r kw a b c || [ -n "$kw" ]; do

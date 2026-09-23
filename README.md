@@ -110,7 +110,11 @@ agb sessions            # interactive picker across all machines
 agb ls                  # the same list, as text
 agb attach <session> [machine]
 agb hosts · agb doctor · agb deploy --all
+agb send <session> "…" · agb peek <session> · agb stop <session>   # orchestration
 ```
+
+All of it, including the `--detach` mode for scripts and other agents, is in
+[docs/sessions.md](docs/sessions.md).
 
 ### New agent by voice
 
@@ -172,6 +176,7 @@ agb status                        daemon, permissions, device, key, log
 agb agents list|next|bottom       agents with state and stats · next · back to the bottom
 agb new <words> | --task …        create an agent session (plain words or flags)
 agb sessions|ls|attach|hosts      agent sessions across machines
+agb send|peek|stop                drive a session's agent (scripts, orchestrators)
 agb doctor|adopt|deploy|tm        session engine housekeeping
 agb led <color 0-7> <mode 0-5>    lights by hand
 agb permissions                   open the macOS privacy lists
@@ -200,8 +205,8 @@ Versions come from [release-please](https://github.com/googleapis/release-please
 - **Agents:** Orca's `terminal list`, tmux clients (matched to Orca through
   `ORCA_TERMINAL_HANDLE`), the titles agents write to the terminal and the transcripts in
   `~/.claude`.
-- **Sessions:** the portable bash engine in [`work/`](work/README.md), which also runs on the
-  Linux and Windows machines.
+- **Sessions:** the session engine in `src/sessions/` (Zig), the same `agb` binary on macOS,
+  Linux and Windows; see [docs/sessions.md](docs/sessions.md).
 - **Lights:** vendor HID reports on the `0xFF00` interface.
 
 Architecture, vocabulary and decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),

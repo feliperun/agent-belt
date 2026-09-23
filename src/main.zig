@@ -1,18 +1,50 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const build_options = @import("build_options");
 const config = @import("config.zig");
 const daemon = @import("daemon.zig");
 const macos = @import("macos.zig");
+const sessions = @import("sessions/cli.zig");
+const sys = @import("sessions/sys.zig");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
-    var iterator = std.process.Args.Iterator.init(init.minimal.args);
-    var argv: [32][]const u8 = undefined;
-    var argc: usize = 0;
-    while (iterator.next()) |arg| {
-        if (argc == argv.len) return error.TooManyArguments;
-        argv[argc] = arg[0..arg.len];
-        argc += 1;
+    var iterator = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
+    var args: std.ArrayList([]const u8) = .empty;
+    while (iterator.next()) |arg| try args.append(allocator, arg[0..arg.len]);
+    const argv = args.items;
+    const argc = argv.len;
+
+    // Agent sessions: every platform.
+    if (argc >= 2 and sessions.isSessionCommand(argv[1])) {
+        const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
+        std.process.exit(try sessions.main(.{ .ctx = ctx, .version = build_options.version, .source_root = build_options.source_root }, argv[1..argc]));
     }
+    if (argc >= 2 and std.mem.eql(u8, argv[1], "version")) {
+        std.debug.print("agb (Agent Belt) {s}\n", .{build_options.version});
+        return;
+    }
+    // The keypad daemon and its UI exist on macOS for now.
+    if (comptime builtin.os.tag != .macos) return usageSessions();
+    return macMain(init, argv);
+}
+
+fn usageSessions() !void {
+    std.debug.print(
+        \\agb (Agent Belt) {s}: agent sessions on any machine of your tailnet
+        \\
+        \\  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
+        \\  agb sessions | ls | attach [-d] <session> [machine]
+        \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
+        \\  agb version
+        \\
+    , .{build_options.version});
+    return error.InvalidArguments;
+}
+
+fn macMain(init: std.process.Init, argv: []const []const u8) !void {
+    const allocator = init.gpa;
+    const argc = argv.len;
     if (argc < 2) return usage();
 
     var store = try config.ConfigStore.init(init.io, allocator);
@@ -39,10 +71,6 @@ pub fn main(init: std.process.Init) !void {
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
 
-    if (std.mem.eql(u8, argv[1], "version")) {
-        std.debug.print("agb (Agent Belt) {s}\n", .{@import("build_options").version});
-        return;
-    }
 
     if (std.mem.eql(u8, argv[1], "update")) {
         // agb update [tag]: builds that release (default: the latest) from source.
@@ -50,31 +78,6 @@ pub fn main(init: std.process.Init) !void {
         const tag: ?[:0]const u8 = if (argc == 3) try allocator.dupeZ(u8, argv[2]) else null;
         defer if (tag) |t| allocator.free(t);
         return macos.updateRun(tag);
-    }
-
-    // Agent sessions (the work engine, bundled in the app): one CLI for everything.
-    if (std.mem.eql(u8, argv[1], "sessions")) return execWork(allocator, "bin/work", &.{});
-    inline for (.{ "ls", "attach", "hosts", "doctor", "adopt" }) |verb| {
-        if (std.mem.eql(u8, argv[1], verb)) return execWork(allocator, "bin/work", argv[1..argc]);
-    }
-    if (std.mem.eql(u8, argv[1], "tm")) return execWork(allocator, "bin/tm", argv[2..argc]);
-    if (std.mem.eql(u8, argv[1], "deploy")) return execWork(allocator, "scripts/deploy.sh", argv[2..argc]);
-
-    if (std.mem.eql(u8, argv[1], "new") and argc > 2 and std.mem.startsWith(u8, argv[2], "--") and
-        !std.mem.eql(u8, argv[2], "--dry-run"))
-    {
-        return execWork(allocator, "bin/work", try newSessionArgs(allocator, argv[2..argc]));
-    }
-
-    if (std.mem.eql(u8, argv[1], "new")) {
-        // agb new [--dry-run] <pedido em linguagem natural>
-        var rest = argv[2..argc];
-        const dry_run = rest.len > 0 and std.mem.eql(u8, rest[0], "--dry-run");
-        if (dry_run) rest = rest[1..];
-        if (rest.len == 0) return usage();
-        const text = try joinArgs(allocator, rest);
-        defer allocator.free(text);
-        return macos.agentsNew(allocator, text, dry_run);
     }
 
     if (std.mem.eql(u8, argv[1], "permissions")) {
@@ -168,58 +171,6 @@ fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 
     return std.mem.join(allocator, " ", args);
 }
 
-/// agb new --task t [--repo r] [--host h] [--agent claude|codex|shell] [--prompt p]
-/// becomes work's own arguments: [host] task [repo] --agent a [--prompt p].
-fn newSessionArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
-    var task: ?[]const u8 = null;
-    var repo: ?[]const u8 = null;
-    var host: ?[]const u8 = null;
-    var agent: []const u8 = "claude";
-    var prompt: ?[]const u8 = null;
-    var i: usize = 0;
-    while (i < args.len) : (i += 2) {
-        if (i + 1 >= args.len) return error.InvalidArguments;
-        const value = args[i + 1];
-        if (std.mem.eql(u8, args[i], "--task")) task = value
-        else if (std.mem.eql(u8, args[i], "--repo")) repo = value
-        else if (std.mem.eql(u8, args[i], "--host")) host = value
-        else if (std.mem.eql(u8, args[i], "--agent")) agent = value
-        else if (std.mem.eql(u8, args[i], "--prompt")) prompt = value
-        else return error.InvalidArguments;
-    }
-    var out: std.ArrayList([]const u8) = .empty;
-    if (host) |h| try out.append(allocator, h);
-    try out.append(allocator, task orelse return error.InvalidArguments);
-    if (repo) |r| try out.append(allocator, r);
-    try out.appendSlice(allocator, &.{ "--agent", agent });
-    if (prompt) |p| try out.appendSlice(allocator, &.{ "--prompt", p });
-    return out.items;
-}
-
-/// Replaces this process with a tool of the work engine: the copy bundled in
-/// Agent Belt.app, else the one installed in ~/.local/bin.
-fn execWork(allocator: std.mem.Allocator, tool: []const u8, args: []const []const u8) !void {
-    const path = blk: {
-        const exe = try macos.selfExePath(allocator);
-        var buffer: [std.c.PATH_MAX]u8 = undefined;
-        const exe_z = try allocator.dupeZ(u8, exe);
-        if (std.c.realpath(exe_z, &buffer)) |real| {
-            const contents = std.fs.path.dirname(std.fs.path.dirname(std.mem.span(real)) orelse "") orelse "";
-            const bundled = try std.fs.path.join(allocator, &.{ contents, "Resources", "work", tool });
-            if (std.c.access(try allocator.dupeZ(u8, bundled), std.c.X_OK) == 0) break :blk bundled;
-        }
-        const home = std.mem.span(std.c.getenv("HOME") orelse return error.HomeNotFound);
-        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "bin", std.fs.path.basename(tool) });
-    };
-    const argv = try allocator.alloc(?[*:0]const u8, args.len + 2);
-    argv[0] = try allocator.dupeZ(u8, path);
-    for (args, 0..) |arg, i| argv[i + 1] = try allocator.dupeZ(u8, arg);
-    argv[args.len + 1] = null;
-    _ = std.c.execve(argv[0].?, @ptrCast(argv.ptr), std.c.environ);
-    std.debug.print("agb: não consegui executar {s}\n", .{path});
-    return error.ExecFailed;
-}
-
 fn usage() !void {
     std.debug.print("agb (Agent Belt) — daemon de teclas HID configuráveis\n" ++
         "\n" ++
@@ -237,10 +188,8 @@ fn usage() !void {
         "  agb status\n" ++
         "  agb version\n" ++
         "  agb update [tag]\n" ++
-        "  agb new [--dry-run] <pedido>   (ex.: crie um agente no windows com codex no coreum para …)\n" ++
-        "  agb new --task <t> [--repo r] [--host m] [--agent claude|codex|shell] [--prompt p]\n" ++
-        "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt   (sessões de agente em qualquer máquina)\n" ++
-        "  agb tm [nome] · agb deploy <máquina…|--all>\n" ++
+        "  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]\n" ++
+        "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt | tm [name] | deploy <m…|--all>\n" ++
         "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
         "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
         "  agb daemon\n" ++

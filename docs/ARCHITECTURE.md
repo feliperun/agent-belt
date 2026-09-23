@@ -11,11 +11,12 @@ macropad (HID) ─┐                       ┌─> Deepgram (transcript) ─> U
 Mac keyboard ───┼─> event tap + HID ────┼─> agent switcher ─> Orca CLI / tmux / Accessibility
 knob ───────────┘   monitor (daemon)    ├─> key LEDs (vendor HID reports)
                                         ├─> overlay, HUD, agent menu, menu bar (AppKit)
-                                        └─> work engine (bash) ─> tmux + worktree + agent, any host
+                                        └─> session engine (Zig) ─> tmux + worktree + agent, any host
 ```
 
 A single LaunchAgent process (`agb daemon`) owns the input, the UI and the agent
-bookkeeping. The CLI (`agb`) is the same binary.
+bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windows
+`agb` is the session CLI (built by `agb deploy`).
 
 ## Components
 
@@ -30,7 +31,7 @@ bookkeeping. The CLI (`agb`) is the same binary.
 | `src/led.m` | keypad LED worker (latest state wins, repeats skipped) |
 | `src/updater.m` | release checks, notifications, source updates |
 | `src/system.m` | permissions, Keychain, single instance, `agb status` |
-| `work/` | portable bash engine for tmux agent sessions on any tailnet host |
+| `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms) |
 | `install.sh` | build, bundle, sign, Keychain, LaunchAgent |
 
 ## Runtime & hosting
