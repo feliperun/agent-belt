@@ -60,7 +60,7 @@ say "compilando (ReleaseSafe)"
 (cd "$src" && zig build -Doptimize=ReleaseSafe)
 
 version=$(git -C "$src" describe --always --dirty 2>/dev/null || echo dev)
-stage=$(mktemp -d)/Agent Belt.app
+stage="$(mktemp -d)/Agent Belt.app"
 mkdir -p "$stage/Contents/MacOS"
 cp "$src/zig-out/bin/agent-belt" "$stage/Contents/MacOS/agent-belt"
 cat > "$stage/Contents/Info.plist" <<PLIST
