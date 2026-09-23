@@ -104,7 +104,12 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
         std.debug.print("[minikeyboard] outro daemon já está rodando (launchctl print gui/$UID/com.frb.minikeyboard)\n", .{});
         return err;
     };
-    macos.waitPermissions();
+    macos.checkPermissions() catch |err| {
+        // Exit and let launchd restart us: only a new process sees a fresh grant.
+        std.Io.sleep(io, .fromSeconds(10), .awake) catch {};
+        return err;
+    };
+    std.debug.print("[minikeyboard] pronto: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
     // "system" leaves the knob as the device's volume control.
     macos.setKnobIntercept(!std.mem.eql(u8, config.knob, "system"));

@@ -45,6 +45,6 @@ void mk_press_key(uint16_t keycode, int pressed);
 char *mk_self_exe_path(void);
 char *mk_keychain_secret(const char *service, const char *account);
 int mk_single_instance(void);
-void mk_wait_permissions(void);
+int mk_check_permissions(void);
 
 #endif

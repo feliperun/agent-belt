@@ -35,8 +35,8 @@ pub fn singleInstance() !void {
     if (c.mk_single_instance() != 0) return error.DaemonAlreadyRunning;
 }
 
-pub fn waitPermissions() void {
-    c.mk_wait_permissions();
+pub fn checkPermissions() !void {
+    if (c.mk_check_permissions() != 0) return error.PermissionsMissing;
 }
 
 pub fn setKnobIntercept(intercept: bool) void {

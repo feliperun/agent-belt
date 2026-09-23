@@ -40,25 +40,25 @@ int mk_single_instance(void) {
     return 0; // held until exit
 }
 
-// Under launchd a missing permission must not become a crash loop: ask once,
-// then wait until System Settings grants it.
-void mk_wait_permissions(void) {
-    IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
-    AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge id)kAXTrustedCheckOptionPrompt: @YES});
-    BOOL warned = NO;
-    for (;;) {
-        BOOL input = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted;
-        BOOL accessibility = AXIsProcessTrusted();
-        if (input && accessibility) {
-            if (warned) fprintf(stderr, "[minikeyboard] permissões concedidas\n");
-            return;
-        }
-        if (!warned) {
-            fprintf(stderr, "[minikeyboard] aguardando permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
-                    input ? "" : "Monitoramento de Entrada", !input && !accessibility ? ", " : "",
-                    accessibility ? "" : "Acessibilidade");
-            warned = YES;
-        }
-        sleep(2);
+// A running process never sees a grant made after it asked (AXIsProcessTrusted
+// stays stale), so a missing permission is reported and the caller exits for
+// launchd to restart it. The system prompt is shown at most every 10 minutes.
+int mk_check_permissions(void) {
+    BOOL input = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted;
+    BOOL accessibility = AXIsProcessTrusted();
+    if (input && accessibility) return 0;
+    NSString *marker = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/minikeyboard/permission-prompt"];
+    NSDate *last = [NSFileManager.defaultManager attributesOfItemAtPath:marker error:nil].fileModificationDate;
+    if (!last || -last.timeIntervalSinceNow > 600) {
+        [NSFileManager.defaultManager createDirectoryAtPath:marker.stringByDeletingLastPathComponent
+                                withIntermediateDirectories:YES attributes:nil error:nil];
+        [@"" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        if (!input) IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
+        if (!accessibility)
+            AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge id)kAXTrustedCheckOptionPrompt: @YES});
     }
+    fprintf(stderr, "[minikeyboard] faltam permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
+            input ? "" : "Monitoramento de Entrada", !input && !accessibility ? ", " : "",
+            accessibility ? "" : "Acessibilidade");
+    return -1;
 }

@@ -151,8 +151,8 @@ fi
 cat <<MSG
 
 Na primeira vez, autorize "Minikeyboard" em Ajustes do Sistema >
-Privacidade e Seguranca: Monitoramento de Entrada e Acessibilidade (o daemon
-espera ate la) e o Microfone no primeiro push-to-talk.
+Privacidade e Seguranca: Monitoramento de Entrada e Acessibilidade (o daemon tenta
+de novo sozinho a cada ~15 s) e o Microfone no primeiro push-to-talk.
 
   minikeyboard agents list        CLI (link em $link)
   tail -f $log

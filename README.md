@@ -12,7 +12,7 @@ Compila, empacota em `~/Applications/Minikeyboard.app` (assinado com o seu certi
 Apple Development, para as permissões sobreviverem a cada atualização), guarda
 `DEEPGRAM_API_KEY` no Keychain e registra o LaunchAgent `com.frb.minikeyboard`, que sobe
 no login e renasce se cair. Na primeira vez, autorize "Minikeyboard" em Monitoramento de
-Entrada e Acessibilidade; o daemon espera até lá. O Microfone é pedido no primeiro
+Entrada e Acessibilidade; o daemon tenta de novo a cada ~15 s e segue sozinho quando elas aparecem. O Microfone é pedido no primeiro
 push-to-talk.
 
 A configuração vem do código: edite os padrões em `src/config.zig` e rode `./install.sh`
