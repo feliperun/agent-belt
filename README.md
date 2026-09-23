@@ -6,7 +6,7 @@
 
 <p align="center">
   A utility belt for people who work with coding agents 🦇<br>
-  A 6-key macropad with a knob becomes voice dictation, agent switching, attention lights and shortcuts for Claude Code and Codex, on macOS; agent sessions on macOS, Linux and Windows, with a tray app on Windows.
+  A 6-key macropad with a knob becomes voice dictation, agent switching, attention lights and shortcuts for Claude Code and Codex, on macOS; agent sessions on macOS, Linux and Windows, with a tray app on Windows and key binds, menu and dictation on Hyprland.
 </p>
 
 <p align="center">
@@ -98,6 +98,23 @@ The tray icon's menu lists the agent sessions of every machine (click one to att
 a terminal), **Novo agente…** (type the same words `agb new` takes), the log
 (`%LOCALAPPDATA%\agent-belt\agent-belt.log`) and quit. The macropad and its lights are
 macOS-only for now.
+
+### Linux desktop (Hyprland, Omarchy)
+
+On a Wayland desktop `agb` has no daemon: compositor key binds run it. `agb deploy`
+installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
+(`~/.config/agent-belt/deepgram.key`, mode 600) and, on Hyprland, adds
+`~/.config/hypr/agent-belt.conf` to `hyprland.conf`:
+
+| Shortcut | Action |
+|---|---|
+| hold `Ctrl+Alt+D` | dictation: `pw-record` while held, Deepgram, typed with `wtype`; mako shows the state |
+| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **Novo agente…** in walker (or fuzzel, wofi, rofi) |
+| `Ctrl+Alt+↑` | `agb sessions` in a terminal |
+
+`agb waybar` feeds a Waybar custom module (`agb install` prints the snippet): 🦇 and the
+number of sessions, the list in the tooltip. `agb ptt toggle` suits desktops without
+key-release binds. `agb uninstall` removes the binds.
 
 ## Agents
 

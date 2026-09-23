@@ -25,6 +25,13 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
     if (comptime builtin.os.tag == .windows) return windowsMain(init, argv);
+    if (comptime builtin.os.tag == .linux) {
+        const desktop = @import("linux/desktop.zig");
+        if (argc >= 2 and desktop.isCommand(argv[1])) {
+            const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
+            std.process.exit(try desktop.main(ctx, argv[1..argc]));
+        }
+    }
     // The keypad daemon and its UI exist on macOS and Windows for now.
     if (comptime builtin.os.tag != .macos) return usageSessions();
     return macMain(init, argv);
@@ -54,6 +61,7 @@ fn usageSessions() !void {
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
         \\  agb version
         \\  Windows: agb install | uninstall | daemon (tray icon, Ctrl+Alt+D dictation, Ctrl+Alt+Space menu)
+        \\  Linux desktop: agb install | uninstall | menu | waybar | ptt start|stop|toggle
         \\
     , .{build_options.version});
     return error.InvalidArguments;
