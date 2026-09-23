@@ -214,7 +214,8 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     if (!typed.ok) {
         // Nowhere to type (or no wtype): the text still reaches the clipboard.
         ctx.env.put("AGB_TEXT", text) catch return 1;
-        const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy" }, null).ok;
+        // wl-copy leaves a process serving the clipboard; with our pipes open we would wait on it forever.
+        const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy >/dev/null 2>&1" }, null).ok;
         notify(ctx, "Agent Belt", if (copied) "texto copiado: cole com Ctrl+V" else "instale wtype para digitar o texto", 5000);
     }
     return 0;

@@ -862,7 +862,8 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     }
     if (!sys.run(ctx, mk.items, null).ok) return error.Unreachable;
     const dest_bin = switch (h.kind) {
-        .posix => try ctx.fmt("{s}:.local/bin/agb", .{h.target}),
+        // Copied aside and renamed over: a running agb (an attached terminal) is "text file busy".
+        .posix => try ctx.fmt("{s}:.local/bin/agb.new", .{h.target}),
         .msys => try ctx.fmt("{s}:C:/Users/{s}/.local/bin/agb.exe", .{ h.target, user }),
     };
     const tmp_conf = try ctx.fmt("{s}/hosts.conf", .{prefix});
@@ -879,6 +880,13 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     scp.items[scp.items.len - 2] = tmp_conf;
     scp.items[scp.items.len - 1] = dest_conf;
     if (!sys.run(ctx, scp.items, null).ok) return error.CopyFailed;
+    if (h.kind == .posix) {
+        var mv: std.ArrayList([]const u8) = .empty;
+        try mv.append(ctx.gpa, "ssh");
+        try mv.appendSlice(ctx.gpa, &ssh_opts);
+        try mv.appendSlice(ctx.gpa, &.{ h.target, "mv -f ~/.local/bin/agb.new ~/.local/bin/agb" });
+        if (!sys.run(ctx, mv.items, null).ok) return error.CopyFailed;
+    }
     if (h.kind == .msys) try deployTray(ctx, h, user, prefix, &ssh_opts);
     const probe = remote(ctx, h, &.{"_probe"});
     std.debug.print("   {s}\n", .{if (probe.ok) std.mem.trim(u8, probe.stdout, " \r\n") else "installed, but agb did not answer"});
