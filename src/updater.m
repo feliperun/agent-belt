@@ -142,5 +142,10 @@ const char *mk_update_line(void) {
     return mk_update_tag ? [NSString stringWithFormat:@"⬆️ %@ disponível · agb update", mk_update_tag].UTF8String : NULL;
 }
 
+// Menu bar: check now; the result lands in the menu and, if new, a notification.
+void mk_update_check_now(void) { dispatch_async(dispatch_get_main_queue(), ^{ MKCheckForUpdate(); }); }
+const char *mk_update_available(void) { return mk_update_tag.UTF8String; }
+const char *mk_app_version(void) { return mk_version.UTF8String ?: "?"; }
+
 // `agb update [tag]`
 int mk_update_run(const char *tag) { @autoreleasepool { return MKStartUpdate(tag && *tag ? @(tag) : nil); } }

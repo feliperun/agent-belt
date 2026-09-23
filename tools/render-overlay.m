@@ -5,17 +5,7 @@
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-// Hooks status_item.m expects from the rest of the daemon.
-void mk_led_status(int s) { (void)s; }
-void mk_agents_menu_click(void) {}
-void mk_agents_menu_close(void) {}
-void mk_agents_menu_open(int i) { (void)i; }
-void mk_agents_bottom(void) {}
-void mk_agents_menu_open_selected(void) {}
-void mk_agents_menu_press(void) {}
-void mk_agents_menu_step(int d) { (void)d; }
-void mk_agents_next(int d) { (void)d; }
-int mk_agents_menu_visible(void) { return 0; }
+#include "../tests/ui_stubs.h"
 
 static double voice(double t) { // syllables with pauses between words
     const double word = fmod(t, 1.1);

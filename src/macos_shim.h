@@ -43,6 +43,9 @@ int mk_agents_new(const char *text, int dry_run);
 void mk_updater_start(const char *version);
 const char *mk_update_line(void);
 int mk_update_run(const char *tag);
+void mk_update_check_now(void);
+const char *mk_update_available(void);
+const char *mk_app_version(void);
 /* Menu bar emoji when idle: 0 nothing, 1 an agent finished, 2 an agent waits. */
 void mk_status_attention(int attention);
 void mk_menu_hide(void);

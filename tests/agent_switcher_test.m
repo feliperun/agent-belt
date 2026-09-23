@@ -96,8 +96,8 @@ int main(void) {
         NSString *why = nil;
         NSArray *hosts = @[@"macbook-pro", @"felipe-windows"];
         assert([MKWorkCommand(@"ok: {\"host\":\"felipe-windows\",\"agent\":\"codex\",\"repo\":\"coreum\",\"task\":\"login-bug\",\"prompt\":\"Investigue o login d'hoje\"}", hosts, &why, NULL)
-                 isEqual:@"work felipe-windows login-bug coreum --agent codex --prompt 'Investigue o login d'\\''hoje'"]);
-        assert([MKWorkCommand(@"{\"host\":null,\"agent\":\"CLAUDE\",\"repo\":\"x\",\"task\":\"t\",\"prompt\":\"\"}", hosts, &why, NULL) isEqual:@"work t x --agent claude"]);
+                 isEqual:@"agb new --task login-bug --repo coreum --host felipe-windows --agent codex --prompt 'Investigue o login d'\\''hoje'"]);
+        assert([MKWorkCommand(@"{\"host\":null,\"agent\":\"CLAUDE\",\"repo\":\"x\",\"task\":\"t\",\"prompt\":\"\"}", hosts, &why, NULL) isEqual:@"agb new --task t --repo x --agent claude"]);
         assert(!MKWorkCommand(@"{\"host\":\"marte\",\"repo\":\"x\",\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"marte"]);
         assert(!MKWorkCommand(@"{\"repo\":null,\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"repositório"]);
         assert(!MKWorkCommand(@"{\"repo\":\"x\",\"task\":\"tem espaço\"}", hosts, &why, NULL));

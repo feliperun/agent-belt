@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include "macos_shim.h"
 #import "agent_stats.h"
+#import "agents.h"
 
 // Native accessibility handles never leave this process. No screenshots,
 // conversation bodies, keystrokes, or private application databases are used.
@@ -837,6 +838,36 @@ void mk_agents_bottom(void) {
     });
 }
 
+static NSArray<NSDictionary *> *mk_snapshot;
+static NSString *mk_snapshot_quota;
+
+static void MKTakeSnapshot(NSArray<MKAgentTarget *> *ring) {
+    NSMutableArray *rows = [NSMutableArray array];
+    for (MKAgentTarget *target in ring)
+        [rows addObject:@{@"title": MKTitleOf(target), @"detail": target.detail ?: @"",
+                          @"tone": @(target.state), @"key": target.key}];
+    NSString *quota = MKQuotaLine();
+    @synchronized([MKAgentTarget class]) { mk_snapshot = rows; mk_snapshot_quota = quota; }
+}
+
+NSArray<NSDictionary *> *MKAgentsSnapshot(void) {
+    @synchronized([MKAgentTarget class]) { return mk_snapshot ?: @[]; }
+}
+
+NSString *MKAgentsQuotaLine(void) {
+    @synchronized([MKAgentTarget class]) { return mk_snapshot_quota; }
+}
+
+void MKAgentsOpenKey(NSString *key) {
+    MKAgentsAsync(^{
+        for (MKAgentTarget *target in MKRefreshRing(NO))
+            if ([target.key isEqual:key]) {
+                if (MKFocus(target)) MKOpened(target, mk_ring);
+                return;
+            }
+    });
+}
+
 // Away from the Mac, an agent waiting for you reaches the phone: WhatsApp via
 // ford-send once per waiting episode, after 3 min of waiting with no input on
 // the Mac for 2 min. The message carries only the session title.
@@ -880,8 +911,10 @@ void mk_agents_monitor(void) {
             NSArray *ring = MKTerminalTargets();
             MKObserve(ring);
             MKDetectWaiting(ring);
+            MKEnrich(ring);
             MKUpdateLed(ring);
             MKNotifyAway(ring);
+            MKTakeSnapshot(ring);
         }
     });
     dispatch_resume(timer);
@@ -947,7 +980,7 @@ static NSString *MKShellQuote(NSString *value) {
 }
 
 // Pure: the model's reply (JSON, possibly wrapped in prose) to a work command
-// line, or nil with a reason. Hosts must be known; task must be a slug.
+// agb new line, or nil with a reason. Hosts must be known; task must be a slug.
 static NSString *MKWorkCommand(NSString *reply, NSArray<NSString *> *hosts, NSString **why, NSDictionary **parsed) {
     NSRange open = [reply rangeOfString:@"{"], close = [reply rangeOfString:@"}" options:NSBackwardsSearch];
     if (open.location == NSNotFound || close.location == NSNotFound || close.location < open.location) { *why = @"não entendi o comando"; return nil; }
@@ -961,9 +994,9 @@ static NSString *MKWorkCommand(NSString *reply, NSArray<NSString *> *hosts, NSSt
     if (![@[@"claude", @"codex", @"shell"] containsObject:agent]) agent = @"claude";
     if ([task rangeOfString:@"^[A-Za-z0-9._-]{1,40}$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"faltou um nome curto para a tarefa"; return nil; }
     if (!repo.length || [repo rangeOfString:@"^[A-Za-z0-9._-]+$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"diga em qual repositório"; return nil; }
-    NSMutableString *command = [NSMutableString stringWithString:@"work"];
-    if (host.length) [command appendFormat:@" %@", host];
-    [command appendFormat:@" %@ %@ --agent %@", task, repo, agent];
+    NSMutableString *command = [NSMutableString stringWithFormat:@"agb new --task %@ --repo %@", task, repo];
+    if (host.length) [command appendFormat:@" --host %@", host];
+    [command appendFormat:@" --agent %@", agent];
     if (prompt.length) [command appendFormat:@" --prompt %@", MKShellQuote(prompt)];
     return command;
 }

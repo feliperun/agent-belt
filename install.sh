@@ -67,6 +67,8 @@ stage="$(mktemp -d)/Agent Belt.app"
 mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
 cp "$src/assets/AppIcon.icns" "$stage/Contents/Resources/AppIcon.icns"
 cp "$src/scripts/update.sh" "$stage/Contents/Resources/update.sh"
+# The work engine behind agb sessions/new/ls/attach/tm/deploy.
+rsync -a --exclude .claude "$src/work/" "$stage/Contents/Resources/work/"
 cp "$src/zig-out/bin/agb" "$stage/Contents/MacOS/agb"
 cat > "$stage/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

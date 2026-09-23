@@ -1,15 +1,6 @@
 // Renders the agent menu with sample sessions into assets/menu.png for the README.
 #import "../src/status_item.m"
-void mk_led_status(int s) { (void)s; }
-void mk_agents_menu_click(void) {}
-void mk_agents_menu_close(void) {}
-void mk_agents_menu_open(int i) { (void)i; }
-void mk_agents_bottom(void) {}
-void mk_agents_menu_open_selected(void) {}
-void mk_agents_menu_press(void) {}
-void mk_agents_menu_step(int d) { (void)d; }
-void mk_agents_next(int d) { (void)d; }
-int mk_agents_menu_visible(void) { return 0; }
+#include "../tests/ui_stubs.h"
 
 int main(int argc, char **argv) { @autoreleasepool {
     if (argc != 2) return 2;

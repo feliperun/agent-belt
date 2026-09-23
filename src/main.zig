@@ -52,6 +52,20 @@ pub fn main(init: std.process.Init) !void {
         return macos.updateRun(tag);
     }
 
+    // Agent sessions (the work engine, bundled in the app): one CLI for everything.
+    if (std.mem.eql(u8, argv[1], "sessions")) return execWork(allocator, "bin/work", &.{});
+    inline for (.{ "ls", "attach", "hosts", "doctor", "adopt" }) |verb| {
+        if (std.mem.eql(u8, argv[1], verb)) return execWork(allocator, "bin/work", argv[1..argc]);
+    }
+    if (std.mem.eql(u8, argv[1], "tm")) return execWork(allocator, "bin/tm", argv[2..argc]);
+    if (std.mem.eql(u8, argv[1], "deploy")) return execWork(allocator, "scripts/deploy.sh", argv[2..argc]);
+
+    if (std.mem.eql(u8, argv[1], "new") and argc > 2 and std.mem.startsWith(u8, argv[2], "--") and
+        !std.mem.eql(u8, argv[2], "--dry-run"))
+    {
+        return execWork(allocator, "bin/work", try newSessionArgs(allocator, argv[2..argc]));
+    }
+
     if (std.mem.eql(u8, argv[1], "new")) {
         // agb new [--dry-run] <pedido em linguagem natural>
         var rest = argv[2..argc];
@@ -154,6 +168,58 @@ fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 
     return std.mem.join(allocator, " ", args);
 }
 
+/// agb new --task t [--repo r] [--host h] [--agent claude|codex|shell] [--prompt p]
+/// becomes work's own arguments: [host] task [repo] --agent a [--prompt p].
+fn newSessionArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const []const u8 {
+    var task: ?[]const u8 = null;
+    var repo: ?[]const u8 = null;
+    var host: ?[]const u8 = null;
+    var agent: []const u8 = "claude";
+    var prompt: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 2) {
+        if (i + 1 >= args.len) return error.InvalidArguments;
+        const value = args[i + 1];
+        if (std.mem.eql(u8, args[i], "--task")) task = value
+        else if (std.mem.eql(u8, args[i], "--repo")) repo = value
+        else if (std.mem.eql(u8, args[i], "--host")) host = value
+        else if (std.mem.eql(u8, args[i], "--agent")) agent = value
+        else if (std.mem.eql(u8, args[i], "--prompt")) prompt = value
+        else return error.InvalidArguments;
+    }
+    var out: std.ArrayList([]const u8) = .empty;
+    if (host) |h| try out.append(allocator, h);
+    try out.append(allocator, task orelse return error.InvalidArguments);
+    if (repo) |r| try out.append(allocator, r);
+    try out.appendSlice(allocator, &.{ "--agent", agent });
+    if (prompt) |p| try out.appendSlice(allocator, &.{ "--prompt", p });
+    return out.items;
+}
+
+/// Replaces this process with a tool of the work engine: the copy bundled in
+/// Agent Belt.app, else the one installed in ~/.local/bin.
+fn execWork(allocator: std.mem.Allocator, tool: []const u8, args: []const []const u8) !void {
+    const path = blk: {
+        const exe = try macos.selfExePath(allocator);
+        var buffer: [std.c.PATH_MAX]u8 = undefined;
+        const exe_z = try allocator.dupeZ(u8, exe);
+        if (std.c.realpath(exe_z, &buffer)) |real| {
+            const contents = std.fs.path.dirname(std.fs.path.dirname(std.mem.span(real)) orelse "") orelse "";
+            const bundled = try std.fs.path.join(allocator, &.{ contents, "Resources", "work", tool });
+            if (std.c.access(try allocator.dupeZ(u8, bundled), std.c.X_OK) == 0) break :blk bundled;
+        }
+        const home = std.mem.span(std.c.getenv("HOME") orelse return error.HomeNotFound);
+        break :blk try std.fs.path.join(allocator, &.{ home, ".local", "bin", std.fs.path.basename(tool) });
+    };
+    const argv = try allocator.alloc(?[*:0]const u8, args.len + 2);
+    argv[0] = try allocator.dupeZ(u8, path);
+    for (args, 0..) |arg, i| argv[i + 1] = try allocator.dupeZ(u8, arg);
+    argv[args.len + 1] = null;
+    _ = std.c.execve(argv[0].?, @ptrCast(argv.ptr), std.c.environ);
+    std.debug.print("agb: não consegui executar {s}\n", .{path});
+    return error.ExecFailed;
+}
+
 fn usage() !void {
     std.debug.print("agb (Agent Belt) — daemon de teclas HID configuráveis\n" ++
         "\n" ++
@@ -172,6 +238,9 @@ fn usage() !void {
         "  agb version\n" ++
         "  agb update [tag]\n" ++
         "  agb new [--dry-run] <pedido>   (ex.: crie um agente no windows com codex no coreum para …)\n" ++
+        "  agb new --task <t> [--repo r] [--host m] [--agent claude|codex|shell] [--prompt p]\n" ++
+        "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt   (sessões de agente em qualquer máquina)\n" ++
+        "  agb tm [nome] · agb deploy <máquina…|--all>\n" ++
         "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
         "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
         "  agb daemon\n" ++

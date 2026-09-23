@@ -3,6 +3,7 @@
 #import <dispatch/dispatch.h>
 #include <math.h>
 #include "macos_shim.h"
+#import "agents.h"
 
 static const CGFloat mk_overlay_width = 252;
 static const CGFloat mk_overlay_height = 78;
@@ -20,14 +21,11 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
 }
 
 static void mk_status_ready(void);
+static void mk_refresh_title(void);
+static void mk_install_status_menu(void);
 static int mk_attention;        // 0 nothing, 1 an agent finished, 2 an agent waits
 static int mk_dictation_status; // mk_status_set: nonzero while dictating
 
-@interface MKStatusClick : NSObject
-@end
-@implementation MKStatusClick
-- (void)clicked:(id)sender { (void)sender; mk_agents_menu_click(); }
-@end
 
 @interface MKOverlayView : NSView
 @property(nonatomic) NSInteger mode;
@@ -288,10 +286,7 @@ int mk_status_init(void) {
         mk_status_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
         if (!mk_status_item) return -1;
         mk_status_ready();
-        static MKStatusClick *click;
-        click = [MKStatusClick new];
-        mk_status_item.button.target = click;
-        mk_status_item.button.action = @selector(clicked:);
+        mk_install_status_menu();
         mk_overlay_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, mk_overlay_width, mk_overlay_height)
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
             backing:NSBackingStoreBuffered defer:NO];
@@ -336,19 +331,19 @@ void mk_status_set(int status) {
             mk_reveal_overlay();
             switch (status) {
                 case 4:
-                    mk_status_item.button.title = @" 🦇";
+                    mk_refresh_title();
                     mk_status_item.button.toolTip = @"Agent Belt ouvindo um comando";
                     break;
                 case 1:
-                    mk_status_item.button.title = @" 🎙️";
+                    mk_refresh_title();
                     mk_status_item.button.toolTip = @"Agent Belt gravando";
                     break;
                 case 2:
-                    mk_status_item.button.title = @" ⏳";
+                    mk_refresh_title();
                     mk_status_item.button.toolTip = @"Agent Belt transcrevendo";
                     break;
                 case 3:
-                    mk_status_item.button.title = @" ⚠️";
+                    mk_refresh_title();
                     mk_status_item.button.toolTip = @"Agent Belt: erro, consulte o terminal";
                     mk_hide_timer = [NSTimer timerWithTimeInterval:2.2 repeats:NO block:^(NSTimer *timer) {
                         (void)timer;
@@ -639,40 +634,127 @@ void mk_menu_hide(void) {
     CFRunLoopWakeUp(mk_status_runloop);
 }
 
-// Menu bar: 🔴 an agent waits for you, 🟢 one finished, ⌨️ otherwise; while
-// dictating the recording state wins. A click opens the agent menu.
-// The belt buckle as a template image: macOS tints it for light and dark bars.
-static NSImage *mk_buckle_icon(void) {
-    static NSImage *icon;
-    if (icon) return icon;
-    icon = [NSImage imageWithSize:NSMakeSize(20, 16) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+// Menu bar icon: a belt whose buckle light shows the state. Idle it is a
+// template image (tinted for light/dark bars); with a state the light takes
+// the color: orange recording (like macOS's microphone indicator), cyan
+// transcribing, red an agent waits for you, green one finished, yellow error.
+static NSImage *mk_belt_icon(NSColor *light) {
+    NSImage *icon = [NSImage imageWithSize:NSMakeSize(22, 16) flipped:NO drawingHandler:^BOOL(NSRect rect) {
         (void)rect;
-        [NSColor.blackColor set];
-        NSBezierPath *strap = [NSBezierPath bezierPath];
-        [strap moveToPoint:NSMakePoint(0.5, 8)];
-        [strap lineToPoint:NSMakePoint(5, 8)];
-        [strap moveToPoint:NSMakePoint(15, 8)];
-        [strap lineToPoint:NSMakePoint(19.5, 8)];
-        strap.lineWidth = 2.2;
-        strap.lineCapStyle = NSLineCapStyleRound;
-        [strap stroke];
-        NSBezierPath *buckle = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(5.2, 2.7, 9.6, 10.6) xRadius:3 yRadius:3];
-        buckle.lineWidth = 1.6;
+        NSColor *ink = light ? NSColor.labelColor : NSColor.blackColor;
+        [ink set];
+        NSBezierPath *strap = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(0.5, 6.4, 21, 3.2) xRadius:1.6 yRadius:1.6];
+        NSBezierPath *buckle = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(6, 1.5, 10, 13) xRadius:3.4 yRadius:3.4];
+        // The strap passes behind the buckle: cut it where the buckle sits.
+        [NSGraphicsContext saveGraphicsState];
+        NSBezierPath *clip = [NSBezierPath bezierPathWithRect:rect];
+        [clip appendBezierPath:[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(buckle.bounds, -1.2, -1.2) xRadius:4.4 yRadius:4.4]];
+        clip.windingRule = NSWindingRuleEvenOdd;
+        [clip addClip];
+        [strap fill];
+        [NSGraphicsContext restoreGraphicsState];
+        buckle.lineWidth = 1.7;
         [buckle stroke];
-        [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(8.4, 6.4, 3.2, 3.2)] fill];
+        NSRect lamp = NSMakeRect(8.6, 5.6, 4.8, 4.8);
+        if (light) { [light setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(lamp, -0.4, -0.4)] fill]; }
+        else [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(lamp, 0.9, 0.9)] fill];
         return YES;
     }];
-    icon.template = YES;
+    icon.template = light == nil;
     return icon;
 }
 
 static void mk_refresh_title(void) {
-    mk_status_item.button.image = mk_buckle_icon();
-    mk_status_item.button.imagePosition = NSImageLeft;
-    if (mk_dictation_status) return; // mk_status_set owns the title meanwhile
-    mk_status_item.button.title = @[@"", @" 🟢", @" 🔴"][MAX(0, MIN(2, mk_attention))];
-    mk_status_item.button.toolTip = @[@"Agent Belt: nada pendente", @"Agent Belt: um agente terminou",
-                                      @"Agent Belt: um agente aguarda você"][MAX(0, MIN(2, mk_attention))];
+    NSColor *light = nil;
+    NSString *tip = @"Agent Belt: nada pendente";
+    switch (mk_dictation_status) {
+    case 1: light = NSColor.systemOrangeColor; tip = @"Agent Belt gravando"; break;
+    case 4: light = NSColor.systemOrangeColor; tip = @"Agent Belt ouvindo um comando"; break;
+    case 2: light = NSColor.systemTealColor; tip = @"Agent Belt transcrevendo"; break;
+    case 3: light = NSColor.systemYellowColor; tip = @"Agent Belt: erro, veja o log"; break;
+    default:
+        if (mk_attention == 2) { light = NSColor.systemRedColor; tip = @"Agent Belt: um agente aguarda você"; }
+        else if (mk_attention == 1) { light = NSColor.systemGreenColor; tip = @"Agent Belt: um agente terminou"; }
+    }
+    mk_status_item.button.image = mk_belt_icon(light);
+    mk_status_item.button.title = @"";
+    mk_status_item.button.toolTip = tip;
+}
+
+// Click: a native menu with the agents (click opens one), a way to create an
+// agent by typing, quotas, updates and the usual housekeeping.
+@interface MKStatusMenu : NSObject <NSMenuDelegate>
+@end
+@implementation MKStatusMenu
+- (NSMenuItem *)add:(NSMenu *)menu title:(NSString *)title action:(SEL)action {
+    NSMenuItem *item = [menu addItemWithTitle:title action:action keyEquivalent:@""];
+    item.target = self;
+    return item;
+}
+- (void)menuNeedsUpdate:(NSMenu *)menu {
+    [menu removeAllItems];
+    const char *update = mk_update_available();
+    NSMenuItem *header = [menu addItemWithTitle:[NSString stringWithFormat:@"Agent Belt %s", mk_app_version()] action:nil keyEquivalent:@""];
+    header.enabled = NO;
+    [menu addItem:NSMenuItem.separatorItem];
+    NSArray<NSDictionary *> *agents = MKAgentsSnapshot();
+    NSArray *dots = @[@"⚪", @"🔵", @"🟢", @"🔴"], *states = @[@"ocioso", @"trabalhando", @"terminou", @"aguardando você"];
+    if (!agents.count) [menu addItemWithTitle:@"Nenhum agente rodando" action:nil keyEquivalent:@""].enabled = NO;
+    for (NSDictionary *agent in agents) {
+        const int tone = MAX(0, MIN(3, [agent[@"tone"] intValue]));
+        NSMenuItem *item = [self add:menu title:[NSString stringWithFormat:@"%@  %@", dots[tone], agent[@"title"]] action:@selector(openAgent:)];
+        item.representedObject = agent[@"key"];
+        item.toolTip = [NSString stringWithFormat:@"%@ · %@", states[tone], agent[@"detail"]];
+    }
+    [menu addItem:NSMenuItem.separatorItem];
+    [self add:menu title:@"Novo agente…" action:@selector(newAgent:)];
+    [self add:menu title:@"Menu flutuante de agentes   ⌃⌥Espaço" action:@selector(floatingMenu:)];
+    NSString *quota = MKAgentsQuotaLine();
+    if (quota) {
+        [menu addItem:NSMenuItem.separatorItem];
+        [menu addItemWithTitle:quota action:nil keyEquivalent:@""].enabled = NO;
+    }
+    [menu addItem:NSMenuItem.separatorItem];
+    if (update) [self add:menu title:[NSString stringWithFormat:@"Atualizar para %s", update] action:@selector(installUpdate:)];
+    else [self add:menu title:@"Verificar atualizações" action:@selector(checkUpdates:)];
+    [self add:menu title:@"Permissões…" action:@selector(permissions:)];
+    [self add:menu title:@"Abrir log" action:@selector(openLog:)];
+}
+- (void)openAgent:(NSMenuItem *)item { MKAgentsOpenKey(item.representedObject); }
+- (void)floatingMenu:(id)sender { (void)sender; mk_agents_menu_click(); }
+- (void)newAgent:(id)sender {
+    (void)sender;
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"Novo agente";
+    alert.informativeText = @"Descreva o agente, como diria em voz alta. Ex.: no windows com codex no coreum, investigar o login.";
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 380, 24)];
+    field.placeholderString = @"crie um agente aqui com claude no agent-belt para…";
+    alert.accessoryView = field;
+    [alert addButtonWithTitle:@"Criar"];
+    [alert addButtonWithTitle:@"Cancelar"];
+    [NSApp activateIgnoringOtherApps:YES];
+    alert.window.initialFirstResponder = field;
+    if ([alert runModal] == NSAlertFirstButtonReturn && field.stringValue.length)
+        mk_agents_voice_command(field.stringValue.UTF8String);
+}
+- (void)checkUpdates:(id)sender { (void)sender; mk_update_check_now(); }
+- (void)installUpdate:(id)sender { (void)sender; mk_update_run(mk_update_available()); }
+- (void)permissions:(id)sender {
+    (void)sender;
+    mk_open_privacy("ListenEvent");
+}
+- (void)openLog:(id)sender {
+    (void)sender;
+    [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/agent-belt.log"]]];
+}
+@end
+
+static void mk_install_status_menu(void) {
+    static MKStatusMenu *controller;
+    controller = [MKStatusMenu new];
+    NSMenu *menu = [NSMenu new];
+    menu.delegate = controller;
+    mk_status_item.menu = menu;
 }
 
 void mk_status_attention(int attention) {
