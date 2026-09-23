@@ -39,7 +39,10 @@ fn failed() sys.Output {
 /// Replaces this process with tmux on the user's terminal (attach, tm).
 pub fn tmuxHandOver(ctx: sys.Ctx, args: []const []const u8) noreturn {
     if (sys.platform == .windows) {
-        const line = std.mem.concat(ctx.gpa, u8, &.{ "exec tmux ", sys.shJoin(ctx, args) catch unreachable }) catch unreachable;
+        // MSYS2's tmux refuses a native console ("not a terminal"); script(1)
+        // gives it a pty, in Windows Terminal and over ssh alike.
+        const cmd = std.mem.concat(ctx.gpa, u8, &.{ "tmux ", sys.shJoin(ctx, args) catch unreachable }) catch unreachable;
+        const line = std.mem.concat(ctx.gpa, u8, &.{ "exec script -qfc ", sys.shQuote(ctx, cmd) catch unreachable, " /dev/null" }) catch unreachable;
         sys.handOver(ctx, &.{ sys.msys_bash, "-lc", line });
     }
     var argv: std.ArrayList([]const u8) = .empty;

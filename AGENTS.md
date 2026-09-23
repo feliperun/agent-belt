@@ -137,6 +137,18 @@ file — keep appending.
 - **Agent status comes from the terminal title.** Claude Code writes `✳ title` when
   idle and a spinner (◐◓◑◒, braille) while working; "finished" is a working→idle
   transition seen by the 5 s monitor.
+- **Windows: MSYS2's tmux refuses a native console** ("open terminal failed: not a
+  terminal"), in Windows Terminal or conhost alike. Attaching runs it under
+  `script -qfc … /dev/null`, which gives it a pty (`src/sessions/local.zig`).
+- **Windows: the tray daemon opens terminals with `CreateProcessW` +
+  `CREATE_NEW_CONSOLE`**, which the default terminal hosts. `wt.exe` is an app
+  execution alias; started from the daemon (spawn or ShellExecute) it opens no tab.
+- **Windows: an ssh logon has no credential vault.** `CredWriteW` fails with 1312, so
+  `agb install` over ssh leaves the Deepgram key in `%LOCALAPPDATA%\agent-belt` and the
+  daemon moves it into Credential Manager on its first start.
+- **Windows: only a scheduled task (`schtasks /it`) reaches the desktop session from
+  ssh**, and a running `.exe` can be renamed but not overwritten: `agb deploy` renames
+  `agb.exe` aside and swaps `agent-belt.exe` in before restarting it.
 
 ---
 

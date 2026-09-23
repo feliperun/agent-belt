@@ -24,9 +24,24 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("agb (Agent Belt) {s}\n", .{build_options.version});
         return;
     }
-    // The keypad daemon and its UI exist on macOS for now.
+    if (comptime builtin.os.tag == .windows) return windowsMain(init, argv);
+    // The keypad daemon and its UI exist on macOS and Windows for now.
     if (comptime builtin.os.tag != .macos) return usageSessions();
     return macMain(init, argv);
+}
+
+/// agent-belt.exe (GUI subsystem, started at login) is the tray daemon;
+/// agb.exe adds `daemon`, `install` and `uninstall` to the session CLI.
+fn windowsMain(init: std.process.Init, argv: []const []const u8) !void {
+    const win = @import("windows/daemon.zig");
+    const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
+    const self = std.fs.path.basename(argv[0]);
+    const is_daemon = std.ascii.startsWithIgnoreCase(self, "agent-belt");
+    const command = if (argv.len >= 2) argv[1] else if (is_daemon) "daemon" else "";
+    if (std.mem.eql(u8, command, "daemon")) std.process.exit(try win.run(ctx, build_options.version));
+    if (std.mem.eql(u8, command, "install")) std.process.exit(try win.install(ctx));
+    if (std.mem.eql(u8, command, "uninstall")) std.process.exit(try win.uninstall(ctx));
+    return usageSessions();
 }
 
 fn usageSessions() !void {
@@ -38,6 +53,7 @@ fn usageSessions() !void {
         \\  agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
         \\  agb version
+        \\  Windows: agb install | uninstall | daemon (tray icon, Ctrl+Alt+D dictation, Ctrl+Alt+Space menu)
         \\
     , .{build_options.version});
     return error.InvalidArguments;

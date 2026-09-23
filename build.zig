@@ -71,6 +71,26 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    // On Windows the tray daemon is a second, GUI-subsystem binary: started at
+    // login it must not open a console window. Same code, told apart by name.
+    if (target.result.os.tag == .windows) {
+        const gui = b.addExecutable(.{
+            .name = "agent-belt",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        gui.root_module.addOptions("build_options", options);
+        gui.subsystem = .windows;
+        for ([_]*std.Build.Step.Compile{ exe, gui }) |artifact| {
+            artifact.root_module.addWin32ResourceFile(.{ .file = b.path("src/windows/agb.rc") });
+            for ([_][]const u8{ "user32", "gdi32", "shell32", "winmm", "advapi32" }) |lib| artifact.root_module.linkSystemLibrary(lib, .{});
+        }
+        b.installArtifact(gui);
+    }
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);

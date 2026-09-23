@@ -115,6 +115,11 @@ tmux is MSYS2's (`C:\msys64\usr\bin\tmux.exe`); `agb.exe` runs it through MSYS2'
 bash, which provides its runtime and paths. Git and the agents are native: repositories
 live under `C:\dev` (`WORK_REPOS_DIR` overrides), paths are converted between `C:\…`
 and `/c/…` as each tool expects, and native agents run under `winpty` inside the pane.
+MSYS2's tmux does not accept a native console as a terminal, so `agb attach` runs it
+under `script`, which provides a pty.
+
+`agb deploy` also installs `agent-belt.exe`, the tray daemon (see the README's Windows
+section): its menu lists these sessions and opens them in a terminal window.
 
 ## Adopting an agent started outside tmux
 

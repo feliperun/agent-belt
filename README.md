@@ -6,7 +6,7 @@
 
 <p align="center">
   A utility belt for people who work with coding agents 🦇<br>
-  A 6-key macropad with a knob becomes voice dictation, agent switching, attention lights and shortcuts for Claude Code and Codex, on macOS.
+  A 6-key macropad with a knob becomes voice dictation, agent switching, attention lights and shortcuts for Claude Code and Codex, on macOS; agent sessions on macOS, Linux and Windows, with a tray app on Windows.
 </p>
 
 <p align="center">
@@ -76,6 +76,28 @@ The first time, allow **Agent Belt** in
 [Microphone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone) is asked on the first
 dictation. The daemon opens whichever list is still missing, and `agb permissions` opens all
 three. `agb status` confirms everything is in place.
+
+### Windows
+
+`agb` runs on Windows as a CLI (sessions, above) and a tray daemon, `agent-belt.exe`.
+From a Mac with this checkout, `agb deploy <machine>` builds and copies both; then, on
+the Windows machine (or over ssh), with `DEEPGRAM_API_KEY` set:
+
+```powershell
+agb install      # Deepgram key into Credential Manager, start at login, start now
+agb uninstall    # remove the login item
+```
+
+| Shortcut | Action |
+|---|---|
+| hold `Ctrl+Alt+D` | dictation, with the same overlay; the text is typed where the cursor is |
+| `Ctrl+Alt+Space` | the agent menu |
+| `Ctrl+Alt+↑` | `agb sessions` in a terminal window |
+
+The tray icon's menu lists the agent sessions of every machine (click one to attach in
+a terminal), **Novo agente…** (type the same words `agb new` takes), the log
+(`%LOCALAPPDATA%\agent-belt\agent-belt.log`) and quit. The macropad and its lights are
+macOS-only for now.
 
 ## Agents
 

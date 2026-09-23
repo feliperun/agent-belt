@@ -395,12 +395,12 @@ fn str(v: ?std.json.Value) ?[]const u8 {
 
 // ---------------------------------------------------------------- listing
 
-const Row = struct { host: hosts.Host, name: []const u8, windows: []const u8, created: []const u8, attached: bool, agent: []const u8, path: []const u8 };
-const HostState = struct { ok: bool = false, outside: usize = 0, sessions: usize = 0 };
+pub const Row = struct { host: hosts.Host, name: []const u8, windows: []const u8, created: []const u8, attached: bool, agent: []const u8, path: []const u8 };
+pub const HostState = struct { ok: bool = false, outside: usize = 0, sessions: usize = 0 };
 
-const Collected = struct { rows: []Row, states: []HostState };
+pub const Collected = struct { rows: []Row, states: []HostState };
 
-fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
+pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
     const outputs = try ctx.gpa.alloc([]const u8, reg.hosts.len);
     const threads = try ctx.gpa.alloc(?std.Thread, reg.hosts.len);
     const Worker = struct {
@@ -855,7 +855,9 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     switch (h.kind) {
         .posix => try mk.append(ctx.gpa, "mkdir -p ~/.local/bin ~/.config/work"),
         // Also puts ~\.local\bin on the user's PATH, so `agb` works in any new terminal.
-        .msys => try mk.append(ctx.gpa, try ctx.fmt("New-Item -ItemType Directory -Force -Path C:\\Users\\{s}\\.local\\bin,C:\\Users\\{s}\\.config\\work | Out-Null; $b='C:\\Users\\{s}\\.local\\bin'; $p=[Environment]::GetEnvironmentVariable('Path','User'); if (($p -split ';') -notcontains $b) {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';' + $b), 'User') }}", .{ user, user, user })),
+        .msys => try mk.append(ctx.gpa, try ctx.fmt("New-Item -ItemType Directory -Force -Path C:\\Users\\{s}\\.local\\bin,C:\\Users\\{s}\\.config\\work | Out-Null; $b='C:\\Users\\{s}\\.local\\bin'; $p=[Environment]::GetEnvironmentVariable('Path','User'); if (($p -split ';') -notcontains $b) {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';' + $b), 'User') }}; " ++
+            // A running agb.exe (an attached terminal) cannot be overwritten, only renamed.
+            "Remove-Item \"$b\\agb.old-*.exe\" -ErrorAction SilentlyContinue; if (Test-Path \"$b\\agb.exe\") {{ Move-Item -Force \"$b\\agb.exe\" \"$b\\agb.old-$([DateTime]::Now.Ticks).exe\" }}", .{ user, user, user })),
     }
     if (!sys.run(ctx, mk.items, null).ok) return error.Unreachable;
     const dest_bin = switch (h.kind) {
@@ -876,8 +878,34 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     scp.items[scp.items.len - 2] = tmp_conf;
     scp.items[scp.items.len - 1] = dest_conf;
     if (!sys.run(ctx, scp.items, null).ok) return error.CopyFailed;
+    if (h.kind == .msys) try deployTray(ctx, h, user, prefix, &ssh_opts);
     const probe = remote(ctx, h, &.{"_probe"});
     std.debug.print("   {s}\n", .{if (probe.ok) std.mem.trim(u8, probe.stdout, " \r\n") else "installed, but agb did not answer"});
+}
+
+/// The Windows tray daemon is locked while it runs: it is copied aside, swapped
+/// in, and a running one is restarted in the logged-on user's desktop session
+/// (a process started over ssh would live in the invisible service session).
+fn deployTray(ctx: sys.Ctx, h: hosts.Host, user: []const u8, prefix: []const u8, ssh_opts: []const []const u8) !void {
+    const bin = try ctx.fmt("C:\\Users\\{s}\\.local\\bin", .{user});
+    var scp: std.ArrayList([]const u8) = .empty;
+    try scp.append(ctx.gpa, "scp");
+    try scp.appendSlice(ctx.gpa, ssh_opts);
+    try scp.appendSlice(ctx.gpa, &.{ "-q", try ctx.fmt("{s}/bin/agent-belt.exe", .{prefix}), try ctx.fmt("{s}:C:/Users/{s}/.local/bin/agent-belt.new.exe", .{ h.target, user }) });
+    if (!sys.run(ctx, scp.items, null).ok) return error.CopyFailed;
+    const script = try ctx.fmt(
+        "$b='{s}'; $run=[bool](Get-Process agent-belt -ErrorAction SilentlyContinue); " ++
+            "Stop-Process -Name agent-belt -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; " ++
+            "Move-Item -Force \"$b\\agent-belt.new.exe\" \"$b\\agent-belt.exe\"; " ++
+            "if ($run) {{ schtasks /create /tn AgentBelt /tr \"$b\\agent-belt.exe\" /sc once /st 00:00 /it /f | Out-Null; schtasks /run /tn AgentBelt | Out-Null; 'tray restarted' }} else {{ 'tray installed (agb install starts it at login)' }}",
+        .{bin},
+    );
+    var argv: std.ArrayList([]const u8) = .empty;
+    try argv.append(ctx.gpa, "ssh");
+    try argv.appendSlice(ctx.gpa, ssh_opts);
+    try argv.appendSlice(ctx.gpa, &.{ h.target, script });
+    const out = sys.run(ctx, argv.items, null);
+    std.debug.print("   {s}\n", .{std.mem.trim(u8, if (out.ok) out.stdout else out.stderr, " \r\n")});
 }
 
 // ---------------------------------------------------------------- tests

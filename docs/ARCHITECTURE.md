@@ -32,6 +32,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/updater.m` | release checks, notifications, source updates |
 | `src/system.m` | permissions, Keychain, single instance, `agb status` |
 | `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms) |
+| `src/windows/` | the Windows tray daemon (`agent-belt.exe`): notification-area menu, dictation overlay, push-to-talk, Win32 bindings |
 | `install.sh` | build, bundle, sign, Keychain, LaunchAgent |
 
 ## Runtime & hosting
