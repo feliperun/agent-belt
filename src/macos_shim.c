@@ -1,4 +1,5 @@
 #include "macos_shim.h"
+#include "audio_meter.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -209,14 +210,7 @@ static void mk_audio_callback(
     if (buffer->mAudioDataByteSize > 0) {
         const int16_t *samples = buffer->mAudioData;
         const size_t sample_count = buffer->mAudioDataByteSize / sizeof(int16_t);
-        uint64_t sum = 0;
-        for (size_t i = 0; i < sample_count; i++) {
-            const int32_t sample = samples[i];
-            sum += (uint32_t)(sample < 0 ? -sample : sample);
-        }
-        const uint32_t mean = sample_count ? (uint32_t)(sum / sample_count) : 0;
-        const uint32_t scaled = mean >= 5000 ? 1000 : mean / 5;
-        atomic_store_explicit(&mk_audio_level, scaled, memory_order_relaxed);
+        atomic_store_explicit(&mk_audio_level, mk_pcm_level_permille(samples, sample_count), memory_order_relaxed);
         mk_append_pcm(recorder, buffer->mAudioData, buffer->mAudioDataByteSize);
     }
     if (recorder->started) AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
@@ -251,7 +245,7 @@ int mk_recorder_start(mk_recorder *recorder) {
     if (status != noErr) return (int)status;
 
     for (size_t i = 0; i < 3; i++) {
-        status = AudioQueueAllocateBuffer(recorder->queue, 3200, &recorder->buffers[i]);
+        status = AudioQueueAllocateBuffer(recorder->queue, MK_AUDIO_BUFFER_BYTES, &recorder->buffers[i]);
         if (status != noErr) return (int)status;
         status = AudioQueueEnqueueBuffer(recorder->queue, recorder->buffers[i], 0, NULL);
         if (status != noErr) return (int)status;

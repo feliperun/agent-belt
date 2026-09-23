@@ -23,10 +23,12 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
 @property(nonatomic) NSInteger mode;
 @property(nonatomic) double started, lastTick, phase;
 @property(nonatomic) CGFloat level, releaseLevel;
+@property(nonatomic) double signalPhase, motion, previousTarget;
 @property(nonatomic) BOOL reducedMotion;
 @property(nonatomic, strong) NSTimer *animationTimer;
 - (void)showMode:(NSInteger)mode;
 - (void)stopAnimation;
+- (void)updateAudio:(double)target elapsed:(double)dt;
 @end
 
 @implementation MKOverlayView
@@ -45,20 +47,33 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
             const double dt = fmin(0.1, now - view.lastTick);
             view.lastTick = now;
             view.phase += dt;
+            const double previewTime = now - view.started;
             const double target = view.mode == 1
-                ? (mk_preview_mode ? 0.24 + 0.2 * sin(now * 3) : mk_audio_level_permille() / 1000.0)
+                ? (mk_preview_mode
+                    ? 0.04 + (0.25 + 0.6 * mk_ease(previewTime / 3)) * pow(fmax(0, sin(previewTime * 16)), 0.6)
+                    : mk_audio_level_permille() / 1000.0)
                 : 0;
-            view.level += (target - view.level) * (1 - exp(-dt / (target > view.level ? 0.055 : 0.19)));
+            [view updateAudio:target elapsed:dt];
             [view setNeedsDisplay:YES];
         }];
         [[NSRunLoop mainRunLoop] addTimer:self.animationTimer forMode:NSRunLoopCommonModes];
     }
     [self setNeedsDisplay:YES];
 }
+- (void)updateAudio:(double)target elapsed:(double)dt {
+    // Fast attack follows syllables; the short release leaves space between words.
+    self.level += (target - self.level) * (1 - exp(-dt / (target > self.level ? 0.016 : 0.085)));
+    const double onset = fmax(0, target - self.previousTarget - 0.025);
+    self.motion = fmax(fmin(1, onset * 2.5), self.motion * exp(-dt / 0.1));
+    self.previousTarget = target;
+    // Louder speech travels faster; successive attacks add brief bursts of motion.
+    self.signalPhase += dt * (2 + self.level * 10 + self.motion * 14);
+}
 - (void)stopAnimation {
     [self.animationTimer invalidate];
     self.animationTimer = nil;
     self.level = 0;
+    self.motion = self.previousTarget = 0;
 }
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
@@ -115,16 +130,18 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
     [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(light.x - 1.4, light.y - 1.4, 2.8, 2.8)] fill];
 }
 - (void)drawSignal:(double)t morph:(double)morph {
-    const double energy = sqrt(fmax(0, self.mode == 1 ? self.level : self.releaseLevel));
+    const double energy = fmax(0, self.mode == 1 ? self.level : self.releaseLevel);
+    const double travel = self.reducedMotion ? 0 : self.signalPhase;
+    const double detail = self.reducedMotion ? 0 : self.motion;
     // Continuous ribbons settle into the typographic baseline; no random glyph flicker.
     for (NSUInteger layer = 0; layer < 3; layer++) {
         NSBezierPath *wave = [NSBezierPath bezierPath];
         for (NSUInteger i = 0; i <= 90; i++) {
             const double u = i / 90.0;
             const double envelope = pow(sin(u * M_PI), 1.5);
-            const double amplitude = (1 + energy * 10) * envelope * (1 - morph);
-            const double y = 28 + amplitude * (sin(u * 3 * M_PI - t * 3.6 + layer * 0.6) * 0.72 +
-                                              sin(u * 7 * M_PI + t * 1.7) * 0.28);
+            const double amplitude = (0.5 + energy * 14.5) * envelope * (1 - morph);
+            const double y = 28 + amplitude * (sin(u * (4 + detail * 2) * M_PI - travel + layer * 0.6) * 0.72 +
+                                              sin(u * 9 * M_PI + travel * 0.6) * 0.28);
             const double inset = 28 * mk_ease(morph * 2);
             const NSPoint point = NSMakePoint(66 + inset + u * (160 - inset), y);
             if (i == 0) [wave moveToPoint:point]; else [wave lineToPoint:point];

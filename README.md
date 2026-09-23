@@ -38,6 +38,9 @@ Durante o uso normal, a janela aparece no canto superior direito da tela onde es
 o ponteiro do mouse. Ela não recebe foco nem cliques. Ao concluir, faz uma saída
 de 120 ms; a inserção do texto aguarda a janela desaparecer por completo.
 A preferência de acessibilidade “Reduzir movimento” também é respeitada.
+A onda acompanha o áudio a cada 20 ms: volume aumenta sua altura e velocidade,
+e os ataques das sílabas dão impulsos curtos de movimento. O medidor visual usa
+uma escala de voz em decibéis; isso não altera o ganho do áudio enviado à API.
 
 `zig build test` verifica a posição, preservação do foco, resposta ao nível de
 áudio e fechamento completo antes de liberar a inserção. O teste abre o painel

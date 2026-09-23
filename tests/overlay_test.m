@@ -5,12 +5,51 @@
 #include <stdio.h>
 #include <time.h>
 #import "../src/status_item.m"
+#include "../src/audio_meter.h"
 
 static uint32_t test_level;
 uint32_t mk_audio_level_permille(void) { return test_level; }
 uint64_t mk_monotonic_ns(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
 static atomic_bool test_dismissed;
 static int test_dismiss_result;
+
+static uint32_t tone_level(double amplitude) {
+    int16_t samples[320];
+    for (size_t i = 0; i < 320; i++) samples[i] = (int16_t)(sin(i * 2 * M_PI / 40) * amplitude);
+    return mk_pcm_level_permille(samples, 320);
+}
+
+static void test_speech_response(void) {
+    const uint32_t quiet = tone_level(120);
+    const uint32_t normal = tone_level(900);
+    const uint32_t loud = tone_level(10000);
+    assert(tone_level(0) == 0 && tone_level(25) == 0);
+    assert(quiet > 100 && quiet < 400);
+    assert(normal > 450 && normal < 800);
+    assert(loud > 950 && loud <= 1000);
+    assert(mk_pcm_level_permille(NULL, 0) == 0);
+    const int16_t clipped[] = {INT16_MIN, INT16_MAX};
+    assert(mk_pcm_level_permille(clipped, 2) == 1000);
+
+    MKOverlayView *voice = [[MKOverlayView alloc] initWithFrame:NSZeroRect];
+    [voice updateAudio:0.8 elapsed:0.02];
+    assert(voice.level > 0.55); // A syllable must register within one audio buffer.
+    for (int i = 0; i < 10; i++) [voice updateAudio:0 elapsed:0.02];
+    assert(voice.level < 0.06); // A pause should visibly quiet the line.
+
+    MKOverlayView *soft = [[MKOverlayView alloc] initWithFrame:NSZeroRect];
+    MKOverlayView *strong = [[MKOverlayView alloc] initWithFrame:NSZeroRect];
+    MKOverlayView *syllables = [[MKOverlayView alloc] initWithFrame:NSZeroRect];
+    for (int i = 0; i < 100; i++) {
+        [soft updateAudio:0.15 elapsed:0.02];
+        [strong updateAudio:0.75 elapsed:0.02];
+        [syllables updateAudio:(i % 10 < 5 ? 0.3 : 0) elapsed:0.02];
+    }
+    assert(strong.signalPhase > soft.signalPhase * 2);
+    // Same mean input level as soft, but faster syllables should move more.
+    assert(syllables.signalPhase > soft.signalPhase * 1.2);
+    printf("audio response: quiet=%u normal=%u loud=%u; attack, release and cadence OK\n", quiet, normal, loud);
+}
 
 static void pump(double seconds) {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
@@ -43,6 +82,7 @@ static void dismiss_from_worker(void) {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
+        test_speech_response();
         const char *directory = argc > 1 ? argv[1] : NULL;
         const pid_t frontmost = [NSWorkspace sharedWorkspace].frontmostApplication.processIdentifier;
         assert(mk_status_init() == 0);
