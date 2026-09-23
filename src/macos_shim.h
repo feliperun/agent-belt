@@ -21,6 +21,11 @@ void mk_scroll_down(int32_t lines);
 int mk_system_media_key(const void *event, int *key, int *pressed);
 void mk_agents_bottom(void);
 void mk_agents_monitor(void);
+void mk_led_start(uint16_t vendor_id, uint16_t product_id);
+void mk_led_status(int status);
+/* 0 nothing, 1 an agent finished, 2 an agent waits for you */
+void mk_led_agents(int attention);
+int mk_led_set(uint16_t vendor_id, uint16_t product_id, int color, int mode);
 /* tone: 0 idle, 1 working, 2 done, 3 waiting */
 void mk_hud_show(const char *title, const char *detail, int tone);
 int mk_event_tap_run(mk_event_filter_callback filter, void *context);

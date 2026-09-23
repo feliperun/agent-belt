@@ -10,6 +10,7 @@
 static uint32_t test_level;
 uint32_t mk_audio_level_permille(void) { return test_level; }
 uint64_t mk_monotonic_ns(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+void mk_led_status(int status) { (void)status; }
 static atomic_bool test_dismissed;
 static int test_dismiss_result;
 

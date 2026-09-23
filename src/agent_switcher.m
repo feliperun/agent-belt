@@ -485,6 +485,7 @@ static void MKObserve(NSArray<MKAgentTarget *> *ring) {
 static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
     dispatch_apply(ring.count, DISPATCH_APPLY_AUTO, ^(size_t i) {
         MKAgentTarget *target = ring[i];
+        if (target.state == MKStateWorking) return; // a spinning agent is not asking
         BOOL waiting = NO;
         if (target.pane) {
             NSData *screen = MKRun(MKToolPath(@"tmux", @"MINIKEYBOARD_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
@@ -496,6 +497,14 @@ static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
         }
         if (waiting) target.state = MKStateWaiting;
     });
+}
+
+// Key LEDs: red while an agent waits for you, green when one finished unseen.
+static void MKUpdateLed(NSArray<MKAgentTarget *> *ring) {
+    int attention = 0;
+    for (MKAgentTarget *target in ring)
+        attention = MAX(attention, target.state == MKStateWaiting ? 2 : target.state == MKStateDone ? 1 : 0);
+    mk_led_agents(attention);
 }
 
 // Who needs you first: waiting for approval, then finished and unseen, then
@@ -540,7 +549,9 @@ static int MKCycle(BOOL desktop) {
         if (!MKFocus(target)) continue; // app/tab may have closed after discovery
         [target.key writeToFile:MKLastKeyPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
         [mk_done removeObject:target.key]; // seen
+        if (target.state == MKStateDone) target.state = MKStateIdle;
         MKShowHud(target, mk_ring);
+        MKUpdateLed(mk_ring);
         fprintf(stderr, "[minikeyboard] AGENT → %s\n", target.label.UTF8String);
         return 0;
     }
@@ -616,7 +627,8 @@ void mk_agents_bottom(void) {
     });
 }
 
-// Daemon only: watch titles every 5 s so "finished" is caught between presses.
+// Daemon only: every 5 s, catch "finished" and "waiting" between presses and
+// reflect them on the key LEDs.
 void mk_agents_monitor(void) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     static dispatch_source_t timer;
@@ -625,7 +637,12 @@ void mk_agents_monitor(void) {
     timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, mk_agents_queue);
     dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC, NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{
-        @autoreleasepool { MKObserve(MKTerminalTargets()); }
+        @autoreleasepool {
+            NSArray *ring = MKTerminalTargets();
+            MKObserve(ring);
+            MKDetectWaiting(ring);
+            MKUpdateLed(ring);
+        }
     });
     dispatch_resume(timer);
 }

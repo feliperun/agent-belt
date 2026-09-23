@@ -27,6 +27,8 @@ pub const Config = struct {
     knob: []const u8 = "scroll",
     /// Lines per detent; negative inverts the direction.
     knob_scroll_lines: i32 = 3,
+    /// Key LEDs follow push-to-talk and agents: rainbow recording, red waiting, green finished.
+    led: bool = true,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
         .{ .action = "key", .value = "shift+tab" },
@@ -102,6 +104,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"deepgram_mip_opt_out\": true,\n" ++
         "  \"knob\": \"scroll\",\n" ++
         "  \"knob_scroll_lines\": 3,\n" ++
+        "  \"led\": true,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
         "    {\"action\": \"key\", \"value\": \"shift+tab\"},\n" ++
@@ -224,6 +227,7 @@ test "default JSON and struct agree: Esc 0, Shift+Tab 1, Delete 2, PTT 3, agents
     defer parsed.deinit();
     try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
     try std.testing.expectEqual((Config{}).knob_scroll_lines, parsed.value.knob_scroll_lines);
+    try std.testing.expectEqual((Config{}).led, parsed.value.led);
     for ((Config{}).bindings, parsed.value.bindings, 0..) |expected, actual, index| {
         try std.testing.expectEqualStrings(expected.action, actual.action);
         const action = try actionType(actual.action);

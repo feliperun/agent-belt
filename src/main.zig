@@ -39,6 +39,15 @@ pub fn main(init: std.process.Init) !void {
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
 
+    if (std.mem.eql(u8, argv[1], "led")) {
+        if (argc != 4) return usage();
+        const color = std.fmt.parseInt(u8, argv[2], 10) catch return usage();
+        const mode = std.fmt.parseInt(u8, argv[3], 10) catch return usage();
+        var parsed = try store.load();
+        defer parsed.deinit();
+        return macos.ledSet(parsed.value.vendor_id, parsed.value.product_id, color, mode);
+    }
+
     if (std.mem.eql(u8, argv[1], "preview")) {
         try macos.previewOverlay();
         return;
@@ -125,6 +134,7 @@ fn usage() !void {
         "  minikeyboard bind <a-f> disabled\n" ++
         "  minikeyboard devices\n" ++
         "  minikeyboard status\n" ++
+        "  minikeyboard led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
         "  minikeyboard daemon\n" ++
         "  minikeyboard preview\n" ++
         "  minikeyboard agents <list|next|bottom> [desktop]\n" ++

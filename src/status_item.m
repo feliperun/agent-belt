@@ -277,6 +277,7 @@ int mk_status_init(void) {
 }
 
 void mk_status_set(int status) {
+    mk_led_status(status);
     if (!mk_status_runloop) return;
     CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
         @autoreleasepool {

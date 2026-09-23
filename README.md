@@ -152,3 +152,11 @@ registrar o knob; as teclas de volume do próprio Mac continuam funcionando. No 
 `"knob": "system"` devolve o controle de volume; um `knob_scroll_lines` negativo inverte
 o sentido. Nas sessões `work`, o tmux precisa de `mouse on` (o `work` já liga) para a
 roda rolar o copy-mode em vez de virar setas no prompt do agente.
+
+## LEDs
+
+As teclas acendem conforme o estado: **arco-íris** gravando, **ciano** transcrevendo,
+**vermelho** quando um agente aguarda você, **verde** quando um terminou e você ainda não
+viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda ciano a cada toque. Protocolo
+e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
+`minikeyboard led <cor> <modo>` troca à mão.

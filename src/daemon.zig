@@ -111,6 +111,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
         return err;
     };
     macos.agentsMonitor();
+    if (config.led) macos.ledStart(config.vendor_id, config.product_id);
     std.debug.print("[minikeyboard] pronto: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
     // "system" leaves the knob as the device's volume control.

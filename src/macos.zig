@@ -57,6 +57,18 @@ pub fn scrollDown(lines: i32) void {
     c.mk_scroll_down(lines);
 }
 
+pub fn ledStart(vendor_id: u16, product_id: u16) void {
+    c.mk_led_start(vendor_id, product_id);
+}
+
+pub fn ledSet(vendor_id: u16, product_id: u16, color: u8, mode: u8) !void {
+    return switch (c.mk_led_set(vendor_id, product_id, color, mode)) {
+        0 => {},
+        -2 => error.InvalidLed,
+        else => error.LedDeviceUnavailable,
+    };
+}
+
 pub fn agentsMonitor() void {
     c.mk_agents_monitor();
 }
