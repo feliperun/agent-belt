@@ -186,3 +186,11 @@ As teclas acendem conforme o estado: **branco** gravando, **ciano** transcrevend
 viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque. Protocolo
 e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
 `agb led <cor> <modo>` troca à mão.
+
+## work: sessões de agente em qualquer máquina
+
+`work/` (antes o repositório `tmux`, trazido com o histórico) cria uma sessão tmux com
+um worktree e um agente dentro, em qualquer máquina do tailnet: `work <tarefa> [repo]`,
+`work <máquina> <tarefa> [repo] --codex`. O `./install.sh` instala `work`, `work-session`
+e `tm`; para as outras máquinas, `work/scripts/deploy.sh --all`. Detalhes em
+[work/README.md](work/README.md).

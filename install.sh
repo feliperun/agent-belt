@@ -111,6 +111,10 @@ rm -rf "$HOME/Applications/Minikeyboard.app"
 [ -f "$HOME/.config/minikeyboard/config.json" ] && [ ! -f "$HOME/.config/agent-belt/config.json" ] &&
   mkdir -p "$HOME/.config/agent-belt" && cp "$HOME/.config/minikeyboard/config.json" "$HOME/.config/agent-belt/"
 
+# work/tm: tmux sessions with an agent inside, on any machine of the tailnet.
+say "instalando work, work-session e tm"
+"$src/work/install.sh" --no-discover >/dev/null
+
 if [ "$keep_config" = 0 ]; then
   say "config regenerada a partir de src/config.zig"
   "$exe" init >/dev/null 2>&1
