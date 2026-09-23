@@ -1,228 +1,218 @@
-# agent-belt
+<p align="center">
+  <img src="assets/icon-256.png" width="128" alt="Agent Belt">
+</p>
 
-Daemon macOS em Zig para transformar um agent-belt HID em atalhos configuráveis.
+<h1 align="center">Agent Belt</h1>
+
+<p align="center">
+  O cinto de utilidades de quem trabalha com coding agents 🦇<br>
+  Um macropad de 6 teclas + knob vira ditado por voz, troca entre agentes, luzes de aviso e atalhos para o Claude Code e o Codex, no macOS.
+</p>
+
+<p align="center">
+  <a href="https://github.com/feliperun/agent-belt/actions/workflows/ci.yml"><img src="https://github.com/feliperun/agent-belt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/feliperun/agent-belt/releases/latest"><img src="https://img.shields.io/github/v/release/feliperun/agent-belt" alt="Release"></a>
+</p>
+
+<p align="center">
+  <img src="assets/overlay.gif" width="560" alt="Overlay ouvindo a voz e decifrando a transcrição">
+</p>
+
+## O que tem no cinto
+
+| Gadget | O que faz |
+|---|---|
+| 🎙️ **Ditado** | Segure a tecla, fale, solte: o Deepgram transcreve e o texto aparece onde está o cursor. |
+| 🔀 **Troca de agentes** | Um toque vai para o próximo agente, primeiro para quem espera uma decisão sua ou acabou de terminar. |
+| 📋 **Menu de agentes** | Todos os agentes, com estado, recap, tempo, custo, tokens e as cotas do Claude e do Codex. |
+| 🦇 **Novo agente por voz** | *"Crie um agente no Windows com Codex no coreum para investigar o login"*: abre a sessão pronta, em qualquer máquina do tailnet. |
+| 🚨 **Sinal** | As teclas acendem vermelho quando um agente aguarda você e verde quando um termina; longe do Mac, chega um aviso no WhatsApp. |
+| 🎛️ **Knob** | Girar rola a página; apertar leva todos os agentes de volta ao fim da saída. |
+| ⌨️ **Sem o tecladinho** | Atalhos no teclado do Mac e um menu na barra de menus fazem tudo o que o macropad faz. |
+
+## As teclas
+
+```
+┌──────┬──────┬──────┐   ╭────╮
+│  0   │  1   │  2   │   │knob│  girar: rolar · apertar: agentes de volta ao fim
+│ Esc  │ menu │Delete│   ╰────╯
+├──────┼──────┼──────┤
+│  3   │  4   │  5   │
+│ fala │agente│Return│
+└──────┴──────┴──────┘
+```
+
+- **3, segurar:** ditado (com o menu de agentes aberto, vira um comando de voz).
+- **4:** próximo agente, priorizando quem aguarda você.
+- **1:** menu de agentes. Toque navega, duplo toque abre.
+- **0, 2, 5:** Esc, Delete e Return, que repetem ao segurar.
 
 ## Instalação
 
-Numa máquina nova (precisa do Xcode Command Line Tools e do `zig`: `brew install zig`):
+Precisa de macOS 14+, Xcode Command Line Tools, `zig` (`brew install zig`) e uma chave do
+[Deepgram](https://deepgram.com).
 
 ```sh
+export DEEPGRAM_API_KEY=...
 curl -fsSL https://raw.githubusercontent.com/feliperun/agent-belt/main/scripts/update.sh | bash
 ```
 
-Isso baixa a última release e roda o `./install.sh` dela. Do repositório clonado, basta
-`./install.sh`.
+O comando baixa a última release e roda o `./install.sh` dela. De um clone do repositório,
+basta rodar `./install.sh`. O instalador:
 
-### Atualizações
+- compila e monta `~/Applications/Agent Belt.app`, assinado com o seu certificado Apple
+  Development quando houver um, o que faz as permissões sobreviverem às atualizações;
+- guarda a chave do Deepgram no Keychain;
+- registra o LaunchAgent `com.frb.agentbelt`, que sobe no login e reinicia se cair;
+- instala a CLI `agb` e as ferramentas `work`, `work-session` e `tm` em `~/.local/bin`.
 
-O Agent Belt consulta as releases do GitHub a cada 6 h. Quando sai uma versão nova,
-aparece uma notificação com as notas e o botão **Atualizar**, e uma linha no rodapé do
-menu de agentes; `agb update` faz o mesmo na hora. A atualização compila a release a
-partir do código e assina com o seu certificado, então as permissões do macOS continuam
-valendo. As versões saem pelo release-please: cada `feat:`/`fix:` entra no PR de release,
-e o merge publica a tag, o changelog e um `.zip` do app.
+Na primeira vez, autorize **Agent Belt** em
+[Monitoramento de Entrada](x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent) e
+[Acessibilidade](x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility).
+O [Microfone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone) é pedido no primeiro
+ditado. O daemon abre sozinho a lista que faltar, e `agb permissions` abre as três.
+`agb status` confirma se está tudo certo.
 
-```sh
-./install.sh
-```
+## Agentes
 
-Compila, empacota em `~/Applications/Agent Belt.app` (assinado com o seu certificado
-Apple Development, para as permissões sobreviverem a cada atualização), guarda
-`DEEPGRAM_API_KEY` no Keychain e registra o LaunchAgent `com.frb.agentbelt`, que sobe
-no login e renasce se cair. Na primeira vez, autorize "Agent Belt" em Monitoramento de
-Entrada e Acessibilidade; o daemon tenta de novo a cada ~15 s e segue sozinho quando elas aparecem. O Microfone é pedido no primeiro
-push-to-talk.
+<p align="center">
+  <img src="assets/menu.png" width="440" alt="Menu de agentes">
+</p>
 
-Links diretos: [Monitoramento de Entrada](x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent),
-[Acessibilidade](x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility) e
-[Microfone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone), ou `agb permissions`, que
-abre os três; o daemon abre sozinho o que faltar.
+O Agent Belt enxerga os agentes que estão rodando em terminais do Orca
+e em sessões tmux do `work`, esteja o tmux dentro do Orca ou em outro terminal. Para cada
+um, ele mostra:
 
-A configuração vem do código: edite os padrões em `src/config.zig` e rode `./install.sh`
-de novo, que regenera `~/.config/agent-belt/config.json` (`--keep-config` preserva o
-arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica em
-`~/Library/Logs/agent-belt.log` e o CLI em `~/.local/bin/agent-belt`.
+- **Estado:** 🔴 aguardando uma decisão sua (prompt de aprovação na tela), 🟢 terminou e
+  você ainda não viu, 🔵 trabalhando, ⚪ ocioso.
+- **Título e recap:** o título que o próprio Claude Code dá à sessão, e o resumo ou o último
+  pedido.
+- **Tempo, custo e tokens:** somados dos transcripts, incluindo subagentes, pelo preço de
+  lista.
+- **Cotas:** janela de 5 h e semanal do Claude e do Codex.
 
-## Estado atual
+Os detalhes e as fontes de cada dado estão em [docs/agent-stats.md](docs/agent-stats.md).
 
-- monitoramento do teclado HID `VID=0x514c`, `PID=0x8850`;
-- seis teclas (`a` a `f`, ou `0` a `5`) descobertas pelo uso HID `0x07/0x04..0x09`;
-- tecla `3` (`d`) como push-to-talk e tecla `4` (`e`) alternando coding agents por padrão;
-- gravação PCM mono 16 kHz em memória, empacotada como WAV;
-- transcrição via Deepgram REST (`nova-3`, `smart_format` e `mip_opt_out`);
-- inserção do resultado no aplicativo em foco usando eventos Unicode do macOS;
-- cápsula flutuante no canto superior direito, com ondas que respondem ao áudio e se transformam em traços de texto durante a transcrição;
-- bindings de `ptt`, `agents`, `command`, `script`, `text` e `disabled`;
-- knob: girar rola a página e apertar leva os coding agents de volta ao fim;
-- instalação opcional como LaunchAgent;
-- indicador na barra de menus: `🔴 REC` enquanto grava, `⏳` durante a transcrição e `⚠︎` em caso de erro.
+A tecla 4 e o menu levam ao agente escolhido: trocam a aba no Orca, restauram a janela se
+estiver minimizada e trazem o app para frente.
 
-## Requisitos
+### Novo agente por voz
 
-- macOS;
-- Zig 0.16+;
-- permissão de Microphone para o binário;
-- permissões de Input Monitoring/Accessibility para ler o HID e inserir texto;
-- `DEEPGRAM_API_KEY` exportada no ambiente do daemon.
-
-## Compilar e usar
+Com o menu aberto, segure a tecla de fala e peça. Um Claude Haiku (`claude -p`, com a sua
+conta) entende máquina, agente, repositório e tarefa. Em seguida, um terminal novo no Orca
+roda o `work` com a instrução como primeiro prompt. O mesmo funciona pelo terminal, e
+também para outro agente:
 
 ```sh
-zig build -Doptimize=ReleaseSafe
-agb init
-export DEEPGRAM_API_KEY='...'
-agb daemon
+agb new --dry-run crie um agente no windows com codex no coreum para investigar o login
+# work felipe-windows investigar-login coreum --agent codex --prompt 'Investigue…'
 ```
 
-Para ver a animação sem microfone nem teclado, execute `agb preview`.
-Ela exibe quatro segundos de gravação simulada e quatro segundos de transcrição.
-Durante o uso normal, a janela aparece no canto superior direito da tela onde está
-o ponteiro do mouse. Ela não recebe foco nem cliques. Ao concluir, faz uma saída
-de 120 ms; a inserção do texto aguarda a janela desaparecer por completo.
-A preferência de acessibilidade “Reduzir movimento” também é respeitada.
-A onda acompanha o áudio a cada 20 ms: volume aumenta sua altura e velocidade,
-e os ataques das sílabas dão impulsos curtos de movimento. O medidor visual usa
-uma escala de voz em decibéis; isso não altera o ganho do áudio enviado à API.
+## Luzes
 
-`zig build test` verifica a posição, preservação do foco, resposta ao nível de
-áudio e fechamento completo antes de liberar a inserção. O teste abre o painel
-por alguns segundos e exige uma sessão gráfica do macOS; não usa microfone nem API.
+| Estado | Teclas |
+|---|---|
+| gravando | branco fixo |
+| transcrevendo | ciano fixo |
+| um agente aguarda você | **vermelho** |
+| um agente terminou | **verde** |
+| nada pendente | escuras, com uma onda branca a cada toque |
 
-Configuração é salva em `~/.config/agent-belt/config.json`.
-
-Na primeira execução, autorize o binário em Ajustes do Sistema → Privacidade e
-Segurança:
-
-- Input Monitoring, para o daemon poder ler os eventos do teclado HID;
-- Accessibility, para inserir o texto no aplicativo em foco;
-- Microphone, para a gravação.
-
-Se o binário for recompilado em outro caminho, o macOS pode pedir a autorização
-novamente. O daemon reporta `HidOpenFailed` quando o primeiro desses acessos ainda
-não foi concedido.
-
-Para diagnosticar a correlação entre o HID e os eventos de teclado do macOS:
-
-```sh
-AGENT_BELT_DEBUG_INPUT=1 agb daemon
-```
-
-Ao pressionar `a`, o diagnóstico deve mostrar `HID key=0 down` e um evento `TAP`
-correspondente com `suppress=yes`. O daemon também imprime `GRAVANDO`,
-`TRANSCRIVENDO` e `INSERIDO` durante o fluxo de push-to-talk.
-
-Exemplos:
-
-```sh
-agb bind a ptt
-agb bind b command 'open -a Calculator'
-agb bind c script '/Users/frb/bin/meu-script.sh'
-agb bind d text 'Olá!'
-agb bind e disabled
-agb bind 4 agents
-```
-
-Para rodar no login, compile o binário e execute `agb install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
-
-## Nota sobre captura
-
-O daemon usa o monitor HID sem privilégios de root e um CGEvent tap para
-suprimir os eventos `a`–`f` correlacionados ao agent-belt, evitando que eles
-também sejam digitados no aplicativo ativo.
-Após soltar uma tecla, ele mantém a supressão por 100 ms para absorver eventos
-de repetição atrasados do macOS.
-
-## Alternar coding agents
-
-A ação `agents` funciona como um alt-tab entre terminais com agentes rodando:
-
-- terminais do Orca em que o próprio Orca reconhece um agente;
-- terminais do Orca anexados a uma sessão tmux do `work` (o daemon lê `ORCA_TERMINAL_HANDLE` do cliente `tmux attach`);
-- sessões do `work` anexadas em outro app de terminal, que vem para frente.
-
-A tecla vai primeiro para quem precisa de você: um agente **aguardando aprovação**
-(prompt de permissão na tela ou `agentWait` do Orca), depois um que **terminou** e você
-ainda não viu (título saiu do spinner para `✳`), e só então segue o anel. Um HUD no canto
-direito mostra o agente, a posição e o estado; `agents list` mostra o estado de todos.
-
-Uma sessão só conta enquanto algum pane roda `claude`, `codex`, `opencode`, `gemini` etc.;
-se o agente encerrar, ela sai do anel. A ordem é estável e a posição fica em
-`~/Library/Caches/agent-belt/last-agent`. Para incluir também as janelas do Codex e
-do Claude Desktop: `bind 4 agents desktop`. Requer Accessibility.
-
-```sh
-agb agents list
-agb agents next
-agb agents bottom
-```
-
-## Menu de agentes (tecla 1)
-
-Um toque abre um menu flutuante com todos os agentes e o estado de cada um: vermelho
-aguardando uma decisão sua, verde terminou, azul trabalhando, cinza ocioso. Ele já começa
-em quem mais precisa de você. Com o menu aberto, um toque desce para o próximo e um duplo
-toque rápido abre o destacado. Some sozinho depois de 6 s sem toques.
+O protocolo dos LEDs foi obtido por engenharia reversa do configurador do fabricante; está em
+[docs/led-protocol.md](docs/led-protocol.md). Para trocar à mão: `agb led <cor> <modo>`.
 
 ## Sem o tecladinho
 
 | Atalho | Ação |
 |---|---|
-| `⌃⌥Espaço` | menu de agentes; repetir navega, `↩` abre, `Esc` fecha, `↑`/`↓` movem |
+| `⌃⌥Espaço` | menu de agentes; repetir navega, `↩` abre, `Esc` fecha, `↑` `↓` movem |
 | `⌃⌥↑` | próximo agente |
 | `⌃⌥↓` | agentes de volta ao fim |
 
-A barra de menus mostra 🔴 quando um agente aguarda você, 🟢 quando um terminou, 🎙️
-gravando e ⏳ transcrevendo; um clique abre o mesmo menu, com linhas clicáveis. Longe do
-Mac, um agente esperando há 3 min manda um aviso no WhatsApp. O menu traz título, recap,
-tempo, custo e tokens de cada sessão e as cotas dos planos; ver
-[docs/agent-stats.md](docs/agent-stats.md).
+Na barra de menus, a fivela ganha 🔴, 🟢, 🎙️ ou ⏳ conforme o estado, e um clique abre o
+menu de agentes com linhas clicáveis. Se um agente espera por você há 3 minutos e o Mac está
+parado, um aviso vai para o WhatsApp via `ford-send`.
 
-## Knob
+## Configuração
 
-O knob chega como Consumer Control (volume +/− e mute). O daemon transforma:
-
-- **girar** em scroll de linhas sob o ponteiro (horário desce). Giros rápidos aceleram até 4x;
-- **apertar** em "voltar ao fim": todo pane tmux de agente que esteja no histórico
-  (copy-mode) volta para a saída ao vivo, e a view de agente sob o ponteiro rola até o final.
-
-O volume e o mute do knob são bloqueados no event tap enquanto o HID acabou de
-registrar o knob; as teclas de volume do próprio Mac continuam funcionando. No config:
-
-```json
-"knob": "scroll",
-"knob_scroll_lines": 3
-```
-
-`"knob": "system"` devolve o controle de volume; um `knob_scroll_lines` negativo inverte
-o sentido. Nas sessões `work`, o tmux precisa de `mouse on` (o `work` já liga) para a
-roda rolar o copy-mode em vez de virar setas no prompt do agente.
-
-## LEDs
-
-As teclas acendem conforme o estado: **branco** gravando, **ciano** transcrevendo,
-**vermelho** quando um agente aguarda você, **verde** quando um terminou e você ainda não
-viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque. Protocolo
-e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
-`agb led <cor> <modo>` troca à mão.
-
-## Criar agentes por voz
-
-Com o menu de agentes aberto (tecla 1 ou `⌃⌥Espaço`), segure o push-to-talk e peça:
-*"crie um agente no windows com codex no coreum para investigar o login"*. O Deepgram
-transcreve, um Claude Haiku (`claude -p`, com a sua conta) extrai máquina, agente,
-repositório, nome da tarefa e instrução, e um terminal novo no Orca roda o `work` com
-`--prompt`. Sem o Orca, abre no Terminal. O mesmo pelo terminal, ou por outro agente:
+A configuração vive no código: os padrões ficam em [`src/config.zig`](src/config.zig), e
+`./install.sh` regenera `~/.config/agent-belt/config.json` a partir deles (`--keep-config`
+preserva o arquivo). Também dá para mudar na hora:
 
 ```sh
-agb new --dry-run crie um agente no windows com codex no coreum para investigar o login
-# work felipe-windows investigar-login coreum --agent codex --prompt '…'
-agb new crie um agente aqui com claude no agent-belt para revisar o README
+agb bind 0 key escape            # teclas: escape, delete, return, tab, shift+tab, cmd+k, a-z, 0-9…
+agb bind 3 ptt                   # push-to-talk
+agb bind 4 agents                # próximo agente (agents desktop inclui Codex/Claude Desktop)
+agb bind 1 menu                  # menu de agentes
+agb bind 2 command 'open -a Calculator'
+agb bind 5 text 'Olá!'
 ```
 
-## work: sessões de agente em qualquer máquina
+Knob e LEDs: `"knob": "scroll"` ou `"system"` (volume), `"knob_scroll_lines": 3` (negativo
+inverte o sentido) e `"led": true`.
 
-`work/` (antes o repositório `tmux`, trazido com o histórico) cria uma sessão tmux com
-um worktree e um agente dentro, em qualquer máquina do tailnet: `work <tarefa> [repo]`,
-`work <máquina> <tarefa> [repo] --codex`. O `./install.sh` instala `work`, `work-session`
-e `tm`; para as outras máquinas, `work/scripts/deploy.sh --all`. Detalhes em
-[work/README.md](work/README.md).
+## CLI
+
+```
+agb status                      daemon, permissões, dispositivo, chave, log
+agb agents list|next|bottom     agentes com estado e stats · próximo · voltar ao fim
+agb new [--dry-run] <pedido>    cria um agente a partir de linguagem natural
+agb led <cor 0-7> <modo 0-5>    luzes à mão
+agb permissions                 abre as listas de privacidade do macOS
+agb version · agb update [tag]  versão · atualizar agora
+agb preview                     mostra a animação do ditado sem microfone
+```
+
+## Atualizações
+
+A cada 6 h o Agent Belt consulta as releases no GitHub. Quando há uma versão nova, aparece
+uma notificação com as notas e o botão **Atualizar**, e o rodapé do menu avisa. O
+`agb update` faz o mesmo na hora. A atualização compila a release a partir do código e
+assina localmente, então as permissões continuam valendo.
+
+As versões saem pelo [release-please](https://github.com/googleapis/release-please): cada
+commit `feat:`/`fix:` entra num PR de release, e o merge publica a tag, o
+[CHANGELOG](CHANGELOG.md) e um `.zip` do app.
+
+## work
+
+[`work/`](work/README.md) cria, em qualquer máquina do tailnet, uma sessão tmux com um
+worktree e um agente dentro. Fechar o terminal não mata nada: basta rodar `work` de novo
+para reanexar.
+
+```sh
+work <tarefa> [repo]                          # aqui
+work <máquina> <tarefa> [repo] --codex        # em outra máquina
+work felipe-windows login coreum --prompt "investigue o login"
+```
+
+Para instalar nas outras máquinas: `work/scripts/deploy.sh --all`.
+
+## Como funciona
+
+- **Captura:** um monitor HID sem root lê o macropad (VID `0x514c`, PID `0x8850`). Um
+  CGEvent tap engole as letras que ele digitaria e o volume do knob, e trata os atalhos
+  globais.
+- **Ditado:** PCM mono 16 kHz em memória, enviado ao Deepgram (`nova-3`). O texto é inserido
+  com eventos Unicode só depois que o overlay some.
+- **Agentes:** junta o `terminal list` do Orca, os clientes tmux (casados com o Orca pelo
+  `ORCA_TERMINAL_HANDLE`), os títulos que os agentes escrevem no terminal e os transcripts
+  em `~/.claude`.
+- **Luzes:** relatórios HID do fabricante na interface `0xFF00`.
+
+## Desenvolvimento
+
+```sh
+zig build -Doptimize=ReleaseSafe && zig build test
+AGENT_BELT_DEBUG_INPUT=1 zig-out/bin/agb daemon   # mostra cada tecla, knob e evento do tap
+tools/make-icon.sh        # regenera o ícone
+tools/render-overlay.sh   # regenera assets/overlay.gif
+tools/render-menu.sh      # regenera assets/menu.png
+```
+
+O log fica em `~/Library/Logs/agent-belt.log`. Para desinstalar: `./install.sh --uninstall`.
+
+---
+
+<sub>O nome é uma homenagem ao cinto de utilidades 🦇. O projeto não tem relação com a DC
+nem com a Warner.</sub>
