@@ -35,6 +35,10 @@ pub fn singleInstance() !void {
     if (c.mk_single_instance() != 0) return error.DaemonAlreadyRunning;
 }
 
+pub fn openPrivacy(pane: [*:0]const u8) void {
+    c.mk_open_privacy(pane);
+}
+
 pub fn trimLog() void {
     c.mk_trim_log();
 }

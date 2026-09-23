@@ -301,15 +301,15 @@ void mk_status_set(int status) {
             mk_reveal_overlay();
             switch (status) {
                 case 1:
-                    mk_status_item.button.title = @"🎙️";
+                    mk_status_item.button.title = @" 🎙️";
                     mk_status_item.button.toolTip = @"Agent Belt gravando";
                     break;
                 case 2:
-                    mk_status_item.button.title = @"⏳";
+                    mk_status_item.button.title = @" ⏳";
                     mk_status_item.button.toolTip = @"Agent Belt transcrevendo";
                     break;
                 case 3:
-                    mk_status_item.button.title = @"⚠️";
+                    mk_status_item.button.title = @" ⚠️";
                     mk_status_item.button.toolTip = @"Agent Belt: erro, consulte o terminal";
                     mk_hide_timer = [NSTimer timerWithTimeInterval:2.2 repeats:NO block:^(NSTimer *timer) {
                         (void)timer;
@@ -602,9 +602,36 @@ void mk_menu_hide(void) {
 
 // Menu bar: 🔴 an agent waits for you, 🟢 one finished, ⌨️ otherwise; while
 // dictating the recording state wins. A click opens the agent menu.
+// The belt buckle as a template image: macOS tints it for light and dark bars.
+static NSImage *mk_buckle_icon(void) {
+    static NSImage *icon;
+    if (icon) return icon;
+    icon = [NSImage imageWithSize:NSMakeSize(20, 16) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+        (void)rect;
+        [NSColor.blackColor set];
+        NSBezierPath *strap = [NSBezierPath bezierPath];
+        [strap moveToPoint:NSMakePoint(0.5, 8)];
+        [strap lineToPoint:NSMakePoint(5, 8)];
+        [strap moveToPoint:NSMakePoint(15, 8)];
+        [strap lineToPoint:NSMakePoint(19.5, 8)];
+        strap.lineWidth = 2.2;
+        strap.lineCapStyle = NSLineCapStyleRound;
+        [strap stroke];
+        NSBezierPath *buckle = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(5.2, 2.7, 9.6, 10.6) xRadius:3 yRadius:3];
+        buckle.lineWidth = 1.6;
+        [buckle stroke];
+        [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(8.4, 6.4, 3.2, 3.2)] fill];
+        return YES;
+    }];
+    icon.template = YES;
+    return icon;
+}
+
 static void mk_refresh_title(void) {
+    mk_status_item.button.image = mk_buckle_icon();
+    mk_status_item.button.imagePosition = NSImageLeft;
     if (mk_dictation_status) return; // mk_status_set owns the title meanwhile
-    mk_status_item.button.title = @[@"⌨️", @"🟢", @"🔴"][MAX(0, MIN(2, mk_attention))];
+    mk_status_item.button.title = @[@"", @" 🟢", @" 🔴"][MAX(0, MIN(2, mk_attention))];
     mk_status_item.button.toolTip = @[@"Agent Belt: nada pendente", @"Agent Belt: um agente terminou",
                                       @"Agent Belt: um agente aguarda você"][MAX(0, MIN(2, mk_attention))];
 }

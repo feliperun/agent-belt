@@ -67,6 +67,7 @@ char *mk_self_exe_path(void);
 char *mk_keychain_secret(const char *service, const char *account);
 int mk_single_instance(void);
 int mk_check_permissions(void);
+void mk_open_privacy(const char *pane);
 void mk_trim_log(void);
 int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_env);
 

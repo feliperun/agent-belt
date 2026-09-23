@@ -39,6 +39,15 @@ pub fn main(init: std.process.Init) !void {
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
 
+    if (std.mem.eql(u8, argv[1], "permissions")) {
+        // Opens the three lists the app must be enabled in.
+        for ([_][*:0]const u8{ "ListenEvent", "Accessibility", "Microphone" }) |pane| {
+            macos.openPrivacy(pane);
+            std.Io.sleep(init.io, .fromMilliseconds(700), .awake) catch {};
+        }
+        return;
+    }
+
     if (std.mem.eql(u8, argv[1], "led")) {
         if (argc != 4) return usage();
         const color = std.fmt.parseInt(u8, argv[2], 10) catch return usage();
@@ -122,24 +131,25 @@ fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 
 }
 
 fn usage() !void {
-    std.debug.print("agent-belt — daemon de teclas HID configuráveis\n" ++
+    std.debug.print("agb (Agent Belt) — daemon de teclas HID configuráveis\n" ++
         "\n" ++
         "uso:\n" ++
-        "  agent-belt init\n" ++
-        "  agent-belt bind <a-f> ptt\n" ++
-        "  agent-belt bind <0-5|a-f> agents [desktop]\n" ++
-        "  agent-belt bind <0-5|a-f> menu\n" ++
-        "  agent-belt bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
-        "  agent-belt bind <a-f> command <comando>\n" ++
-        "  agent-belt bind <a-f> script <comando-ou-script>\n" ++
-        "  agent-belt bind <a-f> text <texto>\n" ++
-        "  agent-belt bind <a-f> disabled\n" ++
-        "  agent-belt devices\n" ++
-        "  agent-belt status\n" ++
-        "  agent-belt led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
-        "  agent-belt daemon\n" ++
-        "  agent-belt preview\n" ++
-        "  agent-belt agents <list|next|bottom> [desktop]\n" ++
+        "  agb init\n" ++
+        "  agb bind <a-f> ptt\n" ++
+        "  agb bind <0-5|a-f> agents [desktop]\n" ++
+        "  agb bind <0-5|a-f> menu\n" ++
+        "  agb bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
+        "  agb bind <a-f> command <comando>\n" ++
+        "  agb bind <a-f> script <comando-ou-script>\n" ++
+        "  agb bind <a-f> text <texto>\n" ++
+        "  agb bind <a-f> disabled\n" ++
+        "  agb devices\n" ++
+        "  agb status\n" ++
+        "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
+        "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
+        "  agb daemon\n" ++
+        "  agb preview\n" ++
+        "  agb agents <list|next|bottom> [desktop]\n" ++
         "  ./install.sh [--keep-config|--uninstall]\n", .{});
     return error.InvalidArguments;
 }

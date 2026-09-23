@@ -67,4 +67,4 @@ Do mesmo canal, segundo outros projetos para este VID:PID:
 repetidas. Prioridade: gravando (branco fixo) > transcrevendo (ciano fixo) >
 agente aguardando você (vermelho) > agente terminou e não foi visto (verde) >
 base (onda branca reativa, `02`). `"led": false` na config desliga. Manual:
-`agent-belt led <cor> <modo>`.
+`agb led <cor> <modo>`.

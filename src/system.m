@@ -45,6 +45,13 @@ int mk_single_instance(void) {
 // A running process never sees a grant made after it asked (AXIsProcessTrusted
 // stays stale), so a missing permission is reported and the caller exits for
 // launchd to restart it. The system prompt is shown at most every 10 minutes.
+// System Settings > Privacy & Security, straight at one list:
+// ListenEvent (Input Monitoring), Accessibility or Microphone.
+void mk_open_privacy(const char *pane) {
+    NSString *url = [@"x-apple.systempreferences:com.apple.preference.security?Privacy_" stringByAppendingString:@(pane)];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:url]];
+}
+
 int mk_check_permissions(void) {
     BOOL input = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted;
     BOOL accessibility = AXIsProcessTrusted();
@@ -58,6 +65,8 @@ int mk_check_permissions(void) {
         if (!input) IOHIDRequestAccess(kIOHIDRequestTypeListenEvent);
         if (!accessibility)
             AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge id)kAXTrustedCheckOptionPrompt: @YES});
+        // Straight to the list that still misses the app.
+        mk_open_privacy(!input ? "ListenEvent" : "Accessibility");
     }
     fprintf(stderr, "[agent-belt] faltam permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
             input ? "" : "Monitoramento de Entrada", !input && !accessibility ? ", " : "",
@@ -99,7 +108,7 @@ static NSUInteger MKDeviceCount(uint16_t vendor_id, uint16_t product_id) {
     return count;
 }
 
-// `agent-belt status`: one screen instead of reading launchctl and the log.
+// `agb status`: one screen instead of reading launchctl and the log.
 int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_env) {
     @autoreleasepool {
         NSString *service = [NSString stringWithFormat:@"gui/%d/com.frb.agentbelt", getuid()];

@@ -13,10 +13,10 @@ set -euo pipefail
 
 label=com.frb.agentbelt
 app="$HOME/Applications/Agent Belt.app"
-exe="$app/Contents/MacOS/agent-belt"
+exe="$app/Contents/MacOS/agb"
 plist="$HOME/Library/LaunchAgents/$label.plist"
 log="$HOME/Library/Logs/agent-belt.log"
-link="$HOME/.local/bin/agent-belt"
+link="$HOME/.local/bin/agb"
 domain="gui/$(id -u)"
 src=$(cd "$(dirname "$0")" && pwd)
 
@@ -30,11 +30,12 @@ stop_daemons() {
   launchctl bootout "$domain/com.frb.minikeyboard" 2>/dev/null || true # before the rename
   pkill -f '/minikeyboard daemon$' 2>/dev/null || true
   pkill -f '/agent-belt daemon$' 2>/dev/null || true
+  pkill -f '/agb daemon$' 2>/dev/null || true
   for _ in $(seq 1 50); do
-    pgrep -f '/agent-belt daemon$' >/dev/null || return 0
+    pgrep -f '/(agb|agent-belt) daemon$' >/dev/null || return 0
     sleep 0.1
   done
-  pkill -9 -f '/agent-belt daemon$' 2>/dev/null || true
+  pkill -9 -f '/(agb|agent-belt) daemon$' 2>/dev/null || true
 }
 
 keep_config=0
@@ -42,7 +43,7 @@ case "${1:-}" in
   --uninstall)
     say "removendo LaunchAgent, app e link"
     stop_daemons
-    rm -f "$plist" "$link"
+    rm -f "$plist" "$link" "$HOME/.local/bin/agent-belt"
     rm -rf "$app"
     say "pronto. Config (~/.config/agent-belt) e chave no Keychain foram mantidas;"
     printf '    para apagar a chave: security delete-generic-password -s agent-belt -a deepgram\n'
@@ -61,15 +62,17 @@ say "compilando (ReleaseSafe)"
 
 version=$(git -C "$src" describe --always --dirty 2>/dev/null || echo dev)
 stage="$(mktemp -d)/Agent Belt.app"
-mkdir -p "$stage/Contents/MacOS"
-cp "$src/zig-out/bin/agent-belt" "$stage/Contents/MacOS/agent-belt"
+mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
+cp "$src/assets/AppIcon.icns" "$stage/Contents/Resources/AppIcon.icns"
+cp "$src/zig-out/bin/agb" "$stage/Contents/MacOS/agb"
 cat > "$stage/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>$label</string>
   <key>CFBundleName</key><string>Agent Belt</string>
-  <key>CFBundleExecutable</key><string>agent-belt</string>
+  <key>CFBundleExecutable</key><string>agb</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>
@@ -99,6 +102,7 @@ mv "$stage" "$app"
 
 mkdir -p "$(dirname "$link")"
 ln -sf "$exe" "$link"
+ln -sf "$exe" "$HOME/.local/bin/agent-belt" # long alias
 
 # The project was called minikeyboard: drop that install (its privacy grants
 # and Keychain item stay behind under the old identity).
@@ -170,7 +174,7 @@ Na primeira vez, autorize "Agent Belt" em Ajustes do Sistema >
 Privacidade e Seguranca: Monitoramento de Entrada e Acessibilidade (o daemon tenta
 de novo sozinho a cada ~15 s) e o Microfone no primeiro push-to-talk.
 
-  agent-belt agents list        CLI (link em $link)
+  agb agents list               CLI (link em $link)
   tail -f $log
   ./install.sh --uninstall
 MSG

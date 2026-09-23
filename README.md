@@ -15,6 +15,11 @@ no login e renasce se cair. Na primeira vez, autorize "Agent Belt" em Monitorame
 Entrada e Acessibilidade; o daemon tenta de novo a cada ~15 s e segue sozinho quando elas aparecem. O Microfone é pedido no primeiro
 push-to-talk.
 
+Links diretos: [Monitoramento de Entrada](x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent),
+[Acessibilidade](x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility) e
+[Microfone](x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone), ou `agb permissions`, que
+abre os três; o daemon abre sozinho o que faltar.
+
 A configuração vem do código: edite os padrões em `src/config.zig` e rode `./install.sh`
 de novo, que regenera `~/.config/agent-belt/config.json` (`--keep-config` preserva o
 arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica em
@@ -46,12 +51,12 @@ arquivo). `./install.sh --uninstall` remove app, LaunchAgent e link. O log fica 
 
 ```sh
 zig build -Doptimize=ReleaseSafe
-zig-out/bin/agent-belt init
+agb init
 export DEEPGRAM_API_KEY='...'
-zig-out/bin/agent-belt daemon
+agb daemon
 ```
 
-Para ver a animação sem microfone nem teclado, execute `zig-out/bin/agent-belt preview`.
+Para ver a animação sem microfone nem teclado, execute `agb preview`.
 Ela exibe quatro segundos de gravação simulada e quatro segundos de transcrição.
 Durante o uso normal, a janela aparece no canto superior direito da tela onde está
 o ponteiro do mouse. Ela não recebe foco nem cliques. Ao concluir, faz uma saída
@@ -81,7 +86,7 @@ não foi concedido.
 Para diagnosticar a correlação entre o HID e os eventos de teclado do macOS:
 
 ```sh
-AGENT_BELT_DEBUG_INPUT=1 zig-out/bin/agent-belt daemon
+AGENT_BELT_DEBUG_INPUT=1 agb daemon
 ```
 
 Ao pressionar `a`, o diagnóstico deve mostrar `HID key=0 down` e um evento `TAP`
@@ -91,15 +96,15 @@ correspondente com `suppress=yes`. O daemon também imprime `GRAVANDO`,
 Exemplos:
 
 ```sh
-zig-out/bin/agent-belt bind a ptt
-zig-out/bin/agent-belt bind b command 'open -a Calculator'
-zig-out/bin/agent-belt bind c script '/Users/frb/bin/meu-script.sh'
-zig-out/bin/agent-belt bind d text 'Olá!'
-zig-out/bin/agent-belt bind e disabled
-zig-out/bin/agent-belt bind 4 agents
+agb bind a ptt
+agb bind b command 'open -a Calculator'
+agb bind c script '/Users/frb/bin/meu-script.sh'
+agb bind d text 'Olá!'
+agb bind e disabled
+agb bind 4 agents
 ```
 
-Para rodar no login, compile o binário e execute `zig-out/bin/agent-belt install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
+Para rodar no login, compile o binário e execute `agb install`; depois carregue o plist com o comando mostrado. Variáveis de ambiente de um LaunchAgent precisam ser configuradas pelo próprio ambiente do usuário — para a chave, a forma recomendada é criar um pequeno wrapper local que exporte `DEEPGRAM_API_KEY` e chamar esse wrapper no plist.
 
 ## Nota sobre captura
 
@@ -128,9 +133,9 @@ se o agente encerrar, ela sai do anel. A ordem é estável e a posição fica em
 do Claude Desktop: `bind 4 agents desktop`. Requer Accessibility.
 
 ```sh
-zig-out/bin/agent-belt agents list
-zig-out/bin/agent-belt agents next
-zig-out/bin/agent-belt agents bottom
+agb agents list
+agb agents next
+agb agents bottom
 ```
 
 ## Menu de agentes (tecla 1)
@@ -180,4 +185,4 @@ As teclas acendem conforme o estado: **branco** gravando, **ciano** transcrevend
 **vermelho** quando um agente aguarda você, **verde** quando um terminou e você ainda não
 viu (a tecla 4 leva até ele) e, sem nada pendente, uma onda branca a cada toque. Protocolo
 e cores em [docs/led-protocol.md](docs/led-protocol.md). `"led": false` desliga;
-`agent-belt led <cor> <modo>` troca à mão.
+`agb led <cor> <modo>` troca à mão.
