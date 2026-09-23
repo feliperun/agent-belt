@@ -160,18 +160,40 @@ static int mk_dictation_status; // mk_status_set: nonzero while dictating
         wave.lineWidth = 1.2;
         [wave stroke];
     }
-    if (morph > 0) {
-        const double textOpacity = mk_ease((morph - 0.25) / 0.75);
-        mk_label(@"Aa", NSMakePoint(66, 19 + (1 - morph) * 4), 13, mk_ink(textOpacity * 0.65));
-        const CGFloat lengths[] = { 29, 18, 35, 21 };
-        CGFloat x = 94;
-        for (NSUInteger i = 0; i < 4; i++) {
-            const double glow = self.reducedMotion ? 0.55 : 0.4 + 0.2 * (0.5 + 0.5 * sin(t * 2.5 - i * 0.8));
-            [mk_ink(textOpacity * glow) setFill];
-            [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(x, 27, lengths[i] * morph, 2.5)
-                                           xRadius:1.25 yRadius:1.25] fill];
-            x += lengths[i] + 7;
+    if (morph > 0) [self drawCipher:t opacity:mk_ease((morph - 0.25) / 0.75)];
+
+}
+// While the transcription is on its way, a line of glyphs keeps deciphering
+// into a phrase: letters settle left to right, hold, then scramble again.
+- (void)drawCipher:(double)t opacity:(double)opacity {
+    static NSString *const phrase = @"decifrando sua voz";
+    static NSString *const pool = @"abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/\\|?!";
+    NSDictionary *resolved = @{NSFontAttributeName: [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium],
+                               NSForegroundColorAttributeName: mk_ink(opacity * 0.85)};
+    NSDictionary *scrambled = @{NSFontAttributeName: [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular],
+                                NSForegroundColorAttributeName: mk_ink(opacity * 0.4)};
+    if (self.reducedMotion) {
+        [phrase drawAtPoint:NSMakePoint(66, 18) withAttributes:resolved];
+        return;
+    }
+    const NSUInteger count = phrase.length;
+    const double cycle = 2.8, local = fmod(t, cycle) / cycle;
+    // 0-45%: settle left to right; 45-75%: hold; 75-100%: scramble left to right.
+    const double settled = local < 0.45 ? local / 0.45 * count : local < 0.75 ? count : (1 - (local - 0.75) / 0.25) * count;
+    const long tick = (long)floor(t * 18); // glyphs change 18 times a second
+    CGFloat x = 66;
+    for (NSUInteger i = 0; i < count; i++) {
+        unichar target = [phrase characterAtIndex:i];
+        const BOOL fixed = i < settled || target == ' ';
+        NSString *glyph;
+        if (fixed) glyph = [NSString stringWithCharacters:&target length:1];
+        else {
+            const unsigned long h = (unsigned long)(i * 2654435761u) ^ (unsigned long)(tick * 40503u + i * 97u);
+            unichar c = [pool characterAtIndex:(h >> 3) % pool.length];
+            glyph = [NSString stringWithCharacters:&c length:1];
         }
+        [glyph drawAtPoint:NSMakePoint(x, 18) withAttributes:fixed ? resolved : scrambled];
+        x += 7.4;
     }
 }
 @end
