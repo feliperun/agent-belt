@@ -151,6 +151,11 @@ file — keep appending.
   id that exists, so the id printed by `-p` is kept in `$XDG_RUNTIME_DIR`. A dmenu
   prompt for free text gets no lines, or Enter picks an empty entry
   (`src/linux/desktop.zig`).
+- **Omarchy configures Hyprland in Lua** (`hyprland.lua`, `o.bind`), and Lua binds show
+  in `hyprctl binds` as dispatcher `__lua` with a numeric arg: check them by
+  description. Its bar only takes plugin widgets through `omarchy bar put`; a command
+  module goes straight into `shell.json`. From ssh, the session environment comes from
+  `systemctl --user show-environment` (Hyprland's own environ lacks WAYLAND_DISPLAY).
 - **Windows: `ssh.exe` never exits when its stdout is a pipe inside an ssh session**
   (it prints the output, then hangs). Remote calls from Windows capture through
   temporary files (`sys.runCaptured`); otherwise `agb ls` over ssh hangs forever.

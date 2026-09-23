@@ -48,8 +48,10 @@ fn openTerminal(ctx: sys.Ctx, args: []const []const u8) void {
         notify(ctx, "Agent Belt", ctx.fmt("could not open a terminal: {s}", .{@errorName(err)}) catch "", 5000);
 }
 
-/// Shows lines in the desktop's dmenu-style picker and returns the chosen one.
+/// Shows lines in the desktop's picker and returns the chosen one (with no
+/// lines, the typed text): Omarchy's own menu, else a dmenu-style program.
 fn pick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
+    if (sys.which(ctx, "omarchy-shell") != null) return omarchyPick(ctx, prompt, lines);
     const pickers = [_][]const u8{ "walker --dmenu -p \"$AGB_PROMPT\"", "fuzzel --dmenu -p \"$AGB_PROMPT \"", "wofi --dmenu -p \"$AGB_PROMPT\"", "rofi -dmenu -p \"$AGB_PROMPT\"" };
     for (pickers) |picker| {
         const bin = picker[0..std.mem.indexOfScalar(u8, picker, ' ').?];
@@ -64,6 +66,34 @@ fn pick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
     }
     notify(ctx, "Agent Belt", "no menu program: install walker, fuzzel, wofi or rofi", 5000);
     return null;
+}
+
+/// Omarchy's menu in dmenu mode: a JSON payload names a selection file and a
+/// done file, like omarchy-menu-input.
+fn omarchyPick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
+    const base = runtimeFile(ctx, "agb-menu") catch return null;
+    const selection = ctx.fmt("{s}.selection", .{base}) catch return null;
+    const done = ctx.fmt("{s}.done", .{base}) catch return null;
+    const cwd = std.Io.Dir.cwd();
+    cwd.deleteFile(ctx.io, done) catch {};
+    cwd.deleteFile(ctx.io, selection) catch {};
+    defer cwd.deleteFile(ctx.io, done) catch {};
+    defer cwd.deleteFile(ctx.io, selection) catch {};
+    var options: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.splitScalar(u8, lines, '\n');
+    while (it.next()) |line| if (line.len > 0) options.append(ctx.gpa, line) catch return null;
+    const payload = ctx.fmt("{f}", .{std.json.fmt(.{
+        .mode = if (lines.len > 0) "select" else "input",
+        .prompt = prompt,
+        .options = options.items,
+        .selectionFile = selection,
+        .doneFile = done,
+        .width = 560,
+    }, .{})}) catch return null;
+    if (!sys.run(ctx, &.{ "omarchy-shell", "shell", "summon", "omarchy.menu", payload }, null).ok) return null;
+    while (!sys.exists(ctx, done)) std.Io.sleep(ctx.io, .fromMilliseconds(50), .awake) catch return null;
+    const choice = std.mem.trim(u8, sys.readFile(ctx, selection) orelse return null, " \r\n");
+    return if (choice.len > 0) choice else null;
 }
 
 const new_agent = "+ Novo agente…";
@@ -181,28 +211,61 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     notify(ctx, "Agent Belt", text, 1);
     // wtype waits for the compositor to take its keymap, or the first key is lost.
     const typed = if (sys.which(ctx, "wtype") != null) sys.run(ctx, &.{ "wtype", "-s", "120", "--", text }, null) else sys.run(ctx, &.{ "ydotool", "type", "--", text }, null);
-    if (!typed.ok) notify(ctx, "Agent Belt", "instale wtype para digitar o texto", 5000);
+    if (!typed.ok) {
+        // Nowhere to type (or no wtype): the text still reaches the clipboard.
+        ctx.env.put("AGB_TEXT", text) catch return 1;
+        const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy" }, null).ok;
+        notify(ctx, "Agent Belt", if (copied) "texto copiado: cole com Ctrl+V" else "instale wtype para digitar o texto", 5000);
+    }
     return 0;
 }
 
 // ---------------------------------------------------------------- install
 
-const hypr_snippet =
-    \\# Agent Belt (written by agb install; agb uninstall removes it)
-    \\bind = CTRL ALT, D, exec, {0s} ptt start
-    \\bindr = CTRL ALT, D, exec, {0s} ptt stop
-    \\bind = CTRL ALT, SPACE, exec, {0s} menu
-    \\bind = CTRL ALT, UP, exec, xdg-terminal-exec {0s} sessions
-    \\
-;
+/// Hyprland binds, in whichever config language this Hyprland reads: Omarchy
+/// configures it in Lua (hyprland.lua), plain Hyprland in hyprland.conf. Each
+/// gets its own file, included from the main one inside a marked block; @AGB@
+/// stands for this binary.
+const HyprConfig = struct { main: []const u8, file: []const u8, snippet: []const u8, include: []const u8, comment: []const u8 };
+
+const hypr_configs = [_]HyprConfig{
+    .{
+        .main = "hyprland.lua",
+        .file = "agent-belt.lua",
+        .comment = "--",
+        .include = "require(\"hypr.agent-belt\")",
+        .snippet =
+        \\-- Agent Belt (written by agb install; agb uninstall removes it)
+        \\o.bind("CTRL + ALT + D", "Agent Belt: dictate", "@AGB@ ptt start")
+        \\o.bind("CTRL + ALT + D", "Agent Belt: stop dictating", "@AGB@ ptt stop", { release = true })
+        \\o.bind("CTRL + ALT + SPACE", "Agent Belt: agent menu", "@AGB@ menu")
+        \\o.bind("CTRL + ALT + UP", "Agent Belt: agent sessions", "xdg-terminal-exec @AGB@ sessions")
+        \\
+        ,
+    },
+    .{
+        .main = "hyprland.conf",
+        .file = "agent-belt.conf",
+        .comment = "#",
+        .include = "source = ~/.config/hypr/agent-belt.conf",
+        .snippet =
+        \\# Agent Belt (written by agb install; agb uninstall removes it)
+        \\bind = CTRL ALT, D, exec, @AGB@ ptt start
+        \\bindr = CTRL ALT, D, exec, @AGB@ ptt stop
+        \\bind = CTRL ALT, SPACE, exec, @AGB@ menu
+        \\bind = CTRL ALT, UP, exec, xdg-terminal-exec @AGB@ sessions
+        \\
+        ,
+    },
+};
 
 fn hyprDir(ctx: sys.Ctx) ![]const u8 {
     const base = ctx.getenv("XDG_CONFIG_HOME") orelse try ctx.join(&.{ ctx.home(), ".config" });
     return ctx.join(&.{ base, "hypr" });
 }
 
-fn sourceLine(ctx: sys.Ctx) ![]const u8 {
-    return ctx.fmt("source = {s}", .{try ctx.join(&.{ try hyprDir(ctx), "agent-belt.conf" })});
+fn includeBlock(ctx: sys.Ctx, cfg: HyprConfig) ![]const u8 {
+    return ctx.fmt("{0s} >>> agent-belt >>>\n{1s}\n{0s} <<< agent-belt <<<\n", .{ cfg.comment, cfg.include });
 }
 
 fn install(ctx: sys.Ctx) !u8 {
@@ -215,35 +278,84 @@ fn install(ctx: sys.Ctx) !u8 {
         std.debug.print("Deepgram key saved to {s} (0600)\n", .{path});
     };
     const hypr = try hyprDir(ctx);
-    const main_conf = try ctx.join(&.{ hypr, "hyprland.conf" });
-    if (sys.readFile(ctx, main_conf)) |conf| {
-        try sys.writeFileAtomic(ctx, try ctx.join(&.{ hypr, "agent-belt.conf" }), try ctx.fmt(hypr_snippet, .{selfExe(ctx)}));
-        const line = try sourceLine(ctx);
-        if (std.mem.indexOf(u8, conf, line) == null)
-            try sys.writeFileAtomic(ctx, main_conf, try ctx.fmt("{s}{s}{s}\n", .{ conf, if (conf.len > 0 and conf[conf.len - 1] != '\n') "\n" else "", line }));
+    const bound = for (hypr_configs) |cfg| {
+        const main_path = try ctx.join(&.{ hypr, cfg.main });
+        const conf = sys.readFile(ctx, main_path) orelse continue;
+        try sys.writeFileAtomic(ctx, try ctx.join(&.{ hypr, cfg.file }), try std.mem.replaceOwned(u8, ctx.gpa, cfg.snippet, "@AGB@", selfExe(ctx)));
+        const block = try includeBlock(ctx, cfg);
+        if (std.mem.indexOf(u8, conf, block) == null)
+            try sys.writeFileAtomic(ctx, main_path, try ctx.fmt("{s}{s}\n{s}", .{ conf, if (conf.len > 0 and conf[conf.len - 1] != '\n') "\n" else "", block }));
         _ = sys.run(ctx, &.{ "hyprctl", "reload" }, null);
+        break true;
+    } else false;
+    if (bound) {
         std.debug.print("Hyprland: hold Ctrl+Alt+D to dictate, Ctrl+Alt+Space for the agent menu, Ctrl+Alt+Up for agb sessions\n", .{});
     } else {
         std.debug.print("no Hyprland config: bind `agb ptt start` / `agb ptt stop` (or `agb ptt toggle`) and `agb menu` in your desktop\n", .{});
     }
-    std.debug.print(
-        \\Waybar module (add "custom/agent-belt" to a modules list):
-        \\  "custom/agent-belt": {{ "exec": "{s} waybar", "return-type": "json", "interval": 15, "on-click": "{s} menu" }}
-        \\
-    , .{ selfExe(ctx), selfExe(ctx) });
+    if (sys.which(ctx, "omarchy-bar") != null) {
+        installOmarchyBar(ctx);
+    } else {
+        std.debug.print(
+            \\Waybar module (add "custom/agent-belt" to a modules list):
+            \\  "custom/agent-belt": {{ "exec": "{s} waybar", "return-type": "json", "interval": 15, "on-click": "{s} menu" }}
+            \\
+        , .{ selfExe(ctx), selfExe(ctx) });
+    }
     if (deepgramKey(ctx) == null) std.debug.print("no Deepgram key yet: DEEPGRAM_API_KEY=… agb install\n", .{});
     return 0;
 }
 
+/// A command module in Omarchy's bar, which reads the same JSON as Waybar.
+/// `omarchy bar put` only knows plugin widgets, so it goes into shell.json.
+fn installOmarchyBar(ctx: sys.Ctx) void {
+    const shell_json = omarchyShellJson(ctx) catch return;
+    const json = sys.readFile(ctx, shell_json) orelse {
+        std.debug.print("Omarchy bar: no {s} yet; customize the bar once, then run agb install again\n", .{shell_json});
+        return;
+    };
+    if (std.mem.indexOf(u8, json, "\"agent-belt\"") == null) {
+        const self = selfExe(ctx);
+        const module = ctx.fmt("{f}", .{std.json.fmt(.{
+            .id = "agent-belt",
+            .type = "command",
+            .exec = ctx.fmt("{s} waybar", .{self}) catch return,
+            .interval = 15,
+            .tooltip = "Agent Belt",
+            .onClick = ctx.fmt("{s} menu", .{self}) catch return,
+        }, .{})}) catch return;
+        const out = sys.run(ctx, &.{ "jq", "--argjson", "m", module, ".bar.layout.right = [$m] + (.bar.layout.right // [])", shell_json }, null);
+        if (!out.ok) {
+            std.debug.print("Omarchy bar: could not edit {s}\n", .{shell_json});
+            return;
+        }
+        sys.writeFileAtomic(ctx, shell_json, out.stdout) catch return;
+    }
+    std.debug.print("Omarchy bar: 🦇 with the agent sessions (click for the menu)\n", .{});
+}
+
+fn omarchyShellJson(ctx: sys.Ctx) ![]const u8 {
+    return ctx.join(&.{ ctx.getenv("XDG_CONFIG_HOME") orelse try ctx.join(&.{ ctx.home(), ".config" }), "omarchy", "shell.json" });
+}
+
 fn uninstall(ctx: sys.Ctx) !u8 {
     const hypr = try hyprDir(ctx);
-    const main_conf = try ctx.join(&.{ hypr, "hyprland.conf" });
-    if (sys.readFile(ctx, main_conf)) |conf| {
-        const line = try ctx.fmt("{s}\n", .{try sourceLine(ctx)});
-        if (std.mem.indexOf(u8, conf, line)) |at| try sys.writeFileAtomic(ctx, main_conf, try std.mem.concat(ctx.gpa, u8, &.{ conf[0..at], conf[at + line.len ..] }));
-        std.Io.Dir.cwd().deleteFile(ctx.io, try ctx.join(&.{ hypr, "agent-belt.conf" })) catch {};
-        _ = sys.run(ctx, &.{ "hyprctl", "reload" }, null);
+    for (hypr_configs) |cfg| {
+        const main_path = try ctx.join(&.{ hypr, cfg.main });
+        const conf = sys.readFile(ctx, main_path) orelse continue;
+        const block = try includeBlock(ctx, cfg);
+        if (std.mem.indexOf(u8, conf, block)) |at| {
+            const before = std.mem.trimEnd(u8, conf[0..at], "\n");
+            try sys.writeFileAtomic(ctx, main_path, try ctx.fmt("{s}\n{s}", .{ before, conf[at + block.len ..] }));
+        }
+        std.Io.Dir.cwd().deleteFile(ctx.io, try ctx.join(&.{ hypr, cfg.file })) catch {};
     }
-    std.debug.print("Hyprland binds removed; the Deepgram key stays in {s}\n", .{try keyPath(ctx)});
+    _ = sys.run(ctx, &.{ "hyprctl", "reload" }, null);
+    const shell_json = try omarchyShellJson(ctx);
+    if (sys.readFile(ctx, shell_json)) |json| if (std.mem.indexOf(u8, json, "\"agent-belt\"") != null) {
+        const out = sys.run(ctx, &.{ "jq", ".bar.layout |= map_values(map(select(.id != \"agent-belt\")))", shell_json }, null);
+        if (out.ok) try sys.writeFileAtomic(ctx, shell_json, out.stdout);
+    };
+    std.debug.print("Agent Belt binds and bar module removed; the Deepgram key stays in {s}\n", .{try keyPath(ctx)});
     return 0;
 }

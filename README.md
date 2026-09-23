@@ -116,6 +116,12 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 number of sessions, the list in the tooltip. `agb ptt toggle` suits desktops without
 key-release binds. `agb uninstall` removes the binds.
 
+On Omarchy (Hyprland configured in Lua, Quickshell bar and menu) `agb install` writes
+`~/.config/hypr/agent-belt.lua` and requires it from `hyprland.lua`, adds a 🦇 command
+module to the bar in `~/.config/omarchy/shell.json`, and `agb menu` opens Omarchy's own
+menu. To dictate with another key, point a bind at `agb ptt start` / `agb ptt stop`
+(with `{ release = true }`).
+
 ## Agents
 
 <p align="center">
