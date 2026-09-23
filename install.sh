@@ -105,10 +105,16 @@ fi
 
 # O LaunchAgent nao herda o ambiente do shell: a chave vai para o Keychain,
 # liberada para o app sem prompt.
-if [ -n "${DEEPGRAM_API_KEY:-}" ]; then
+# So grava quando falta (ou com MINIKEYBOARD_UPDATE_KEY=1): alterar um item
+# existente abre um dialogo do Keychain e travaria a instalacao.
+if security find-generic-password -s minikeyboard -a deepgram >/dev/null 2>&1 &&
+    [ "${MINIKEYBOARD_UPDATE_KEY:-0}" != 1 ]; then
+  say "chave do Deepgram ja esta no Keychain"
+elif [ -n "${DEEPGRAM_API_KEY:-}" ]; then
   say "guardando DEEPGRAM_API_KEY no Keychain"
-  security add-generic-password -U -s minikeyboard -a deepgram -w "$DEEPGRAM_API_KEY" -T "$app" >/dev/null
-elif ! security find-generic-password -s minikeyboard -a deepgram >/dev/null 2>&1; then
+  security delete-generic-password -s minikeyboard -a deepgram >/dev/null 2>&1 || true
+  security add-generic-password -s minikeyboard -a deepgram -w "$DEEPGRAM_API_KEY" -T "$app" >/dev/null
+else
   if [ -t 0 ]; then
     read -rsp "Chave do Deepgram: " key; echo
     [ -n "$key" ] && security add-generic-password -U -s minikeyboard -a deepgram -w "$key" -T "$app" >/dev/null
