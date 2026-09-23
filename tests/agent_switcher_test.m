@@ -2,6 +2,7 @@
 #include <assert.h>
 
 void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
+void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (void)tone; } // status_item.m
 
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     MKAgentTarget *t = [MKAgentTarget new];
@@ -83,6 +84,44 @@ int main(void) {
         assert(!MKSessionTabGroup(@"Período"));
         assert(!MKSessionTabGroup(@"Visualização de estatísticas"));
 
-        puts("agent switcher: ring, tmux/Orca agent detection, process env and session filters OK");
+        assert(MKTitleWorking(@"◐ Refatorar"));
+        assert(MKTitleWorking(@"⠋ build"));
+        assert(!MKTitleWorking(@"✳ Refatorar"));
+        assert(!MKTitleWorking(@"work"));
+        assert(!MKTitleWorking(@""));
+        assert([MKCleanTitle(@"✳ Refatorar") isEqual:@"Refatorar"]);
+        assert([MKCleanTitle(@"◑ Refatorar") isEqual:@"Refatorar"]);
+        assert([MKCleanTitle(@"~/dev") isEqual:@"~/dev"]);
+
+        assert(MKWaitingScreen(@"Bash command\n  rm -rf build\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"));
+        assert(MKWaitingScreen(@"Would you like to run the following command?\n› 1. Yes, proceed (y)\n"));
+        assert(!MKWaitingScreen(@"Do you want me to also update the README?\n> "));
+        assert(!MKWaitingScreen(@"❯ 1. Yes\n"));
+        NSMutableString *old = [NSMutableString stringWithString:@"Do you want to proceed?\n❯ 1. Yes\n"];
+        for (int i = 0; i < 30; i++) [old appendString:@"later output\n"];
+        assert(!MKWaitingScreen(old)); // an answered prompt scrolled away
+
+        NSDictionary *panes = MKSessionAgentPanes(MKRows(@"s1\tclaude\tzsh\t%1\tzsh\ns1\tclaude\t2.1.280\t%2\t✳ task\ns2\t\tvim\t%3\tvim\n"));
+        assert([panes[@"s1"] isEqualToArray:(@[@"%2", @"✳ task"])]);
+        assert(panes[@"s2"] == nil);
+
+        MKAgentTarget *w = target(@"w", @"orca", NO), *x = target(@"x", @"orca", NO), *y = target(@"y", @"orca", NO);
+        w.title = @"◐ busy"; x.title = @"✳ idle"; y.title = @"✳ idle";
+        NSArray *agentRing = @[w, x, y];
+        MKObserve(agentRing);
+        assert(w.state == MKStateWorking && x.state == MKStateIdle);
+        w.title = @"✳ done";
+        MKObserve(agentRing);
+        assert(w.state == MKStateDone); // working → idle = finished
+        MKObserve(agentRing);
+        assert(w.state == MKStateDone); // until visited
+        assert(MKPickIndex(agentRing, @"x", @"orca") == 0); // finished beats plain next
+        y.state = MKStateWaiting;
+        assert(MKPickIndex(agentRing, @"x", @"orca") == 2); // waiting beats finished
+        assert(MKPickIndex(agentRing, @"y", @"orca") == 0); // never the focused one
+        w.state = y.state = MKStateIdle;
+        assert(MKPickIndex(agentRing, @"x", @"orca") == 2); // plain ring order
+
+        puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states and priority OK");
     }
 }

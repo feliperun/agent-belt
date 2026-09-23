@@ -21,9 +21,15 @@
 @property id window;
 @property id control;
 @property BOOL selected;
+@property NSString *title;      // terminal title the agent sets (status glyph)
+@property NSString *pane;       // tmux pane running the agent
+@property NSInteger state;      // MKState
+@property NSUInteger position;  // 1-based place in the ring, for the HUD
 @end
 @implementation MKAgentTarget
 @end
+
+typedef NS_ENUM(NSInteger, MKState) { MKStateIdle, MKStateWorking, MKStateDone, MKStateWaiting };
 
 static id MKAttr(id element, CFStringRef attribute) {
     if (!element) return nil;
@@ -167,6 +173,44 @@ static NSRunningApplication *MKOwningApp(pid_t pid) {
     return nil;
 }
 
+// Claude Code titles its terminal "✳ task" when idle and with a spinner
+// (◐◓◑◒ or braille) while working.
+static BOOL MKTitleWorking(NSString *title) {
+    if (!title.length) return NO;
+    unichar c = [title characterAtIndex:0];
+    return (c >= 0x25D0 && c <= 0x25D3) || (c >= 0x2800 && c <= 0x28FF);
+}
+
+static NSString *MKCleanTitle(NSString *title) {
+    if (title.length > 2 && [title characterAtIndex:1] == ' ' &&
+        (MKTitleWorking(title) || [title characterAtIndex:0] == 0x2733))
+        return [title substringFromIndex:2];
+    return title;
+}
+
+// Approval prompts of Claude Code ("Do you want to proceed? ❯ 1. Yes") and
+// Codex ("Would you like to run…? › 1. Yes, proceed") in the last screen lines.
+// Read locally only to rank the ring; never logged or stored.
+static BOOL MKWaitingScreen(NSString *screen) {
+    NSArray *lines = [screen componentsSeparatedByString:@"\n"];
+    NSString *tail = [[lines subarrayWithRange:NSMakeRange(lines.count > 16 ? lines.count - 16 : 0,
+                                                           MIN(lines.count, (NSUInteger)16))]
+                      componentsJoinedByString:@"\n"];
+    if (![tail containsString:@"1. Yes"]) return NO;
+    for (NSString *question in @[@"Do you want", @"Would you like", @"Allow "])
+        if ([tail containsString:question]) return YES;
+    return NO;
+}
+
+// Rows of `session, @work_agent, command, pane_id, pane_title`: the pane and
+// title of each session's agent.
+static NSDictionary<NSString *, NSArray<NSString *> *> *MKSessionAgentPanes(NSArray<NSArray<NSString *> *> *rows) {
+    NSMutableDictionary *panes = [NSMutableDictionary dictionary];
+    for (NSArray<NSString *> *row in rows)
+        if (row.count >= 5 && !panes[row[0]] && MKAgentCommand(row[2])) panes[row[0]] = @[row[3], row[4]];
+    return panes;
+}
+
 static BOOL MKLiveTerminal(NSDictionary *terminal) {
     return MKBool(terminal[@"connected"]) && !MKBool(terminal[@"orphaned"]) &&
            [MKString(terminal[@"handle"]) hasPrefix:@"term_"];
@@ -174,8 +218,10 @@ static BOOL MKLiveTerminal(NSDictionary *terminal) {
 
 
 static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
-    NSDictionary *agents = MKSessionAgents(MKTmux(@[@"list-panes", @"-a", @"-F",
-        @"#{session_name}\t#{@work_agent}\t#{pane_current_command}"]));
+    NSArray *paneRows = MKTmux(@[@"list-panes", @"-a", @"-F",
+        @"#{session_name}\t#{@work_agent}\t#{pane_current_command}\t#{pane_id}\t#{pane_title}"]);
+    NSDictionary *agents = MKSessionAgents(paneRows);
+    NSDictionary *agentPanes = MKSessionAgentPanes(paneRows);
     // tmux clients attached to agent sessions, keyed by the Orca terminal
     // hosting them; clients in other terminal apps are kept separately.
     NSMutableDictionary<NSString *, NSString *> *sessionByHandle = [NSMutableDictionary dictionary];
@@ -191,6 +237,8 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
         target.key = [@"tmux:" stringByAppendingString:client[1]];
         target.tmuxSession = client[1];
         target.label = [NSString stringWithFormat:@"%@ · %@", client[1], agents[client[1]]];
+        target.pane = agentPanes[client[1]][0];
+        target.title = agentPanes[client[1]][1];
         target.bundle = app.bundleIdentifier;
         target.app = app;
         [outside addObject:target];
@@ -211,7 +259,9 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
         target.terminal = handle;
         target.tmuxSession = session;
         NSString *title = MKString(terminal[@"title"]);
-        target.label = [NSString stringWithFormat:@"%@ · %@", session ?: (title.length ? title : handle), agent];
+        target.pane = session ? agentPanes[session][0] : nil;
+        target.title = session ? agentPanes[session][1] : title;
+        target.label = [NSString stringWithFormat:@"%@ · %@", session ?: (title.length ? MKCleanTitle(title) : handle), agent];
         target.bundle = orca.bundleIdentifier;
         target.app = orca;
         [targets addObject:target];
@@ -407,6 +457,72 @@ static NSString *MKLastKeyPath(void) {
 
 static void MKBottom(void);
 static NSArray<MKAgentTarget *> *mk_ring;
+
+// Transitions seen across discoveries (agents queue only): an agent that was
+// working and went idle has finished and stays "done" until focused.
+static NSMutableSet<NSString *> *mk_seen_working, *mk_done;
+static void MKObserve(NSArray<MKAgentTarget *> *ring) {
+    if (!mk_seen_working) { mk_seen_working = [NSMutableSet set]; mk_done = [NSMutableSet set]; }
+    NSMutableSet *live = [NSMutableSet set];
+    for (MKAgentTarget *target in ring) {
+        [live addObject:target.key];
+        if (MKTitleWorking(target.title)) {
+            [mk_seen_working addObject:target.key];
+            [mk_done removeObject:target.key];
+            target.state = MKStateWorking;
+        } else {
+            if ([mk_seen_working containsObject:target.key]) [mk_done addObject:target.key];
+            [mk_seen_working removeObject:target.key];
+            target.state = [mk_done containsObject:target.key] ? MKStateDone : MKStateIdle;
+        }
+    }
+    [mk_seen_working intersectSet:live];
+    [mk_done intersectSet:live];
+}
+
+// Approval prompts are only looked for when the key is pressed, concurrently:
+// a tmux screen capture or Orca's own wait detection per terminal.
+static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
+    dispatch_apply(ring.count, DISPATCH_APPLY_AUTO, ^(size_t i) {
+        MKAgentTarget *target = ring[i];
+        BOOL waiting = NO;
+        if (target.pane) {
+            NSData *screen = MKRun(MKToolPath(@"tmux", @"MINIKEYBOARD_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
+            waiting = screen && MKWaitingScreen([[NSString alloc] initWithData:screen encoding:NSUTF8StringEncoding] ?: @"");
+        } else if (target.terminal) {
+            NSDictionary *shown = MKOrca(@[@"terminal", @"show", @"--terminal", target.terminal]);
+            id wait = shown[@"terminal"][@"agentWait"];
+            waiting = wait && wait != NSNull.null;
+        }
+        if (waiting) target.state = MKStateWaiting;
+    });
+}
+
+// Who needs you first: waiting for approval, then finished and unseen, then
+// the plain ring order. The agent currently focused is never picked again.
+static NSUInteger MKPickIndex(NSArray<MKAgentTarget *> *ring, NSString *lastKey, NSString *front) {
+    NSUInteger next = MKNextIndex(ring, lastKey, front);
+    NSUInteger current = NSNotFound;
+    for (NSUInteger i = 0; i < ring.count; i++)
+        if ([ring[i].key isEqual:lastKey] && [ring[i].bundle isEqual:front]) current = i;
+    for (NSNumber *wanted in @[@(MKStateWaiting), @(MKStateDone)])
+        for (NSUInteger offset = 0; offset < ring.count; offset++) {
+            NSUInteger i = (next + offset) % ring.count;
+            if (i != current && ring[i].state == wanted.integerValue) return i;
+        }
+    return next;
+}
+
+static void MKShowHud(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
+    NSString *state = @[@"", @"trabalhando", @"terminou", @"aguardando você"][target.state];
+    NSUInteger others = 0;
+    for (MKAgentTarget *other in ring)
+        if (other != target && other.state >= MKStateDone) others++;
+    NSMutableString *detail = [NSMutableString stringWithFormat:@"%lu/%lu", (unsigned long)target.position, (unsigned long)ring.count];
+    if (state.length) [detail appendFormat:@" · %@", state];
+    if (others) [detail appendFormat:@" · mais %lu pedindo atenção", (unsigned long)others];
+    mk_hud_show(target.label.UTF8String, detail.UTF8String, (int)target.state);
+}
 static int MKCycle(BOOL desktop) {
     if (!AXIsProcessTrusted()) {
         fprintf(stderr, "[minikeyboard] alternar agents requer permissão de Accessibility\n");
@@ -415,11 +531,16 @@ static int MKCycle(BOOL desktop) {
     mk_ring = MKStableRing(mk_ring, MKDiscover(desktop));
     if (!mk_ring.count) { fprintf(stderr, "[minikeyboard] nenhum terminal com coding agent (Orca ou work)\n"); return -1; }
     NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
-    NSUInteger start = MKNextIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
+    for (NSUInteger i = 0; i < mk_ring.count; i++) mk_ring[i].position = i + 1;
+    MKObserve(mk_ring);
+    MKDetectWaiting(mk_ring);
+    NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
         MKAgentTarget *target = mk_ring[(start + offset) % mk_ring.count];
         if (!MKFocus(target)) continue; // app/tab may have closed after discovery
         [target.key writeToFile:MKLastKeyPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [mk_done removeObject:target.key]; // seen
+        MKShowHud(target, mk_ring);
         fprintf(stderr, "[minikeyboard] AGENT → %s\n", target.label.UTF8String);
         return 0;
     }
@@ -454,8 +575,11 @@ int mk_agents_command(int mode, int desktop) {
             return -1;
         }
         NSArray *targets = MKDiscover(desktop != 0);
+        MKObserve(targets);
+        MKDetectWaiting(targets);
         for (MKAgentTarget *target in targets)
-            printf("%s\t%s\t%s\n", target.selected ? "*" : " ", target.bundle.UTF8String, target.label.UTF8String);
+            printf("%s\t%-12s\t%s\n", target.selected ? "*" : " ",
+                   [@[@"ocioso", @"trabalhando", @"terminou", @"aguardando"][target.state] UTF8String], target.label.UTF8String);
         if (!targets.count) printf("Nenhum terminal com coding agent (Orca ou work).\n");
         return 0;
     }
@@ -490,4 +614,18 @@ void mk_agents_bottom(void) {
     dispatch_async(mk_agents_queue, ^{
         @autoreleasepool { MKBottom(); }
     });
+}
+
+// Daemon only: watch titles every 5 s so "finished" is caught between presses.
+void mk_agents_monitor(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    static dispatch_source_t timer;
+    pthread_once(&once, MKCreateAgentsQueue);
+    if (timer) return;
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, mk_agents_queue);
+    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(timer, ^{
+        @autoreleasepool { MKObserve(MKTerminalTargets()); }
+    });
+    dispatch_resume(timer);
 }

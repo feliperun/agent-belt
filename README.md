@@ -117,6 +117,11 @@ A ação `agents` funciona como um alt-tab entre terminais com agentes rodando:
 - terminais do Orca anexados a uma sessão tmux do `work` (o daemon lê `ORCA_TERMINAL_HANDLE` do cliente `tmux attach`);
 - sessões do `work` anexadas em outro app de terminal, que vem para frente.
 
+A tecla vai primeiro para quem precisa de você: um agente **aguardando aprovação**
+(prompt de permissão na tela ou `agentWait` do Orca), depois um que **terminou** e você
+ainda não viu (título saiu do spinner para `✳`), e só então segue o anel. Um HUD no canto
+direito mostra o agente, a posição e o estado; `agents list` mostra o estado de todos.
+
 Uma sessão só conta enquanto algum pane roda `claude`, `codex`, `opencode`, `gemini` etc.;
 se o agente encerrar, ela sai do anel. A ordem é estável e a posição fica em
 `~/Library/Caches/minikeyboard/last-agent`. Para incluir também as janelas do Codex e

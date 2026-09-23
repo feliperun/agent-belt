@@ -20,6 +20,9 @@ void mk_knob_set_intercept(int intercept);
 void mk_scroll_down(int32_t lines);
 int mk_system_media_key(const void *event, int *key, int *pressed);
 void mk_agents_bottom(void);
+void mk_agents_monitor(void);
+/* tone: 0 idle, 1 working, 2 done, 3 waiting */
+void mk_hud_show(const char *title, const char *detail, int tone);
 int mk_event_tap_run(mk_event_filter_callback filter, void *context);
 
 int mk_status_init(void);

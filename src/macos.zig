@@ -57,6 +57,10 @@ pub fn scrollDown(lines: i32) void {
     c.mk_scroll_down(lines);
 }
 
+pub fn agentsMonitor() void {
+    c.mk_agents_monitor();
+}
+
 pub fn agentsBottom() void {
     c.mk_agents_bottom();
 }

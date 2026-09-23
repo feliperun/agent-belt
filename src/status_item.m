@@ -321,3 +321,106 @@ int mk_status_preview(void) {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, false);
     return 0;
 }
+
+// Agent switch HUD: which agent took focus and why, in the overlay's corner.
+@interface MKHudView : NSView
+@property(nonatomic, copy) NSString *title, *detail;
+@property(nonatomic) int tone;
+@end
+
+@implementation MKHudView
+- (BOOL)isOpaque { return NO; }
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    NSBezierPath *shell = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 2, 2) xRadius:19 yRadius:19];
+    NSGradient *surface = [[NSGradient alloc]
+        initWithStartingColor:[NSColor colorWithSRGBRed:0.115 green:0.125 blue:0.16 alpha:0.98]
+                  endingColor:[NSColor colorWithSRGBRed:0.065 green:0.075 blue:0.1 alpha:0.98]];
+    [surface drawInBezierPath:shell angle:-90];
+    [mk_ink(0.16) setStroke];
+    shell.lineWidth = 0.75;
+    [shell stroke];
+    // Amber waits for you, green finished, blue works, grey idles.
+    NSColor *dot = @[mk_ink(0.35),
+                     [NSColor colorWithSRGBRed:0.45 green:0.66 blue:1.0 alpha:1],
+                     [NSColor colorWithSRGBRed:0.42 green:0.86 blue:0.6 alpha:1],
+                     [NSColor colorWithSRGBRed:1.0 green:0.72 blue:0.32 alpha:1]][MAX(0, MIN(3, self.tone))];
+    const NSRect dotRect = NSMakeRect(20, NSMidY(self.bounds) - 4, 8, 8);
+    [[dot colorWithAlphaComponent:0.22] setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(dotRect, -4, -4)] fill];
+    [dot setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:dotRect] fill];
+    NSMutableParagraphStyle *clip = [NSMutableParagraphStyle new];
+    clip.lineBreakMode = NSLineBreakByTruncatingTail;
+    const CGFloat width = NSWidth(self.bounds) - 58;
+    [self.title drawInRect:NSMakeRect(42, 29, width, 18) withAttributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: mk_ink(0.95), NSParagraphStyleAttributeName: clip}];
+    [self.detail drawInRect:NSMakeRect(42, 12, width, 16) withAttributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:10.5 weight:NSFontWeightMedium],
+        NSForegroundColorAttributeName: mk_ink(0.55), NSParagraphStyleAttributeName: clip}];
+}
+@end
+
+static NSPanel *mk_hud_panel;
+static MKHudView *mk_hud_view;
+static NSTimer *mk_hud_timer;
+
+static void mk_hud_fade(double from, double to, double duration, void (^done)(void)) {
+    [mk_hud_timer invalidate];
+    const double started = mk_now();
+    const BOOL instant = [NSWorkspace sharedWorkspace].accessibilityDisplayShouldReduceMotion;
+    mk_hud_timer = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer *timer) {
+        const double progress = instant ? 1 : (mk_now() - started) / duration;
+        mk_hud_panel.alphaValue = from + (to - from) * mk_ease(progress);
+        if (progress >= 1) { [timer invalidate]; mk_hud_timer = nil; if (done) done(); }
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:mk_hud_timer forMode:NSRunLoopCommonModes];
+}
+
+void mk_hud_show(const char *title, const char *detail, int tone) {
+    if (!mk_status_runloop) return; // CLI: no UI
+    NSString *titleText = @(title), *detailText = @(detail);
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        @autoreleasepool {
+            if (mk_overlay_panel.isVisible) return; // recording/transcribing wins the corner
+            const CGFloat width = 300, height = 58;
+            if (!mk_hud_panel) {
+                mk_hud_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, width, height)
+                    styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                    backing:NSBackingStoreBuffered defer:NO];
+                mk_hud_panel.opaque = NO;
+                mk_hud_panel.backgroundColor = [NSColor clearColor];
+                mk_hud_panel.hasShadow = YES;
+                mk_hud_panel.level = NSStatusWindowLevel;
+                mk_hud_panel.ignoresMouseEvents = YES;
+                mk_hud_panel.hidesOnDeactivate = NO;
+                mk_hud_panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                                  NSWindowCollectionBehaviorFullScreenAuxiliary;
+                mk_hud_view = [[MKHudView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+                mk_hud_panel.contentView = mk_hud_view;
+            }
+            mk_hud_view.title = titleText;
+            mk_hud_view.detail = detailText;
+            mk_hud_view.tone = tone;
+            [mk_hud_view setNeedsDisplay:YES];
+            NSScreen *screen = [NSScreen mainScreen];
+            const NSPoint mouse = [NSEvent mouseLocation];
+            for (NSScreen *candidate in [NSScreen screens])
+                if (NSPointInRect(mouse, candidate.frame)) { screen = candidate; break; }
+            const NSRect visible = screen.visibleFrame;
+            [mk_hud_panel setFrame:NSMakeRect(NSMaxX(visible) - width - 18, NSMaxY(visible) - height - 14, width, height) display:NO];
+            const double from = mk_hud_panel.isVisible ? mk_hud_panel.alphaValue : 0;
+            mk_hud_panel.alphaValue = from;
+            [mk_hud_panel orderFrontRegardless];
+            mk_hud_fade(from, 1, 0.12, ^{
+                mk_hud_timer = [NSTimer timerWithTimeInterval:1.3 repeats:NO block:^(NSTimer *timer) {
+                    (void)timer;
+                    mk_hud_fade(1, 0, 0.22, ^{ [mk_hud_panel orderOut:nil]; });
+                }];
+                [[NSRunLoop mainRunLoop] addTimer:mk_hud_timer forMode:NSRunLoopCommonModes];
+            });
+        }
+    });
+    CFRunLoopWakeUp(mk_status_runloop);
+}
