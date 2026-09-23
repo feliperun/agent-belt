@@ -19,6 +19,16 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
     }];
 }
 
+static void mk_status_ready(void);
+static int mk_attention;        // 0 nothing, 1 an agent finished, 2 an agent waits
+static int mk_dictation_status; // mk_status_set: nonzero while dictating
+
+@interface MKStatusClick : NSObject
+@end
+@implementation MKStatusClick
+- (void)clicked:(id)sender { (void)sender; mk_agents_menu_click(); }
+@end
+
 @interface MKOverlayView : NSView
 @property(nonatomic) NSInteger mode;
 @property(nonatomic) double started, lastTick, phase;
@@ -192,8 +202,7 @@ static void mk_order_out(void) {
     mk_hide_timer = nil;
     [mk_overlay_panel orderOut:nil];
     [mk_overlay_view stopAnimation];
-    mk_status_item.button.title = @"⌨︎";
-    mk_status_item.button.toolTip = @"Minikeyboard pronto";
+    mk_status_ready();
 }
 
 // Completion is emitted only after the panel has been removed from the screen.
@@ -254,8 +263,11 @@ int mk_status_init(void) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         mk_status_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
         if (!mk_status_item) return -1;
-        mk_status_item.button.title = @"⌨︎";
-        mk_status_item.button.toolTip = @"Minikeyboard pronto";
+        mk_status_ready();
+        static MKStatusClick *click;
+        click = [MKStatusClick new];
+        mk_status_item.button.target = click;
+        mk_status_item.button.action = @selector(clicked:);
         mk_overlay_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, mk_overlay_width, mk_overlay_height)
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
             backing:NSBackingStoreBuffered defer:NO];
@@ -283,12 +295,13 @@ void mk_status_set(int status) {
         @autoreleasepool {
             [mk_hide_timer invalidate];
             mk_hide_timer = nil;
+            mk_dictation_status = status;
             if (status == 0) { mk_order_out(); return; }
             [mk_overlay_view showMode:status];
             mk_reveal_overlay();
             switch (status) {
                 case 1:
-                    mk_status_item.button.title = @"🔴 REC";
+                    mk_status_item.button.title = @"🎙️";
                     mk_status_item.button.toolTip = @"Minikeyboard gravando";
                     break;
                 case 2:
@@ -296,7 +309,7 @@ void mk_status_set(int status) {
                     mk_status_item.button.toolTip = @"Minikeyboard transcrevendo";
                     break;
                 case 3:
-                    mk_status_item.button.title = @"⚠︎";
+                    mk_status_item.button.title = @"⚠️";
                     mk_status_item.button.toolTip = @"Minikeyboard: erro, consulte o terminal";
                     mk_hide_timer = [NSTimer timerWithTimeInterval:2.2 repeats:NO block:^(NSTimer *timer) {
                         (void)timer;
@@ -435,16 +448,29 @@ static NSColor *mk_tone(int tone) {
 }
 
 @interface MKMenuView : NSView
-@property(nonatomic, copy) NSArray<NSString *> *labels;
+@property(nonatomic, copy) NSArray<NSString *> *labels, *details;
 @property(nonatomic, copy) NSArray<NSNumber *> *tones;
+@property(nonatomic, copy) NSString *footer;
 @property(nonatomic) NSInteger selected;
+@property(nonatomic) BOOL clickable;
 @end
 
-static const CGFloat mk_menu_width = 330, mk_menu_row = 32, mk_menu_header = 34, mk_menu_pad = 8;
+static const CGFloat mk_menu_width = 380, mk_menu_row = 48, mk_menu_header = 34, mk_menu_pad = 8, mk_menu_footer = 28;
+
+static CGFloat mk_menu_height(NSUInteger rows, BOOL footer) {
+    return mk_menu_header + rows * mk_menu_row + (footer ? mk_menu_footer : 0) + mk_menu_pad;
+}
 
 @implementation MKMenuView
 - (BOOL)isOpaque { return NO; }
 - (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { (void)event; return YES; }
+- (void)mouseDown:(NSEvent *)event {
+    if (!self.clickable) return;
+    const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    const NSInteger row = (NSInteger)floor((point.y - mk_menu_header) / mk_menu_row);
+    if (row >= 0 && row < (NSInteger)self.labels.count) mk_agents_menu_open((int)row);
+}
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     NSBezierPath *shell = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 2, 2) xRadius:18 yRadius:18];
@@ -463,7 +489,8 @@ static const CGFloat mk_menu_width = 330, mk_menu_row = 32, mk_menu_header = 34,
     [@"Agentes" drawInRect:NSMakeRect(18, 11, 120, 16) withAttributes:@{
         NSFontAttributeName: [NSFont systemFontOfSize:11.5 weight:NSFontWeightSemibold],
         NSForegroundColorAttributeName: mk_ink(0.6)}];
-    [@"toque: próximo · 2×: abrir" drawInRect:NSMakeRect(130, 12, mk_menu_width - 148, 14) withAttributes:@{
+    NSString *hint = self.clickable ? @"clique para abrir" : @"toque: próximo · 2× ou ↩: abrir";
+    [hint drawInRect:NSMakeRect(130, 12, mk_menu_width - 148, 14) withAttributes:@{
         NSFontAttributeName: [NSFont systemFontOfSize:10 weight:NSFontWeightMedium],
         NSForegroundColorAttributeName: mk_ink(0.38), NSParagraphStyleAttributeName: right}];
 
@@ -478,36 +505,51 @@ static const CGFloat mk_menu_width = 330, mk_menu_row = 32, mk_menu_header = 34,
                                              xRadius:10 yRadius:10] fill];
         }
         NSColor *dot = mk_tone(tone);
-        const NSRect dotRect = NSMakeRect(20, y + mk_menu_row / 2 - 4, 8, 8);
+        const NSRect dotRect = NSMakeRect(20, y + 12, 8, 8);
         if (tone >= 2) {
             [[dot colorWithAlphaComponent:0.22] setFill];
             [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(dotRect, -4, -4)] fill];
         }
         [dot setFill];
         [[NSBezierPath bezierPathWithOvalInRect:dotRect] fill];
-        [self.labels[i] drawInRect:NSMakeRect(40, y + 8, mk_menu_width - 160, 17) withAttributes:@{
+        [self.labels[i] drawInRect:NSMakeRect(40, y + 7, mk_menu_width - 160, 17) withAttributes:@{
             NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:selected ? NSFontWeightSemibold : NSFontWeightMedium],
-            NSForegroundColorAttributeName: mk_ink(selected ? 0.97 : 0.78), NSParagraphStyleAttributeName: clip}];
-        [states[MAX(0, MIN(3, tone))] drawInRect:NSMakeRect(mk_menu_width - 128, y + 9, 108, 15) withAttributes:@{
+            NSForegroundColorAttributeName: mk_ink(selected ? 0.97 : 0.8), NSParagraphStyleAttributeName: clip}];
+        [states[MAX(0, MIN(3, tone))] drawInRect:NSMakeRect(mk_menu_width - 128, y + 8, 108, 15) withAttributes:@{
             NSFontAttributeName: [NSFont systemFontOfSize:10.5 weight:NSFontWeightMedium],
             NSForegroundColorAttributeName: tone >= 2 ? dot : mk_ink(0.42), NSParagraphStyleAttributeName: right}];
+        [self.details[i] drawInRect:NSMakeRect(40, y + 26, mk_menu_width - 60, 15) withAttributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:10.5 weight:NSFontWeightRegular],
+            NSForegroundColorAttributeName: mk_ink(selected ? 0.58 : 0.44), NSParagraphStyleAttributeName: clip}];
+    }
+    if (self.footer.length) {
+        const CGFloat y = mk_menu_header + self.labels.count * mk_menu_row + 6;
+        [mk_ink(0.1) setFill];
+        NSRectFill(NSMakeRect(18, y, mk_menu_width - 36, 0.75));
+        [self.footer drawInRect:NSMakeRect(18, y + 7, mk_menu_width - 36, 15) withAttributes:@{
+            NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:10.5 weight:NSFontWeightMedium],
+            NSForegroundColorAttributeName: mk_ink(0.5), NSParagraphStyleAttributeName: clip}];
     }
 }
 @end
 
 static NSPanel *mk_menu_panel;
 static MKMenuView *mk_menu_view;
+static id mk_menu_outside_monitor;
 
-void mk_menu_show(const char *const *labels, const int *tones, int count, int selected) {
+void mk_menu_show(const char *const *labels, const char *const *details, const int *tones, int count,
+                  int selected, const char *footer, int clickable) {
     if (!mk_status_runloop) return;
-    NSMutableArray *labelList = [NSMutableArray array], *toneList = [NSMutableArray array];
+    NSMutableArray *labelList = [NSMutableArray array], *detailList = [NSMutableArray array], *toneList = [NSMutableArray array];
     for (int i = 0; i < count; i++) {
         [labelList addObject:@(labels[i])];
+        [detailList addObject:@(details[i])];
         [toneList addObject:@(tones[i])];
     }
+    NSString *footerText = footer ? @(footer) : nil;
     CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
         @autoreleasepool {
-            const CGFloat height = mk_menu_header + count * mk_menu_row + mk_menu_pad;
+            const CGFloat height = mk_menu_height((NSUInteger)count, footerText.length > 0);
             if (!mk_menu_panel) {
                 mk_menu_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, mk_menu_width, height)
                     styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
@@ -516,7 +558,6 @@ void mk_menu_show(const char *const *labels, const int *tones, int count, int se
                 mk_menu_panel.backgroundColor = [NSColor clearColor];
                 mk_menu_panel.hasShadow = YES;
                 mk_menu_panel.level = NSStatusWindowLevel;
-                mk_menu_panel.ignoresMouseEvents = YES;
                 mk_menu_panel.hidesOnDeactivate = NO;
                 mk_menu_panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                                    NSWindowCollectionBehaviorFullScreenAuxiliary;
@@ -525,8 +566,16 @@ void mk_menu_show(const char *const *labels, const int *tones, int count, int se
             }
             [mk_hud_panel orderOut:nil]; // the menu already says it all
             mk_menu_view.labels = labelList;
+            mk_menu_view.details = detailList;
             mk_menu_view.tones = toneList;
+            mk_menu_view.footer = footerText;
             mk_menu_view.selected = selected;
+            mk_menu_view.clickable = clickable != 0;
+            mk_menu_panel.ignoresMouseEvents = !clickable;
+            // A click anywhere else closes a mouse-opened menu.
+            if (clickable && !mk_menu_outside_monitor)
+                mk_menu_outside_monitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown
+                                                                                 handler:^(NSEvent *event) { (void)event; mk_agents_menu_close(); }];
             [mk_menu_view setNeedsDisplay:YES];
             NSScreen *screen = [NSScreen mainScreen];
             const NSPoint mouse = [NSEvent mouseLocation];
@@ -544,6 +593,33 @@ void mk_menu_show(const char *const *labels, const int *tones, int count, int se
 
 void mk_menu_hide(void) {
     if (!mk_status_runloop) return;
-    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{ [mk_menu_panel orderOut:nil]; });
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        [mk_menu_panel orderOut:nil];
+        if (mk_menu_outside_monitor) { [NSEvent removeMonitor:mk_menu_outside_monitor]; mk_menu_outside_monitor = nil; }
+    });
     CFRunLoopWakeUp(mk_status_runloop);
+}
+
+// Menu bar: 🔴 an agent waits for you, 🟢 one finished, ⌨️ otherwise; while
+// dictating the recording state wins. A click opens the agent menu.
+static void mk_refresh_title(void) {
+    if (mk_dictation_status) return; // mk_status_set owns the title meanwhile
+    mk_status_item.button.title = @[@"⌨️", @"🟢", @"🔴"][MAX(0, MIN(2, mk_attention))];
+    mk_status_item.button.toolTip = @[@"Minikeyboard: nada pendente", @"Minikeyboard: um agente terminou",
+                                      @"Minikeyboard: um agente aguarda você"][MAX(0, MIN(2, mk_attention))];
+}
+
+void mk_status_attention(int attention) {
+    if (!mk_status_runloop) return;
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        mk_attention = attention;
+        mk_refresh_title();
+    });
+    CFRunLoopWakeUp(mk_status_runloop);
+}
+
+
+static void mk_status_ready(void) {
+    mk_dictation_status = 0;
+    mk_refresh_title();
 }

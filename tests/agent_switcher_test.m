@@ -4,7 +4,8 @@
 void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
 void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (void)tone; } // status_item.m
 void mk_led_agents(int attention) { (void)attention; } // led.m
-void mk_menu_show(const char *const *l, const int *t, int c, int s) { (void)l; (void)t; (void)c; (void)s; }
+void mk_menu_show(const char *const *l, const char *const *d, const int *t, int c, int s, const char *f, int k) { (void)l; (void)d; (void)t; (void)c; (void)s; (void)f; (void)k; }
+void mk_status_attention(int a) { (void)a; }
 void mk_menu_hide(void) {}
 
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {

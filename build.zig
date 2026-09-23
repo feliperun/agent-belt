@@ -37,6 +37,10 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/led.m"),
         .flags = &.{"-fobjc-arc"},
     });
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/agent_stats.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
 
     exe.root_module.linkFramework("CoreFoundation", .{});
     exe.root_module.linkFramework("CoreGraphics", .{});
@@ -77,6 +81,10 @@ pub fn build(b: *std.Build) void {
     agent_test.root_module.addCSourceFile(.{
         .file = b.path("tests/agent_switcher_test.m"),
         .flags = &.{ "-fobjc-arc", "-UNDEBUG" },
+    });
+    agent_test.root_module.addCSourceFile(.{
+        .file = b.path("src/agent_stats.m"),
+        .flags = &.{"-fobjc-arc"},
     });
     agent_test.root_module.addIncludePath(b.path("src"));
     agent_test.root_module.linkFramework("AppKit", .{});

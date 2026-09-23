@@ -23,7 +23,16 @@ void mk_agents_bottom(void);
 void mk_agents_monitor(void);
 void mk_agents_menu_press(void);
 /* Agent menu overlay; tones as mk_hud_show. */
-void mk_menu_show(const char *const *labels, const int *tones, int count, int selected);
+void mk_menu_show(const char *const *labels, const char *const *details, const int *tones, int count,
+                  int selected, const char *footer, int clickable);
+int mk_agents_menu_visible(void);
+void mk_agents_menu_click(void);
+void mk_agents_menu_open(int index);
+void mk_agents_menu_open_selected(void);
+void mk_agents_menu_step(int delta);
+void mk_agents_menu_close(void);
+/* Menu bar emoji when idle: 0 nothing, 1 an agent finished, 2 an agent waits. */
+void mk_status_attention(int attention);
 void mk_menu_hide(void);
 void mk_led_start(uint16_t vendor_id, uint16_t product_id);
 void mk_led_status(int status);

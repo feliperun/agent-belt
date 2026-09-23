@@ -140,6 +140,20 @@ aguardando uma decisão sua, verde terminou, azul trabalhando, cinza ocioso. Ele
 em quem mais precisa de você. Com o menu aberto, um toque desce para o próximo e um duplo
 toque rápido abre o destacado. Some sozinho depois de 6 s sem toques.
 
+## Sem o tecladinho
+
+| Atalho | Ação |
+|---|---|
+| `⌃⌥Espaço` | menu de agentes; repetir navega, `↩` abre, `Esc` fecha, `↑`/`↓` movem |
+| `⌃⌥↑` | próximo agente |
+| `⌃⌥↓` | agentes de volta ao fim |
+
+A barra de menus mostra 🔴 quando um agente aguarda você, 🟢 quando um terminou, 🎙️
+gravando e ⏳ transcrevendo; um clique abre o mesmo menu, com linhas clicáveis. Longe do
+Mac, um agente esperando há 3 min manda um aviso no WhatsApp. O menu traz título, recap,
+tempo, custo e tokens de cada sessão e as cotas dos planos; ver
+[docs/agent-stats.md](docs/agent-stats.md).
+
 ## Knob
 
 O knob chega como Consumer Control (volume +/− e mute). O daemon transforma:

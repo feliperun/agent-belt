@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #include "macos_shim.h"
+#import "agent_stats.h"
 
 // Native accessibility handles never leave this process. No screenshots,
 // conversation bodies, keystrokes, or private application databases are used.
@@ -25,11 +26,14 @@
 @property NSString *pane;       // tmux pane running the agent
 @property NSInteger state;      // MKState
 @property NSUInteger position;  // 1-based place in the ring, for the HUD
+@property NSString *name;       // readable session title, when the agent's files have one
+@property NSString *detail;     // recap and stats for the menu
 @end
 @implementation MKAgentTarget
 @end
 
 typedef NS_ENUM(NSInteger, MKState) { MKStateIdle, MKStateWorking, MKStateDone, MKStateWaiting };
+static NSString *MKTitleOf(MKAgentTarget *target);
 
 static id MKAttr(id element, CFStringRef attribute) {
     if (!element) return nil;
@@ -143,7 +147,7 @@ static NSDictionary<NSString *, NSString *> *MKSessionAgents(NSArray<NSArray<NSS
     return agents;
 }
 
-static NSString *MKProcessEnv(pid_t pid, const char *name) {
+NSString *MKProcessEnv(pid_t pid, const char *name) {
     int mib[3] = {CTL_KERN, KERN_PROCARGS2, pid};
     size_t size = 0;
     if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0 || size < sizeof(int)) return nil;
@@ -537,6 +541,7 @@ static void MKUpdateLed(NSArray<MKAgentTarget *> *ring) {
     for (MKAgentTarget *target in ring)
         attention = MAX(attention, target.state == MKStateWaiting ? 2 : target.state == MKStateDone ? 1 : 0);
     mk_led_agents(attention);
+    mk_status_attention(attention);
 }
 
 // Who needs you first: waiting for approval, then finished and unseen, then
@@ -562,7 +567,7 @@ static void MKShowHud(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
     NSMutableString *detail = [NSMutableString stringWithFormat:@"%lu/%lu", (unsigned long)target.position, (unsigned long)ring.count];
     if (state.length) [detail appendFormat:@" · %@", state];
     if (others) [detail appendFormat:@" · mais %lu pedindo atenção", (unsigned long)others];
-    mk_hud_show(target.label.UTF8String, detail.UTF8String, (int)target.state);
+    mk_hud_show(MKTitleOf(target).UTF8String, detail.UTF8String, (int)target.state);
 }
 // Focus succeeded: remember it, clear "finished", refresh HUD-less state.
 static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
@@ -570,7 +575,30 @@ static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
     [mk_done removeObject:target.key]; // seen
     if (target.state == MKStateDone) target.state = MKStateIdle;
     MKUpdateLed(ring);
-    fprintf(stderr, "[minikeyboard] AGENT → %s\n", target.label.UTF8String);
+    fprintf(stderr, "[minikeyboard] AGENT → %s\n", MKTitleOf(target).UTF8String);
+}
+
+// Discovery plus states, with each target's place in the ring.
+// Titles, recaps and usage from the agents' own files (agent_stats.m).
+static void MKEnrich(NSArray<MKAgentTarget *> *ring) {
+    NSDictionary<NSString *, MKSessionInfo *> *sessions = MKClaudeSessionInfo();
+    for (MKAgentTarget *target in ring) {
+        MKSessionInfo *info = target.pane ? sessions[[@"pane:" stringByAppendingString:target.pane]] : nil;
+        if (!info && target.terminal) info = sessions[[@"orca:" stringByAppendingString:target.terminal]];
+        NSString *agent = [target.label componentsSeparatedByString:@" · "].lastObject;
+        target.name = info.title.length ? info.title : [target.label componentsSeparatedByString:@" · "].firstObject;
+        NSMutableArray *parts = [NSMutableArray arrayWithObject:agent ?: @""];
+        NSString *stats = info ? MKSessionStatsText(info) : @"";
+        if (stats.length) [parts addObject:stats];
+        if (info.recap.length) [parts addObject:info.recap];
+        target.detail = [parts componentsJoinedByString:@" · "];
+    }
+}
+
+static NSString *MKTitleOf(MKAgentTarget *target) { return target.name ?: target.label; }
+static NSString *MKEnrichedName(MKAgentTarget *target) {
+    if (!target.name) MKEnrich(@[target]);
+    return MKTitleOf(target);
 }
 
 // Discovery plus states, with each target's place in the ring.
@@ -579,6 +607,7 @@ static NSArray<MKAgentTarget *> *MKRefreshRing(BOOL desktop) {
     for (NSUInteger i = 0; i < mk_ring.count; i++) mk_ring[i].position = i + 1;
     MKObserve(mk_ring);
     MKDetectWaiting(mk_ring);
+    MKEnrich(mk_ring);
     return mk_ring;
 }
 
@@ -636,22 +665,26 @@ static MKMenuAction MKMenuDecide(BOOL visible, double sinceLastPress) {
 static NSArray<MKAgentTarget *> *mk_menu_ring;
 static NSUInteger mk_menu_selected;
 static BOOL mk_menu_visible;
+static atomic_bool mk_menu_shown; // read by the event tap for Return/Esc/arrows
 static double mk_menu_last_press = -1;
 static NSUInteger mk_menu_generation; // invalidates pending moves and timeouts
 
+static BOOL mk_menu_clickable;
 static void MKMenuRender(void) {
     NSUInteger count = mk_menu_ring.count;
-    const char *labels[count ? count : 1];
+    const char *labels[count ? count : 1], *details[count ? count : 1];
     int tones[count ? count : 1];
     for (NSUInteger i = 0; i < count; i++) {
-        labels[i] = mk_menu_ring[i].label.UTF8String;
+        labels[i] = MKTitleOf(mk_menu_ring[i]).UTF8String;
+        details[i] = (mk_menu_ring[i].detail ?: @"").UTF8String;
         tones[i] = (int)mk_menu_ring[i].state;
     }
-    mk_menu_show(labels, tones, (int)count, (int)mk_menu_selected);
+    mk_menu_show(labels, details, tones, (int)count, (int)mk_menu_selected, MKQuotaLine().UTF8String, mk_menu_clickable);
 }
 
 static void MKMenuClose(void) {
     mk_menu_visible = NO;
+    atomic_store(&mk_menu_shown, false);
     mk_menu_generation++;
     mk_menu_hide();
 }
@@ -675,6 +708,8 @@ static void MKMenuPress(void) {
         NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
         mk_menu_selected = MKPickIndex(mk_menu_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
         mk_menu_visible = YES;
+        mk_menu_clickable = NO;
+        atomic_store(&mk_menu_shown, true);
         MKMenuRender();
         MKMenuArmTimeout();
         return;
@@ -694,11 +729,49 @@ static void MKMenuPress(void) {
         MKAgentTarget *target = mk_menu_ring[mk_menu_selected];
         MKMenuClose();
         if (MKFocus(target)) MKOpened(target, mk_menu_ring);
-        else mk_hud_show(target.label.UTF8String, "não consegui abrir; a sessão ainda existe?", 3);
+        else mk_hud_show(MKTitleOf(target).UTF8String, "não consegui abrir; a sessão ainda existe?", 3);
         return;
     }
     }
 }
+
+static void MKMenuOpenIndex(NSUInteger index) {
+    if (!mk_menu_visible || index >= mk_menu_ring.count) return;
+    mk_menu_selected = index;
+    mk_menu_last_press = NSProcessInfo.processInfo.systemUptime;
+    MKMenuPress(); // within the double-press window: opens the selection
+}
+
+static void MKMenuStep(int delta) {
+    if (!mk_menu_visible || !mk_menu_ring.count) return;
+    mk_menu_selected = (mk_menu_selected + mk_menu_ring.count + delta) % mk_menu_ring.count;
+    MKMenuRender();
+    MKMenuArmTimeout();
+}
+
+// Menu bar click: the same menu, with clickable rows.
+static void MKMenuToggleClick(void) {
+    if (mk_menu_visible) { MKMenuClose(); return; }
+    mk_menu_last_press = -1;
+    MKMenuPress();
+    if (!mk_menu_visible) return;
+    mk_menu_clickable = YES;
+    mk_menu_generation++; // no timeout while the mouse is in charge
+    MKMenuRender();
+}
+
+static void MKAgentsAsync(void (^block)(void)) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, MKCreateAgentsQueue);
+    dispatch_async(mk_agents_queue, ^{ @autoreleasepool { block(); } });
+}
+
+int mk_agents_menu_visible(void) { return atomic_load(&mk_menu_shown); }
+void mk_agents_menu_click(void) { MKAgentsAsync(^{ MKMenuToggleClick(); }); }
+void mk_agents_menu_open(int index) { MKAgentsAsync(^{ MKMenuOpenIndex((NSUInteger)MAX(index, 0)); }); }
+void mk_agents_menu_open_selected(void) { MKAgentsAsync(^{ MKMenuOpenIndex(mk_menu_selected); }); }
+void mk_agents_menu_step(int delta) { MKAgentsAsync(^{ MKMenuStep(delta); }); }
+void mk_agents_menu_close(void) { MKAgentsAsync(^{ if (mk_menu_visible) MKMenuClose(); }); }
 
 void mk_agents_menu_press(void) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
@@ -719,10 +792,13 @@ int mk_agents_command(int mode, int desktop) {
         NSArray *targets = MKDiscover(desktop != 0);
         MKObserve(targets);
         MKDetectWaiting(targets);
+        MKEnrich(targets);
         for (MKAgentTarget *target in targets)
-            printf("%s\t%-12s\t%s\n", target.selected ? "*" : " ",
-                   [@[@"ocioso", @"trabalhando", @"terminou", @"aguardando"][target.state] UTF8String], target.label.UTF8String);
+            printf("%-12s %s\n             %s\n", [@[@"ocioso", @"trabalhando", @"terminou", @"aguardando"][target.state] UTF8String],
+                   MKTitleOf(target).UTF8String, target.detail.UTF8String);
         if (!targets.count) printf("Nenhum terminal com coding agent (Orca ou work).\n");
+        NSString *quotas = MKQuotaLine();
+        printf("\ncotas: %s\n", quotas ? quotas.UTF8String : "indisponíveis");
         return 0;
     }
 }
@@ -758,6 +834,35 @@ void mk_agents_bottom(void) {
     });
 }
 
+// Away from the Mac, an agent waiting for you reaches the phone: WhatsApp via
+// ford-send once per waiting episode, after 3 min of waiting with no input on
+// the Mac for 2 min. The message carries only the session title.
+static void MKNotifyAway(NSArray<MKAgentTarget *> *ring) {
+    static NSMutableDictionary<NSString *, NSNumber *> *since;
+    static NSMutableSet<NSString *> *notified;
+    if (!since) { since = [NSMutableDictionary dictionary]; notified = [NSMutableSet set]; }
+    const double now = NSProcessInfo.processInfo.systemUptime;
+    NSMutableSet *waiting = [NSMutableSet set];
+    for (MKAgentTarget *target in ring) if (target.state == MKStateWaiting) [waiting addObject:target.key];
+    for (NSString *key in since.allKeys) if (![waiting containsObject:key]) [since removeObjectForKey:key];
+    [notified intersectSet:waiting];
+    const double idle = CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, kCGAnyInputEventType);
+    NSString *ford = MKToolPath(@"ford-send", @"MINIKEYBOARD_FORD_SEND");
+    for (MKAgentTarget *target in ring) {
+        if (target.state != MKStateWaiting) continue;
+        if (!since[target.key]) since[target.key] = @(now);
+        if ([notified containsObject:target.key] || now - since[target.key].doubleValue < 180 || idle < 120 || !ford) continue;
+        [notified addObject:target.key];
+        NSString *name = MKEnrichedName(target);
+        NSTask *task = [NSTask new]; // no timeout: a text message takes ~3 s
+        task.executableURL = [NSURL fileURLWithPath:ford];
+        task.arguments = @[[NSString stringWithFormat:@"🔴 %@ está esperando uma decisão sua há %.0f min", name,
+                            (now - since[target.key].doubleValue) / 60]];
+        task.standardOutput = task.standardError = [NSFileHandle fileHandleWithNullDevice];
+        if ([task launchAndReturnError:nil]) fprintf(stderr, "[minikeyboard] aviso no WhatsApp: %s\n", name.UTF8String);
+    }
+}
+
 // Daemon only: every 5 s, catch "finished" and "waiting" between presses and
 // reflect them on the key LEDs.
 void mk_agents_monitor(void) {
@@ -773,6 +878,7 @@ void mk_agents_monitor(void) {
             MKObserve(ring);
             MKDetectWaiting(ring);
             MKUpdateLed(ring);
+            MKNotifyAway(ring);
         }
     });
     dispatch_resume(timer);

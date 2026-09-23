@@ -60,6 +60,33 @@ static int mk_is_tracked_keycode(uint16_t keycode) {
         keycode == 2 || keycode == 14 || keycode == 3;
 }
 
+// Mac keyboard stand-ins for the keypad, so everything works without it:
+//   ⌃⌥Space agent menu (repeat moves) · ⌃⌥↑ next agent · ⌃⌥↓ agents back to the bottom
+// and, while the agent menu is up, ↩ opens, Esc closes, ↑/↓ move.
+// Handled keys are swallowed, down, repeat and up alike.
+enum { mk_kc_return = 36, mk_kc_enter = 76, mk_kc_escape = 53, mk_kc_space = 49, mk_kc_up = 126, mk_kc_down = 125 };
+
+static int mk_hotkey(CGEventRef event, int down) {
+    const uint16_t keycode = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    const CGEventFlags modifiers = CGEventGetFlags(event) &
+        (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
+    const int fresh = down && !CGEventGetIntegerValueField(event, kCGKeyboardEventAutorepeat);
+    if (modifiers == (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate)) {
+        if (keycode == mk_kc_space) { if (fresh) mk_agents_menu_press(); return 1; }
+        if (keycode == mk_kc_up) { if (fresh) mk_agents_next(0); return 1; }
+        if (keycode == mk_kc_down) { if (fresh) mk_agents_bottom(); return 1; }
+        return 0;
+    }
+    if (modifiers || !mk_agents_menu_visible()) return 0;
+    switch (keycode) {
+    case mk_kc_return: case mk_kc_enter: if (fresh) mk_agents_menu_open_selected(); return 1;
+    case mk_kc_escape: if (fresh) mk_agents_menu_close(); return 1;
+    case mk_kc_down: if (down) mk_agents_menu_step(1); return 1;
+    case mk_kc_up: if (down) mk_agents_menu_step(-1); return 1;
+    default: return 0;
+    }
+}
+
 static CGEventRef mk_event_tap_callback(
     CGEventTapProxy proxy,
     CGEventType type,
@@ -83,6 +110,7 @@ static CGEventRef mk_event_tap_callback(
         for (int wait = 0; wait < 20 && !mk_knob_recent(); wait++) usleep(1000);
         if (mk_knob_recent()) return NULL;
     }
+    if ((type == kCGEventKeyDown || type == kCGEventKeyUp) && mk_hotkey(event, type == kCGEventKeyDown)) return NULL;
     if ((type == kCGEventKeyDown || type == kCGEventKeyUp) && state->filter) {
         const uint16_t keycode = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
         // IOHIDManager delivers the raw key slightly after the WindowServer
