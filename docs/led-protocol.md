@@ -49,7 +49,7 @@ Modos, como observados neste exemplar (o manual diz outra coisa para 2 e 3):
 
 Não há animação contínua nem arco-íris: tudo que anima reage a teclas. Trocar a
 cor pelo host é lento (≥ 600 ms por troca, com identificação) e grava a flash a
-cada passo. O roxo (`7`) não acendeu em nenhum modo testado.
+cada passo.
 
 ## Comandos que nunca devem ser enviados
 

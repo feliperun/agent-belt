@@ -69,6 +69,11 @@ static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) {
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:path];
     task.arguments = arguments;
+    // launchd gives no locale; tmux then sanitizes format output and turns
+    // every tab separator into "_", hiding all tmux sessions.
+    NSMutableDictionary *environment = [NSProcessInfo.processInfo.environment mutableCopy];
+    if (!environment[@"LANG"] && !environment[@"LC_ALL"]) environment[@"LANG"] = @"en_US.UTF-8";
+    task.environment = environment;
     NSPipe *pipe = [NSPipe pipe];
     task.standardOutput = pipe;
     task.standardError = [NSFileHandle fileHandleWithNullDevice];

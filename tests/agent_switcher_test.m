@@ -73,6 +73,10 @@ int main(void) {
         assert(agents.count == 3);
 
         assert([MKProcessEnv(getpid(), "MK_TEST_MARK") isEqual:@"switcher"]);
+        // Subprocesses get a UTF-8 locale even from launchd's empty environment.
+        unsetenv("LANG"); unsetenv("LC_ALL");
+        NSString *childEnv = [[NSString alloc] initWithData:MKRun(@"/usr/bin/env", @[]) encoding:NSUTF8StringEncoding];
+        assert([childEnv containsString:@"LANG=en_US.UTF-8"]);
         assert(MKProcessEnv(getpid(), "MK_TEST_MISSING") == nil);
 
         assert([MKLiveSessionName(@"Em execução projeto") isEqual:@"projeto"]);
