@@ -7,6 +7,7 @@ void mk_led_agents(int attention) { (void)attention; } // led.m
 void mk_menu_show(const char *const *l, const char *const *d, const int *t, int c, int s, const char *f, int k) { (void)l; (void)d; (void)t; (void)c; (void)s; (void)f; (void)k; }
 void mk_status_attention(int a) { (void)a; }
 void mk_menu_hide(void) {}
+const char *mk_update_line(void) { return NULL; }
 
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     MKAgentTarget *t = [MKAgentTarget new];

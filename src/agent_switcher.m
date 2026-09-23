@@ -679,7 +679,10 @@ static void MKMenuRender(void) {
         details[i] = (mk_menu_ring[i].detail ?: @"").UTF8String;
         tones[i] = (int)mk_menu_ring[i].state;
     }
-    mk_menu_show(labels, details, tones, (int)count, (int)mk_menu_selected, MKQuotaLine().UTF8String, mk_menu_clickable);
+    NSString *footer = MKQuotaLine();
+    const char *update = mk_update_line();
+    if (update) footer = footer ? [NSString stringWithFormat:@"%s   %@", update, footer] : @(update);
+    mk_menu_show(labels, details, tones, (int)count, (int)mk_menu_selected, footer.UTF8String, mk_menu_clickable);
 }
 
 static void MKMenuClose(void) {

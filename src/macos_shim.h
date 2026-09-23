@@ -34,6 +34,9 @@ void mk_agents_menu_close(void);
 /* Transcript spoken with the agent menu open: create an agent through work. */
 void mk_agents_voice_command(const char *text);
 int mk_agents_new(const char *text, int dry_run);
+void mk_updater_start(const char *version);
+const char *mk_update_line(void);
+int mk_update_run(const char *tag);
 /* Menu bar emoji when idle: 0 nothing, 1 an agent finished, 2 an agent waits. */
 void mk_status_attention(int attention);
 void mk_menu_hide(void);

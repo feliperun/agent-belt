@@ -4,6 +4,24 @@ Daemon macOS em Zig para transformar um agent-belt HID em atalhos configuráveis
 
 ## Instalação
 
+Numa máquina nova (precisa do Xcode Command Line Tools e do `zig`: `brew install zig`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/feliperun/agent-belt/main/scripts/update.sh | bash
+```
+
+Isso baixa a última release e roda o `./install.sh` dela. Do repositório clonado, basta
+`./install.sh`.
+
+### Atualizações
+
+O Agent Belt consulta as releases do GitHub a cada 6 h. Quando sai uma versão nova,
+aparece uma notificação com as notas e o botão **Atualizar**, e uma linha no rodapé do
+menu de agentes; `agb update` faz o mesmo na hora. A atualização compila a release a
+partir do código e assina com o seu certificado, então as permissões do macOS continuam
+valendo. As versões saem pelo release-please: cada `feat:`/`fix:` entra no PR de release,
+e o merge publica a tag, o changelog e um `.zip` do app.
+
 ```sh
 ./install.sh
 ```

@@ -39,6 +39,19 @@ pub fn main(init: std.process.Init) !void {
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
 
+    if (std.mem.eql(u8, argv[1], "version")) {
+        std.debug.print("agb (Agent Belt) {s}\n", .{@import("build_options").version});
+        return;
+    }
+
+    if (std.mem.eql(u8, argv[1], "update")) {
+        // agb update [tag]: builds that release (default: the latest) from source.
+        if (argc > 3) return usage();
+        const tag: ?[:0]const u8 = if (argc == 3) try allocator.dupeZ(u8, argv[2]) else null;
+        defer if (tag) |t| allocator.free(t);
+        return macos.updateRun(tag);
+    }
+
     if (std.mem.eql(u8, argv[1], "new")) {
         // agb new [--dry-run] <pedido em linguagem natural>
         var rest = argv[2..argc];
@@ -156,6 +169,8 @@ fn usage() !void {
         "  agb bind <a-f> disabled\n" ++
         "  agb devices\n" ++
         "  agb status\n" ++
+        "  agb version\n" ++
+        "  agb update [tag]\n" ++
         "  agb new [--dry-run] <pedido>   (ex.: crie um agente no windows com codex no coreum para …)\n" ++
         "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
         "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++

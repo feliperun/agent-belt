@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh [--keep-config] | --uninstall
+# install.sh [--keep-config] | --uninstall | --package <dir>
 #
 # Instala o agent-belt como app de background: compila, empacota em
 # ~/Applications/Agent Belt.app, assina, guarda a chave do Deepgram no
@@ -39,7 +39,9 @@ stop_daemons() {
 }
 
 keep_config=0
+package=""
 case "${1:-}" in
+  --package) package="${2:?install.sh: --package precisa de um diretorio}" ;;
   --uninstall)
     say "removendo LaunchAgent, app e link"
     stop_daemons
@@ -60,10 +62,11 @@ command -v zig >/dev/null || die "zig nao encontrado (brew install zig)"
 say "compilando (ReleaseSafe)"
 (cd "$src" && zig build -Doptimize=ReleaseSafe)
 
-version=$(git -C "$src" describe --always --dirty 2>/dev/null || echo dev)
+version=$(tr -d " \n" < "$src/version.txt")
 stage="$(mktemp -d)/Agent Belt.app"
 mkdir -p "$stage/Contents/MacOS" "$stage/Contents/Resources"
 cp "$src/assets/AppIcon.icns" "$stage/Contents/Resources/AppIcon.icns"
+cp "$src/scripts/update.sh" "$stage/Contents/Resources/update.sh"
 cp "$src/zig-out/bin/agb" "$stage/Contents/MacOS/agb"
 cat > "$stage/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -93,6 +96,15 @@ if [ -z "$identity" ]; then
 fi
 say "assinando com: $identity"
 codesign --force --sign "$identity" --identifier "$label" "$stage" >/dev/null
+
+# --package: just the signed app, zipped (used by the release workflow).
+if [ -n "$package" ]; then
+  mkdir -p "$package"
+  zip="$(cd "$package" && pwd)/Agent-Belt-$version-macos.zip"
+  (cd "$(dirname "$stage")" && ditto -c -k --keepParent "Agent Belt.app" "$zip")
+  say "pacote: $zip"
+  exit 0
+fi
 
 say "parando daemons em execucao"
 stop_daemons

@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // version.txt is bumped by release-please; the binary and the updater read it.
+    const version = std.mem.trim(u8, b.build_root.handle.readFileAlloc(b.graph.io, "version.txt", b.allocator, .limited(64)) catch "0.0.0", " \n\r\t");
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", version);
+
     const exe = b.addExecutable(.{
         .name = "agb",
         .root_module = b.createModule(.{
@@ -12,6 +17,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    exe.root_module.addOptions("build_options", options);
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/macos_shim.c"),
         .flags = &.{"-fblocks"},
@@ -38,6 +44,10 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-fobjc-arc"},
     });
     exe.root_module.addCSourceFile(.{
+        .file = b.path("src/updater.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
+    exe.root_module.addCSourceFile(.{
         .file = b.path("src/agent_stats.m"),
         .flags = &.{"-fobjc-arc"},
     });
@@ -50,6 +60,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkFramework("AppKit", .{});
     exe.root_module.linkFramework("ApplicationServices", .{});
     exe.root_module.linkFramework("Security", .{});
+    exe.root_module.linkFramework("UserNotifications", .{});
 
     b.installArtifact(exe);
 

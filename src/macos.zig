@@ -93,6 +93,14 @@ pub fn agentsNew(allocator: std.mem.Allocator, text: []const u8, dry_run: bool) 
     if (c.mk_agents_new(z.ptr, @intFromBool(dry_run)) != 0) return error.AgentNotCreated;
 }
 
+pub fn updaterStart(comptime version: []const u8) void {
+    c.mk_updater_start(version ++ "");
+}
+
+pub fn updateRun(tag: ?[:0]const u8) !void {
+    if (c.mk_update_run(if (tag) |t| t.ptr else null) != 0) return error.UpdateFailed;
+}
+
 pub fn agentsMenuPress() void {
     c.mk_agents_menu_press();
 }
