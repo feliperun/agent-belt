@@ -13,11 +13,14 @@ const Daemon = struct {
     busy: bool = false,
     /// Push-to-talk started with the agent menu open: the speech is a command.
     command: bool = false,
+    /// The keypad's HID thread and the F5 queue both drive push-to-talk.
+    ptt_lock: std.Io.Mutex = .init,
     keys: @import("key_edges.zig").KeyEdges = .{},
     knob: @import("knob.zig").Knob = .{},
     talk: @import("f5.zig").Talk = .{},
 
-    /// F5 records like the push-to-talk key, under a key index no binding uses.
+    /// F5 (fn+F5 on a Mac keyboard) records like the push-to-talk key, under a
+    /// key index no binding uses. Runs on its own queue, not the event tap.
     fn onF5(context: *anyopaque, pressed: bool) void {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
         const now = macos.monotonicNs();
@@ -64,6 +67,8 @@ const Daemon = struct {
     }
 
     fn handlePushToTalk(self: *Daemon, event: macos.HidEvent) !void {
+        self.ptt_lock.lockUncancelable(self.io);
+        defer self.ptt_lock.unlock(self.io);
         if (event.pressed) {
             if (self.recording != null or self.busy) return;
             var recorder = macos.Recorder.init(self.allocator);
@@ -74,6 +79,7 @@ const Daemon = struct {
             self.command = macos.agentsMenuVisible();
             if (self.command) macos.agentsMenuClose();
             macos.setStatus(if (self.command) .command else .recording);
+            if (self.config.sounds) macos.playCue(.start);
             std.debug.print("[agent-belt] GRAVANDO — solte a tecla para transcrever\n", .{});
             return;
         }
@@ -83,6 +89,7 @@ const Daemon = struct {
         self.recording = null;
         self.recording_key = null;
         self.busy = true;
+        if (self.config.sounds) macos.playCue(.stop);
         defer self.busy = false;
         defer macos.setStatus(.ready);
         defer recorder.deinit();

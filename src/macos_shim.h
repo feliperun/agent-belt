@@ -20,6 +20,9 @@ int mk_hid_run(
     void *context
 );
 void mk_knob_set_intercept(int intercept);
+void mk_set_f5_handler(mk_f5_callback handler, void *context);
+/* 0 start, 1 stop: discreet recording cues */
+void mk_play_cue(int cue);
 void mk_scroll_down(int32_t lines);
 int mk_system_media_key(const void *event, int *key, int *pressed);
 void mk_agents_bottom(void);

@@ -312,6 +312,15 @@ int mk_status_init(void) {
     }
 }
 
+// Discreet start/stop cues for recording, like macOS Dictation's.
+void mk_play_cue(int cue) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSSound *sound = [[NSSound soundNamed:cue == 0 ? @"Tink" : @"Pop"] copy];
+        sound.volume = 0.25;
+        [sound play];
+    });
+}
+
 void mk_status_set(int status) {
     mk_led_status(status);
     if (!mk_status_runloop) return;

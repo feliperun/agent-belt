@@ -30,9 +30,11 @@ pub const Config = struct {
     knob_scroll_lines: i32 = 3,
     /// Key LEDs follow push-to-talk and agents: white recording, red waiting, green finished.
     led: bool = true,
-    /// F5, the Mac's microphone key, as push-to-talk (turn off the Dictation
-    /// and Siri keyboard shortcuts in System Settings > Keyboard).
+    /// F5 as push-to-talk: fn+F5 on a Mac keyboard (plain F5 is the microphone
+    /// key, which macOS keeps for its own Dictation).
     f5_push_to_talk: bool = true,
+    /// Discreet sounds when recording starts and stops.
+    sounds: bool = true,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
         .{ .action = "agents_menu" },
@@ -110,6 +112,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"knob_scroll_lines\": 3,\n" ++
         "  \"led\": true,\n" ++
         "  \"f5_push_to_talk\": true,\n" ++
+        "  \"sounds\": true,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
         "    {\"action\": \"agents_menu\", \"value\": \"\"},\n" ++

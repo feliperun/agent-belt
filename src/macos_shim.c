@@ -68,15 +68,29 @@ static int mk_is_tracked_keycode(uint16_t keycode) {
 // Handled keys are swallowed, down, repeat and up alike.
 enum { mk_kc_return = 36, mk_kc_enter = 76, mk_kc_escape = 53, mk_kc_space = 49, mk_kc_up = 126, mk_kc_down = 125 };
 
-static atomic_int mk_f5_swallow;
+// F5 as it reaches apps (keycode 96): fn+F5 on a Mac keyboard, where plain F5
+// is the microphone key macOS keeps for its own Dictation. Handled on a queue
+// of its own: a transcription must never block the event tap.
+static mk_f5_callback mk_f5_handler;
+static void *mk_f5_context;
+static dispatch_queue_t mk_f5_queue;
+
+void mk_set_f5_handler(mk_f5_callback handler, void *context) {
+    mk_f5_context = context;
+    mk_f5_queue = dispatch_queue_create("agent-belt.f5", DISPATCH_QUEUE_SERIAL);
+    mk_f5_handler = handler;
+}
 
 static int mk_hotkey(CGEventRef event, int down) {
     const uint16_t keycode = (uint16_t)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     const CGEventFlags modifiers = CGEventGetFlags(event) &
         (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate | kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
     const int fresh = down && !CGEventGetIntegerValueField(event, kCGKeyboardEventAutorepeat);
-    // F5 is push-to-talk (read from HID); the plain key must not reach apps.
-    if (keycode == 96 && !modifiers && atomic_load(&mk_f5_swallow)) return 1;
+    if (keycode == 96 && !modifiers && mk_f5_handler) {
+        const uint8_t pressed = (uint8_t)down;
+        dispatch_async(mk_f5_queue, ^{ mk_f5_handler(mk_f5_context, pressed); });
+        return 1;
+    }
     if (modifiers == (kCGEventFlagMaskControl | kCGEventFlagMaskAlternate)) {
         if (keycode == mk_kc_space) { if (fresh) mk_agents_menu_press(); return 1; }
         if (keycode == mk_kc_up) { if (fresh) mk_agents_next(0); return 1; }
@@ -207,7 +221,7 @@ int mk_hid_run(
     }
 
     struct mk_hid_context state = { .callback = callback, .knob = knob, .f5 = f5, .vendor_id = vendor_id, .context = context };
-    atomic_store(&mk_f5_swallow, f5 != NULL);
+
     if (f5) {
         // Also every keyboard, for F5 (their other keys are ignored above).
         int32_t page = 0x01, keyboard = 0x06;

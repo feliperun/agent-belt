@@ -53,6 +53,12 @@ pub fn checkPermissions() !void {
     if (c.mk_check_permissions() != 0) return error.PermissionsMissing;
 }
 
+pub const Cue = enum(c_int) { start = 0, stop = 1 };
+
+pub fn playCue(cue: Cue) void {
+    c.mk_play_cue(@intFromEnum(cue));
+}
+
 pub fn setKnobIntercept(intercept: bool) void {
     c.mk_knob_set_intercept(@intFromBool(intercept));
 }
@@ -153,7 +159,7 @@ pub const HidListener = struct {
     product_id: u16,
     on_event: *const fn (context: *anyopaque, event: HidEvent) void,
     on_knob: *const fn (context: *anyopaque, event: KnobEvent) void,
-    /// F5 on the Mac's own keyboards; null leaves the key to macOS.
+    /// F5 as apps see it (fn+F5 on a Mac keyboard); null leaves the key alone.
     on_f5: ?*const fn (context: *anyopaque, pressed: bool) void = null,
     context: *anyopaque,
     pressed: std.atomic.Value(u8) = .init(0),
@@ -168,6 +174,7 @@ pub const HidListener = struct {
             std.log.warn("não consegui criar indicador na barra de menus", .{});
         }
         self.debug_input = std.c.getenv("AGENT_BELT_DEBUG_INPUT") != null;
+        if (self.on_f5 != null) c.mk_set_f5_handler(f5Callback, self);
         const hid_thread = try std.Thread.spawn(.{}, hidThread, .{self});
         hid_thread.detach();
 
@@ -184,7 +191,7 @@ pub const HidListener = struct {
 };
 
 fn hidThread(listener: *HidListener) void {
-    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, if (listener.on_f5 != null) f5Callback else null, listener);
+    const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, null, listener);
     if (result != 0) {
         std.log.err("não consegui abrir o monitor HID (código={d}); dê ao binário a permissão de Input Monitoring", .{result});
     } else {

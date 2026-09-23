@@ -46,10 +46,11 @@
 - **4:** próximo agente, priorizando quem aguarda você.
 - **1:** menu de agentes. Toque navega, duplo toque abre.
 - **0, 2, 5:** Esc, Delete e Return, que repetem ao segurar.
-- **F5, a tecla do microfone do Mac:** um toque começa a gravar e outro para; segurar grava
-  até soltar. Para ela deixar de chamar o Ditado e a Siri, desligue os dois atalhos em
-  Ajustes do Sistema → Teclado → Ditado → Atalho e em Siri → Atalho de teclado. Para
-  manter a F5 com o macOS, use `"f5_push_to_talk": false`.
+- **fn+F5:** push-to-talk no teclado do Mac. Um toque começa a gravar e outro para; segurar
+  grava até soltar. A F5 sozinha, a do microfone, continua com o Ditado do macOS, que não
+  a libera. Quem preferir a F5 sozinha pode ativar "Usar F1, F2 etc. como teclas de função
+  padrão" em Teclado; aí o microfone passa para fn+F5. Sons discretos marcam o início e o
+  fim da gravação (`"sounds": false` desliga).
 
 ## Instalação
 
