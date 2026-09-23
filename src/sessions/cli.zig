@@ -102,7 +102,7 @@ fn remoteArgv(ctx: sys.Ctx, host: hosts.Host, tty: bool, args: []const []const u
 
 fn remote(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) sys.Output {
     const argv = remoteArgv(ctx, host, false, args) catch return .{ .ok = false, .code = 1, .stdout = &.{}, .stderr = &.{} };
-    return sys.run(ctx, argv, null);
+    return sys.runCaptured(ctx, argv);
 }
 
 /// Hands this terminal to agb on another machine (attach, create).

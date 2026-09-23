@@ -146,6 +146,9 @@ file — keep appending.
 - **Windows: an ssh logon has no credential vault.** `CredWriteW` fails with 1312, so
   `agb install` over ssh leaves the Deepgram key in `%LOCALAPPDATA%\agent-belt` and the
   daemon moves it into Credential Manager on its first start.
+- **Windows: `ssh.exe` never exits when its stdout is a pipe inside an ssh session**
+  (it prints the output, then hangs). Remote calls from Windows capture through
+  temporary files (`sys.runCaptured`); otherwise `agb ls` over ssh hangs forever.
 - **Windows: only a scheduled task (`schtasks /it`) reaches the desktop session from
   ssh**, and a running `.exe` can be renamed but not overwritten: `agb deploy` renames
   `agb.exe` aside and swaps `agent-belt.exe` in before restarting it.

@@ -65,6 +65,36 @@ pub fn run(ctx: Ctx, argv: []const []const u8, cwd: ?[]const u8) Output {
 }
 
 /// Runs a program on the user's terminal (inherited stdio) and returns its exit code.
+var capture_seq = std.atomic.Value(u32).init(0);
+
+/// Like run, with the output going through temporary files instead of pipes.
+/// Windows' ssh.exe prints its output and then never exits when stdout is a
+/// pipe inside an ssh session (a remote `agb ls` on Windows hung forever).
+pub fn runCaptured(ctx: Ctx, argv: []const []const u8) Output {
+    if (platform != .windows) return run(ctx, argv, null);
+    const failed = Output{ .ok = false, .code = 127, .stdout = &.{}, .stderr = &.{} };
+    const stamp = std.Io.Clock.real.now(ctx.io).toNanoseconds();
+    const base = ctx.fmt("{s}\\agb-{d}-{d}", .{ ctx.getenv("TEMP") orelse ctx.home(), stamp, capture_seq.fetchAdd(1, .monotonic) }) catch return failed;
+    const out_path = ctx.fmt("{s}.out", .{base}) catch return failed;
+    const err_path = ctx.fmt("{s}.err", .{base}) catch return failed;
+    const cwd = std.Io.Dir.cwd();
+    defer cwd.deleteFile(ctx.io, out_path) catch {};
+    defer cwd.deleteFile(ctx.io, err_path) catch {};
+    const code: u8 = blk: {
+        const out = cwd.createFile(ctx.io, out_path, .{}) catch return failed;
+        defer out.close(ctx.io);
+        const err = cwd.createFile(ctx.io, err_path, .{}) catch return failed;
+        defer err.close(ctx.io);
+        var child = std.process.spawn(ctx.io, .{ .argv = argv, .environ_map = ctx.env, .stdin = .ignore, .stdout = .{ .file = out }, .stderr = .{ .file = err } }) catch return failed;
+        const term = child.wait(ctx.io) catch return failed;
+        break :blk switch (term) {
+            .exited => |c| c,
+            else => 1,
+        };
+    };
+    return .{ .ok = code == 0, .code = code, .stdout = readFile(ctx, out_path) orelse &.{}, .stderr = readFile(ctx, err_path) orelse &.{} };
+}
+
 pub fn interactive(ctx: Ctx, argv: []const []const u8, cwd: ?[]const u8) u8 {
     var child = std.process.spawn(ctx.io, .{
         .argv = argv,
