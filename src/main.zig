@@ -79,7 +79,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
     const value = switch (action) {
         .disabled, .push_to_talk => "",
         .cycle_agents => if (args.len > 2 and std.mem.eql(u8, args[2], "desktop")) "desktop" else if (args.len > 2) return usage() else "",
-        .key => if (args.len == 3 and config.keyCode(args[2]) != null) args[2] else return usage(),
+        .key => if (args.len == 3 and config.keyChord(args[2]) != null) args[2] else return usage(),
         .command, .script, .text => blk: {
             const joined = try joinArgs(allocator, args[2..]);
             owned_value = joined;
@@ -111,7 +111,7 @@ fn usage() !void {
         "  minikeyboard init\n" ++
         "  minikeyboard bind <a-f> ptt\n" ++
         "  minikeyboard bind <0-5|a-f> agents [desktop]\n" ++
-        "  minikeyboard bind <0-5|a-f> key <escape|delete|return|tab|space|up|down|...>\n" ++
+        "  minikeyboard bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
         "  minikeyboard bind <a-f> command <comando>\n" ++
         "  minikeyboard bind <a-f> script <comando-ou-script>\n" ++
         "  minikeyboard bind <a-f> text <texto>\n" ++

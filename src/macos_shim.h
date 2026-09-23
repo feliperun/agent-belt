@@ -41,7 +41,7 @@ void mk_recorder_destroy(mk_recorder *recorder);
 void mk_free_buffer(uint8_t *buffer);
 
 int mk_insert_text(const uint16_t *text, size_t length);
-void mk_press_key(uint16_t keycode, int pressed);
+void mk_press_key(uint16_t keycode, uint64_t flags, int pressed);
 char *mk_self_exe_path(void);
 char *mk_keychain_secret(const char *service, const char *account);
 int mk_single_instance(void);

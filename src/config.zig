@@ -29,7 +29,7 @@ pub const Config = struct {
     knob_scroll_lines: i32 = 3,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
-        .{},
+        .{ .action = "key", .value = "shift+tab" },
         .{ .action = "key", .value = "delete" },
         .{ .action = "push_to_talk" },
         .{ .action = "cycle_agents" },
@@ -104,7 +104,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"knob_scroll_lines\": 3,\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
+        "    {\"action\": \"key\", \"value\": \"shift+tab\"},\n" ++
         "    {\"action\": \"key\", \"value\": \"delete\"},\n" ++
         "    {\"action\": \"push_to_talk\", \"value\": \"\"},\n" ++
         "    {\"action\": \"cycle_agents\", \"value\": \"\"},\n" ++
@@ -131,33 +131,79 @@ pub fn actionType(name: []const u8) !ActionType {
     return error.InvalidAction;
 }
 
-/// macOS virtual keycodes for the `key` action. "delete" is the Mac Delete
-/// (backspace); "forward_delete" is ⌦.
-pub fn keyCode(name: []const u8) ?u16 {
-    const keys = [_]struct { []const u8, u16 }{
-        .{ "escape", 53 },         .{ "esc", 53 },
-        .{ "delete", 51 },         .{ "backspace", 51 },
-        .{ "forward_delete", 117 }, .{ "return", 36 },
-        .{ "enter", 36 },          .{ "tab", 48 },
-        .{ "space", 49 },          .{ "up", 126 },
-        .{ "down", 125 },          .{ "left", 123 },
-        .{ "right", 124 },         .{ "home", 115 },
-        .{ "end", 119 },           .{ "page_up", 116 },
-        .{ "page_down", 121 },
+pub const KeyChord = struct {
+    code: u16,
+    /// CGEventFlags modifier mask.
+    flags: u64 = 0,
+};
+
+/// Parses the `key` action value: a key name with optional modifiers, e.g.
+/// "escape", "shift+tab", "cmd+k". "delete" is the Mac Delete (backspace);
+/// "forward_delete" is ⌦.
+pub fn keyChord(value: []const u8) ?KeyChord {
+    var chord = KeyChord{ .code = 0 };
+    var parts = std.mem.splitScalar(u8, value, '+');
+    var key: ?u16 = null;
+    while (parts.next()) |part| {
+        if (key != null) return null; // the key must come last
+        if (modifierFlag(part)) |flag| {
+            chord.flags |= flag;
+        } else {
+            key = keyCode(part) orelse return null;
+        }
+    }
+    chord.code = key orelse return null;
+    return chord;
+}
+
+fn modifierFlag(name: []const u8) ?u64 {
+    const modifiers = [_]struct { []const u8, u64 }{
+        .{ "shift", 0x20000 }, .{ "ctrl", 0x40000 },   .{ "control", 0x40000 },
+        .{ "alt", 0x80000 },   .{ "option", 0x80000 }, .{ "opt", 0x80000 },
+        .{ "cmd", 0x100000 },  .{ "command", 0x100000 },
     };
-    for (keys) |entry| if (std.ascii.eqlIgnoreCase(entry[0], name)) return entry[1];
+    for (modifiers) |entry| if (std.ascii.eqlIgnoreCase(entry[0], name)) return entry[1];
     return null;
 }
 
-test "key names map to macOS keycodes" {
-    try std.testing.expectEqual(@as(?u16, 53), keyCode("escape"));
-    try std.testing.expectEqual(@as(?u16, 53), keyCode("ESC"));
-    try std.testing.expectEqual(@as(?u16, 51), keyCode("delete"));
-    try std.testing.expectEqual(@as(?u16, 117), keyCode("forward_delete"));
-    try std.testing.expectEqual(@as(?u16, 36), keyCode("return"));
-    try std.testing.expectEqual(@as(?u16, 36), keyCode("enter"));
-    try std.testing.expectEqual(@as(?u16, null), keyCode("hyper"));
-    try std.testing.expectEqual(@as(?u16, null), keyCode(""));
+pub fn keyCode(name: []const u8) ?u16 {
+    const keys = [_]struct { []const u8, u16 }{
+        .{ "escape", 53 },          .{ "esc", 53 },
+        .{ "delete", 51 },          .{ "backspace", 51 },
+        .{ "forward_delete", 117 }, .{ "return", 36 },
+        .{ "enter", 36 },           .{ "tab", 48 },
+        .{ "space", 49 },           .{ "up", 126 },
+        .{ "down", 125 },           .{ "left", 123 },
+        .{ "right", 124 },          .{ "home", 115 },
+        .{ "end", 119 },            .{ "page_up", 116 },
+        .{ "page_down", 121 },
+    };
+    for (keys) |entry| if (std.ascii.eqlIgnoreCase(entry[0], name)) return entry[1];
+    if (name.len == 1) {
+        // ANSI layout positions: macOS keycodes are physical.
+        const letters = [26]u16{ 0, 11, 8, 2, 14, 3, 5, 4, 34, 38, 40, 37, 46, 45, 31, 35, 12, 15, 1, 17, 32, 9, 13, 7, 16, 6 };
+        const digits = [10]u16{ 29, 18, 19, 20, 21, 23, 22, 26, 28, 25 };
+        const c = std.ascii.toLower(name[0]);
+        if (c >= 'a' and c <= 'z') return letters[c - 'a'];
+        if (c >= '0' and c <= '9') return digits[c - '0'];
+    }
+    return null;
+}
+
+test "key chords: names, letters, digits and modifiers" {
+    try std.testing.expectEqual(KeyChord{ .code = 53 }, keyChord("escape").?);
+    try std.testing.expectEqual(KeyChord{ .code = 53 }, keyChord("ESC").?);
+    try std.testing.expectEqual(KeyChord{ .code = 51 }, keyChord("delete").?);
+    try std.testing.expectEqual(KeyChord{ .code = 117 }, keyChord("forward_delete").?);
+    try std.testing.expectEqual(KeyChord{ .code = 36 }, keyChord("enter").?);
+    try std.testing.expectEqual(KeyChord{ .code = 48, .flags = 0x20000 }, keyChord("shift+tab").?);
+    try std.testing.expectEqual(KeyChord{ .code = 40, .flags = 0x100000 }, keyChord("cmd+k").?);
+    try std.testing.expectEqual(KeyChord{ .code = 29, .flags = 0x40000 | 0x80000 }, keyChord("ctrl+alt+0").?);
+    try std.testing.expectEqual(@as(?KeyChord, null), keyChord("hyper"));
+    try std.testing.expectEqual(@as(?KeyChord, null), keyChord(""));
+    try std.testing.expectEqual(@as(?KeyChord, null), keyChord("shift"));
+    try std.testing.expectEqual(@as(?KeyChord, null), keyChord("tab+shift"));
+    try std.testing.expectEqual(@as(?KeyChord, null), keyChord("shift+"));
     try std.testing.expectEqual(ActionType.key, try actionType("key"));
 }
 
@@ -173,7 +219,7 @@ test "numbered keys are zero-based aliases and agents action is configurable" {
     try std.testing.expectEqual(ActionType.cycle_agents, try actionType("cycle_agents"));
 }
 
-test "default JSON and struct agree: Esc 0, Delete 2, PTT 3, agents 4, Return 5" {
+test "default JSON and struct agree: Esc 0, Shift+Tab 1, Delete 2, PTT 3, agents 4, Return 5" {
     const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, defaultConfigJson(), .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
@@ -183,11 +229,11 @@ test "default JSON and struct agree: Esc 0, Delete 2, PTT 3, agents 4, Return 5"
         const action = try actionType(actual.action);
         try std.testing.expectEqualStrings(expected.value, actual.value);
         try std.testing.expectEqual(switch (index) {
-            0, 2, 5 => ActionType.key,
+            0, 1, 2, 5 => ActionType.key,
             3 => ActionType.push_to_talk,
             4 => ActionType.cycle_agents,
             else => ActionType.disabled,
         }, action);
-        if (action == .key) try std.testing.expect(keyCode(actual.value) != null);
+        if (action == .key) try std.testing.expect(keyChord(actual.value) != null);
     }
 }

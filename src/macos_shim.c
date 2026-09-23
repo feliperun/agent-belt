@@ -365,12 +365,12 @@ void mk_free_buffer(uint8_t *buffer) {
     free(buffer);
 }
 
-static void mk_post_key(uint16_t keycode, bool down, bool repeat) {
+static void mk_post_key(uint16_t keycode, uint64_t flags, bool down, bool repeat) {
     CGEventRef event = CGEventCreateKeyboardEvent(NULL, keycode, down);
     if (!event) return;
-    // Posted without modifiers: a held Shift/Cmd on the Mac keyboard must not
-    // turn Return into Shift+Return or Delete into Cmd+Delete.
-    CGEventSetFlags(event, 0);
+    // Only the binding's own modifiers: a held Shift/Cmd on the Mac keyboard
+    // must not turn Return into Shift+Return or Delete into Cmd+Delete.
+    CGEventSetFlags(event, (CGEventFlags)flags);
     if (repeat) CGEventSetIntegerValueField(event, kCGKeyboardEventAutorepeat, 1);
     CGEventSetIntegerValueField(event, kCGEventSourceUserData, mk_injected_event_marker);
     CGEventPost(kCGHIDEventTap, event);
@@ -391,11 +391,12 @@ static uint64_t mk_key_repeat_ns(CFStringRef key, long fallback_ticks) {
 static dispatch_queue_t mk_key_queue;
 static dispatch_source_t mk_key_timer;
 static uint16_t mk_key_held;
+static uint64_t mk_key_held_flags;
 static void mk_key_queue_create(void) {
     mk_key_queue = dispatch_queue_create("minikeyboard.keys", DISPATCH_QUEUE_SERIAL);
 }
 
-void mk_press_key(uint16_t keycode, int pressed) {
+void mk_press_key(uint16_t keycode, uint64_t flags, int pressed) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, mk_key_queue_create);
     dispatch_async(mk_key_queue, ^{
@@ -404,18 +405,19 @@ void mk_press_key(uint16_t keycode, int pressed) {
             mk_key_timer = NULL;
         }
         if (!pressed) {
-            if (mk_key_held == keycode) mk_post_key(keycode, false, false);
+            if (mk_key_held == keycode) mk_post_key(keycode, flags, false, false);
             mk_key_held = 0;
             return;
         }
-        if (mk_key_held) mk_post_key(mk_key_held, false, false);
+        if (mk_key_held) mk_post_key(mk_key_held, mk_key_held_flags, false, false);
         mk_key_held = keycode;
-        mk_post_key(keycode, true, false);
+        mk_key_held_flags = flags;
+        mk_post_key(keycode, flags, true, false);
         mk_key_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, mk_key_queue);
         dispatch_source_set_timer(mk_key_timer,
             dispatch_time(DISPATCH_TIME_NOW, (int64_t)mk_key_repeat_ns(CFSTR("InitialKeyRepeat"), 25)),
             mk_key_repeat_ns(CFSTR("KeyRepeat"), 2), NSEC_PER_MSEC);
-        dispatch_source_set_event_handler(mk_key_timer, ^{ mk_post_key(keycode, true, true); });
+        dispatch_source_set_event_handler(mk_key_timer, ^{ mk_post_key(keycode, flags, true, true); });
         dispatch_resume(mk_key_timer);
     });
 }
