@@ -136,7 +136,13 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
         CFTypeRef attributes = NULL;
         BOOL keychain = SecItemCopyMatching((__bridge CFDictionaryRef)query, &attributes) == errSecSuccess;
         if (attributes) CFRelease(attributes);
-        printf("deepgram:     %s\n", keychain ? "chave no Keychain" : getenv(key_env) ? "só no ambiente do terminal (o LaunchAgent não vê)" : "sem chave");
+        // Reads the secret like the daemon does (same signed app), so a missing
+        // Keychain grant shows up here as the system prompt, not mid-dictation.
+        char *secret = keychain ? mk_keychain_secret("minikeyboard", "deepgram") : NULL;
+        if (secret) { memset(secret, 0, strlen(secret)); free(secret); }
+        printf("deepgram:     %s\n", secret ? "chave no Keychain, legível pelo app"
+                                    : keychain ? "chave no Keychain, mas o app não tem acesso (rode status de novo e autorize)"
+                                    : getenv(key_env) ? "só no ambiente do terminal (o LaunchAgent não vê)" : "sem chave");
 
         printf("config:       %s/.config/minikeyboard/config.json\n", NSHomeDirectory().UTF8String);
         printf("log:          %s\n", logPath.UTF8String);
