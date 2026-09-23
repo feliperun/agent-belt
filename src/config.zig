@@ -4,6 +4,7 @@ pub const ActionType = enum {
     disabled,
     push_to_talk,
     cycle_agents,
+    key,
     command,
     script,
     text,
@@ -27,12 +28,12 @@ pub const Config = struct {
     /// Lines per detent; negative inverts the direction.
     knob_scroll_lines: i32 = 3,
     bindings: [6]Binding = .{
+        .{ .action = "key", .value = "escape" },
         .{},
-        .{},
-        .{},
+        .{ .action = "key", .value = "delete" },
         .{ .action = "push_to_talk" },
         .{ .action = "cycle_agents" },
-        .{},
+        .{ .action = "key", .value = "return" },
     },
 };
 
@@ -102,12 +103,12 @@ pub fn defaultConfigJson() []const u8 {
         "  \"knob\": \"scroll\",\n" ++
         "  \"knob_scroll_lines\": 3,\n" ++
         "  \"bindings\": [\n" ++
+        "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
         "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"},\n" ++
+        "    {\"action\": \"key\", \"value\": \"delete\"},\n" ++
         "    {\"action\": \"push_to_talk\", \"value\": \"\"},\n" ++
         "    {\"action\": \"cycle_agents\", \"value\": \"\"},\n" ++
-        "    {\"action\": \"disabled\", \"value\": \"\"}\n" ++
+        "    {\"action\": \"key\", \"value\": \"return\"}\n" ++
         "  ]\n" ++
         "}\n";
 }
@@ -123,10 +124,41 @@ pub fn actionType(name: []const u8) !ActionType {
     if (std.mem.eql(u8, name, "disabled")) return .disabled;
     if (std.mem.eql(u8, name, "ptt") or std.mem.eql(u8, name, "push_to_talk")) return .push_to_talk;
     if (std.mem.eql(u8, name, "agents") or std.mem.eql(u8, name, "cycle_agents")) return .cycle_agents;
+    if (std.mem.eql(u8, name, "key")) return .key;
     if (std.mem.eql(u8, name, "command")) return .command;
     if (std.mem.eql(u8, name, "script")) return .script;
     if (std.mem.eql(u8, name, "text")) return .text;
     return error.InvalidAction;
+}
+
+/// macOS virtual keycodes for the `key` action. "delete" is the Mac Delete
+/// (backspace); "forward_delete" is ⌦.
+pub fn keyCode(name: []const u8) ?u16 {
+    const keys = [_]struct { []const u8, u16 }{
+        .{ "escape", 53 },         .{ "esc", 53 },
+        .{ "delete", 51 },         .{ "backspace", 51 },
+        .{ "forward_delete", 117 }, .{ "return", 36 },
+        .{ "enter", 36 },          .{ "tab", 48 },
+        .{ "space", 49 },          .{ "up", 126 },
+        .{ "down", 125 },          .{ "left", 123 },
+        .{ "right", 124 },         .{ "home", 115 },
+        .{ "end", 119 },           .{ "page_up", 116 },
+        .{ "page_down", 121 },
+    };
+    for (keys) |entry| if (std.ascii.eqlIgnoreCase(entry[0], name)) return entry[1];
+    return null;
+}
+
+test "key names map to macOS keycodes" {
+    try std.testing.expectEqual(@as(?u16, 53), keyCode("escape"));
+    try std.testing.expectEqual(@as(?u16, 53), keyCode("ESC"));
+    try std.testing.expectEqual(@as(?u16, 51), keyCode("delete"));
+    try std.testing.expectEqual(@as(?u16, 117), keyCode("forward_delete"));
+    try std.testing.expectEqual(@as(?u16, 36), keyCode("return"));
+    try std.testing.expectEqual(@as(?u16, 36), keyCode("enter"));
+    try std.testing.expectEqual(@as(?u16, null), keyCode("hyper"));
+    try std.testing.expectEqual(@as(?u16, null), keyCode(""));
+    try std.testing.expectEqual(ActionType.key, try actionType("key"));
 }
 
 test "numbered keys are zero-based aliases and agents action is configurable" {
@@ -141,7 +173,7 @@ test "numbered keys are zero-based aliases and agents action is configurable" {
     try std.testing.expectEqual(ActionType.cycle_agents, try actionType("cycle_agents"));
 }
 
-test "default JSON and struct agree on PTT 3 and agents 4" {
+test "default JSON and struct agree: Esc 0, Delete 2, PTT 3, agents 4, Return 5" {
     const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, defaultConfigJson(), .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
@@ -149,10 +181,13 @@ test "default JSON and struct agree on PTT 3 and agents 4" {
     for ((Config{}).bindings, parsed.value.bindings, 0..) |expected, actual, index| {
         try std.testing.expectEqualStrings(expected.action, actual.action);
         const action = try actionType(actual.action);
+        try std.testing.expectEqualStrings(expected.value, actual.value);
         try std.testing.expectEqual(switch (index) {
+            0, 2, 5 => ActionType.key,
             3 => ActionType.push_to_talk,
             4 => ActionType.cycle_agents,
             else => ActionType.disabled,
         }, action);
+        if (action == .key) try std.testing.expect(keyCode(actual.value) != null);
     }
 }

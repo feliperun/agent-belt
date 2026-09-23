@@ -166,6 +166,10 @@ fn keyFromKeycode(keycode: u16) ?u8 {
     };
 }
 
+pub fn pressKey(keycode: u16, pressed: bool) void {
+    c.mk_press_key(keycode, @intFromBool(pressed));
+}
+
 pub fn insertText(text: []const u8) !void {
     var utf16: std.ArrayList(u16) = .empty;
     defer utf16.deinit(std.heap.page_allocator);

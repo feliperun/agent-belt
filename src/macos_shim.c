@@ -8,6 +8,9 @@
 #include <AudioToolbox/AudioQueue.h>
 #include <mach-o/dyld.h>
 
+#include <dispatch/dispatch.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -360,6 +363,61 @@ void mk_recorder_destroy(mk_recorder *recorder) {
 
 void mk_free_buffer(uint8_t *buffer) {
     free(buffer);
+}
+
+static void mk_post_key(uint16_t keycode, bool down, bool repeat) {
+    CGEventRef event = CGEventCreateKeyboardEvent(NULL, keycode, down);
+    if (!event) return;
+    // Posted without modifiers: a held Shift/Cmd on the Mac keyboard must not
+    // turn Return into Shift+Return or Delete into Cmd+Delete.
+    CGEventSetFlags(event, 0);
+    if (repeat) CGEventSetIntegerValueField(event, kCGKeyboardEventAutorepeat, 1);
+    CGEventSetIntegerValueField(event, kCGEventSourceUserData, mk_injected_event_marker);
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+}
+
+// macOS stores key repeat in ticks of 15 ms (System Settings > Keyboard).
+static uint64_t mk_key_repeat_ns(CFStringRef key, long fallback_ticks) {
+    Boolean valid = false;
+    long ticks = CFPreferencesGetAppIntegerValue(key, kCFPreferencesAnyApplication, &valid);
+    if (!valid || ticks <= 0) ticks = fallback_ticks;
+    return (uint64_t)ticks * 15 * NSEC_PER_MSEC;
+}
+
+// Synthetic events never autorepeat, so a held key repeats here. All state
+// lives on one serial queue; pthread_once because dispatch_once traps under
+// the UBSan Zig enables for C.
+static dispatch_queue_t mk_key_queue;
+static dispatch_source_t mk_key_timer;
+static uint16_t mk_key_held;
+static void mk_key_queue_create(void) {
+    mk_key_queue = dispatch_queue_create("minikeyboard.keys", DISPATCH_QUEUE_SERIAL);
+}
+
+void mk_press_key(uint16_t keycode, int pressed) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, mk_key_queue_create);
+    dispatch_async(mk_key_queue, ^{
+        if (mk_key_timer) {
+            dispatch_source_cancel(mk_key_timer);
+            mk_key_timer = NULL;
+        }
+        if (!pressed) {
+            if (mk_key_held == keycode) mk_post_key(keycode, false, false);
+            mk_key_held = 0;
+            return;
+        }
+        if (mk_key_held) mk_post_key(mk_key_held, false, false);
+        mk_key_held = keycode;
+        mk_post_key(keycode, true, false);
+        mk_key_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, mk_key_queue);
+        dispatch_source_set_timer(mk_key_timer,
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)mk_key_repeat_ns(CFSTR("InitialKeyRepeat"), 25)),
+            mk_key_repeat_ns(CFSTR("KeyRepeat"), 2), NSEC_PER_MSEC);
+        dispatch_source_set_event_handler(mk_key_timer, ^{ mk_post_key(keycode, true, true); });
+        dispatch_resume(mk_key_timer);
+    });
 }
 
 int mk_insert_text(const uint16_t *text, size_t length) {

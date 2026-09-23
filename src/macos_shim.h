@@ -41,6 +41,7 @@ void mk_recorder_destroy(mk_recorder *recorder);
 void mk_free_buffer(uint8_t *buffer);
 
 int mk_insert_text(const uint16_t *text, size_t length);
+void mk_press_key(uint16_t keycode, int pressed);
 char *mk_self_exe_path(void);
 
 #endif
