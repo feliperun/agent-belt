@@ -360,8 +360,10 @@ int mk_recorder_start(mk_recorder *recorder) {
         &format,
         mk_audio_callback,
         recorder,
-        CFRunLoopGetCurrent(),
-        kCFRunLoopDefaultMode,
+        // NULL: callbacks on AudioQueue's own thread. The caller may be a
+        // dispatch queue (fn+F5) with no run loop, which would record nothing.
+        NULL,
+        NULL,
         0,
         &recorder->queue
     );
