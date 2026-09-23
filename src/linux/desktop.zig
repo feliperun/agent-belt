@@ -31,9 +31,13 @@ fn selfExe(ctx: sys.Ctx) []const u8 {
     return std.process.executablePathAlloc(ctx.io, ctx.gpa) catch "agb";
 }
 
+/// One Agent Belt bubble that changes state: each notification replaces the
+/// previous one by the id notify-send printed for it.
 fn notify(ctx: sys.Ctx, title: []const u8, body: []const u8, timeout_ms: u32) void {
-    // A fixed replace id keeps one Agent Belt bubble that changes state.
-    _ = sys.run(ctx, &.{ "notify-send", "-a", "Agent Belt", "-r", "8850", "-t", ctx.fmt("{d}", .{timeout_ms}) catch "3000", title, body }, null);
+    const id_path = runtimeFile(ctx, "agb-notify.id") catch return;
+    const last = std.mem.trim(u8, sys.readFile(ctx, id_path) orelse "0", " \n");
+    const out = sys.run(ctx, &.{ "notify-send", "-a", "Agent Belt", "-p", "-r", last, "-t", ctx.fmt("{d}", .{timeout_ms}) catch "3000", title, body }, null);
+    if (out.ok) sys.writeFileAtomic(ctx, id_path, std.mem.trim(u8, out.stdout, " \n")) catch {};
 }
 
 /// Opens a terminal running agb with these arguments, detached from us.
@@ -52,7 +56,9 @@ fn pick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
         if (sys.which(ctx, bin) == null) continue;
         ctx.env.put("AGB_MENU", lines) catch return null;
         ctx.env.put("AGB_PROMPT", prompt) catch return null;
-        const out = sys.run(ctx, &.{ "sh", "-c", ctx.fmt("printf '%s\\n' \"$AGB_MENU\" | {s}", .{picker}) catch return null }, null);
+        // No lines at all for free text: an empty entry would be picked instead of the typed words.
+        const feed = if (lines.len > 0) "printf '%s\\n' \"$AGB_MENU\"" else "true";
+        const out = sys.run(ctx, &.{ "sh", "-c", ctx.fmt("{s} | {s}", .{ feed, picker }) catch return null }, null);
         const choice = std.mem.trim(u8, out.stdout, " \r\n");
         return if (choice.len > 0) choice else null;
     }
@@ -173,7 +179,8 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         return 0;
     }
     notify(ctx, "Agent Belt", text, 1);
-    const typed = if (sys.which(ctx, "wtype") != null) sys.run(ctx, &.{ "wtype", "--", text }, null) else sys.run(ctx, &.{ "ydotool", "type", "--", text }, null);
+    // wtype waits for the compositor to take its keymap, or the first key is lost.
+    const typed = if (sys.which(ctx, "wtype") != null) sys.run(ctx, &.{ "wtype", "-s", "120", "--", text }, null) else sys.run(ctx, &.{ "ydotool", "type", "--", text }, null);
     if (!typed.ok) notify(ctx, "Agent Belt", "instale wtype para digitar o texto", 5000);
     return 0;
 }

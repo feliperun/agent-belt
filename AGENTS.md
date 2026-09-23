@@ -146,6 +146,11 @@ file — keep appending.
 - **Windows: an ssh logon has no credential vault.** `CredWriteW` fails with 1312, so
   `agb install` over ssh leaves the Deepgram key in `%LOCALAPPDATA%\agent-belt` and the
   daemon moves it into Credential Manager on its first start.
+- **Hyprland: `wtype` loses the first key** while the compositor takes its keymap
+  ("Olá" arrived as "lá"); it runs with `-s 120`. `notify-send -r` only replaces an
+  id that exists, so the id printed by `-p` is kept in `$XDG_RUNTIME_DIR`. A dmenu
+  prompt for free text gets no lines, or Enter picks an empty entry
+  (`src/linux/desktop.zig`).
 - **Windows: `ssh.exe` never exits when its stdout is a pipe inside an ssh session**
   (it prints the output, then hangs). Remote calls from Windows capture through
   temporary files (`sys.runCaptured`); otherwise `agb ls` over ssh hangs forever.
