@@ -22,9 +22,14 @@ pub fn tmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
         return sys.run(ctx, &.{ sys.msys_bash, "-lc", line }, null);
     }
     var argv: std.ArrayList([]const u8) = .empty;
-    argv.append(ctx.gpa, "tmux") catch return failed();
+    argv.append(ctx.gpa, tmuxBin(ctx)) catch return failed();
     argv.appendSlice(ctx.gpa, args) catch return failed();
     return sys.run(ctx, argv.items, null);
+}
+
+/// tmux by full path: a non-interactive ssh session on macOS has no Homebrew on PATH.
+fn tmuxBin(ctx: sys.Ctx) []const u8 {
+    return sys.which(ctx, "tmux") orelse "tmux";
 }
 
 fn failed() sys.Output {
@@ -38,7 +43,7 @@ pub fn tmuxHandOver(ctx: sys.Ctx, args: []const []const u8) noreturn {
         sys.handOver(ctx, &.{ sys.msys_bash, "-lc", line });
     }
     var argv: std.ArrayList([]const u8) = .empty;
-    argv.append(ctx.gpa, "tmux") catch unreachable;
+    argv.append(ctx.gpa, tmuxBin(ctx)) catch unreachable;
     argv.appendSlice(ctx.gpa, args) catch unreachable;
     sys.handOver(ctx, argv.items);
 }
@@ -102,13 +107,17 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
 
+fn gitBin(ctx: sys.Ctx) []const u8 {
+    return sys.which(ctx, "git") orelse "git";
+}
+
 fn gitTop(ctx: sys.Ctx, path: []const u8) ?[]const u8 {
-    const out = sys.run(ctx, &.{ "git", "-C", path, "rev-parse", "--show-toplevel" }, null);
+    const out = sys.run(ctx, &.{ gitBin(ctx), "-C", path, "rev-parse", "--show-toplevel" }, null);
     return if (out.ok) out.text() else null;
 }
 
 fn gitCommon(ctx: sys.Ctx, path: []const u8) ?[]const u8 {
-    const out = sys.run(ctx, &.{ "git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir" }, null);
+    const out = sys.run(ctx, &.{ gitBin(ctx), "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir" }, null);
     return if (out.ok) out.text() else null;
 }
 
@@ -263,11 +272,11 @@ pub fn create(ctx: sys.Ctx, opts: CreateOptions) CreateError![]const u8 {
         const b = gitCommon(ctx, repo_root) orelse "-";
         if (!std.mem.eql(u8, a, b)) return error.WorktreeClash;
     } else {
-        const has_branch = sys.run(ctx, &.{ "git", "-C", repo_root, "show-ref", "--verify", "--quiet", try ctx.fmt("refs/heads/{s}", .{branch}) }, null).ok;
+        const has_branch = sys.run(ctx, &.{ gitBin(ctx), "-C", repo_root, "show-ref", "--verify", "--quiet", try ctx.fmt("refs/heads/{s}", .{branch}) }, null).ok;
         const out = if (has_branch)
-            sys.run(ctx, &.{ "git", "-C", repo_root, "worktree", "add", worktree, branch }, null)
+            sys.run(ctx, &.{ gitBin(ctx), "-C", repo_root, "worktree", "add", worktree, branch }, null)
         else
-            sys.run(ctx, &.{ "git", "-C", repo_root, "worktree", "add", worktree, "-b", branch }, null);
+            sys.run(ctx, &.{ gitBin(ctx), "-C", repo_root, "worktree", "add", worktree, "-b", branch }, null);
         if (!out.ok) {
             std.debug.print("{s}", .{out.stderr});
             return error.WorktreeFailed;

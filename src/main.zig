@@ -34,7 +34,8 @@ fn usageSessions() !void {
         \\agb (Agent Belt) {s}: agent sessions on any machine of your tailnet
         \\
         \\  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
-        \\  agb sessions | ls | attach [-d] <session> [machine]
+        \\  agb sessions | ls | repos [machine] | attach [-d] <session> [machine]
+        \\  agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
         \\  agb version
         \\

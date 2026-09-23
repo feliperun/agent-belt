@@ -15,6 +15,7 @@ tmux marks it wrote are still read.
 agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
 agb sessions                      interactive picker across all machines
 agb ls                            the same list, as text
+agb repos [machine]               the repository names agb new accepts there
 agb attach [-d] <session> [machine]
 agb send <session> [machine] <text…>     type an instruction into the agent
 agb peek <session> [machine] [lines]     read the end of its screen

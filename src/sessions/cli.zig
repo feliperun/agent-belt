@@ -2,7 +2,7 @@
 //! (`agb _…`) between machines over ssh.
 //!
 //!   agb new [agent] [machine|here] [repo] [what to do…]
-//!   agb sessions | ls | attach [-d] <session> [machine]
+//!   agb sessions | ls | repos [machine] | attach [-d] <session> [machine]
 //!   agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy [machine…|--all]
 //!   agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
 const std = @import("std");
@@ -18,7 +18,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -30,6 +30,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
     if (std.mem.eql(u8, verb, "new")) return cmdNew(env, rest);
     if (std.mem.eql(u8, verb, "sessions")) return cmdSessions(env);
     if (std.mem.eql(u8, verb, "ls")) return cmdLs(env);
+    if (std.mem.eql(u8, verb, "repos")) return cmdRepos(env, rest);
     if (std.mem.eql(u8, verb, "attach")) return cmdAttach(env, rest);
     if (std.mem.eql(u8, verb, "hosts")) return cmdHosts(env, rest);
     if (std.mem.eql(u8, verb, "doctor")) return cmdDoctor(env);
@@ -250,7 +251,7 @@ fn execute(env: Env, input: Plan) !u8 {
     var plan = input;
     // Here, no repo given: the repo this terminal is in.
     if (plan.host == null and plan.repo == null) {
-        const out = sys.run(ctx, &.{ "git", "rev-parse", "--show-toplevel" }, null);
+        const out = sys.run(ctx, &.{ sys.which(ctx, "git") orelse "git", "rev-parse", "--show-toplevel" }, null);
         if (out.ok) plan.repo = out.text();
     }
     const where = if (plan.host) |h| h.name else "here";
@@ -496,6 +497,24 @@ fn cmdLs(env: Env) !u8 {
     }
     try render(ctx, reg, try collect(ctx, reg));
     return 0;
+}
+
+/// `agb repos [machine]`: the repository names `agb new` accepts there.
+fn cmdRepos(env: Env, args: []const []const u8) anyerror!u8 {
+    const ctx = env.ctx;
+    const reg = try loadRegistry(ctx);
+    if (args.len > 0) {
+        const h = reg.find(args[0]) orelse {
+            say("agb: unknown machine {s} (see: agb hosts)", .{args[0]});
+            return 1;
+        };
+        if (!reg.isSelf(h)) {
+            const out = remote(ctx, h, &.{"_repos"});
+            _ = print(ctx, out.stdout);
+            return out.code;
+        }
+    }
+    return main(env, &.{"_repos"});
 }
 
 fn readLine(ctx: sys.Ctx) ?[]const u8 {
