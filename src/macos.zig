@@ -26,6 +26,10 @@ pub fn setStatus(status: Status) void {
     c.mk_status_set(@intFromEnum(status));
 }
 
+pub fn dismissOverlay() !void {
+    if (c.mk_status_dismiss() != 0) return error.OverlayDismissTimeout;
+}
+
 pub fn previewOverlay() !void {
     if (c.mk_status_preview() != 0) return error.OverlayPreviewFailed;
 }

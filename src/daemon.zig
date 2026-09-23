@@ -80,6 +80,7 @@ const Daemon = struct {
             std.debug.print("[minikeyboard] nenhuma fala detectada\n", .{});
             return;
         }
+        try macos.dismissOverlay();
         try macos.insertText(text);
         std.debug.print("[minikeyboard] INSERIDO ({d} caracteres)\n", .{text.len});
     }

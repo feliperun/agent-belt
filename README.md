@@ -10,7 +10,7 @@ Daemon macOS em Zig para transformar um minikeyboard HID em atalhos configuráve
 - gravação PCM mono 16 kHz em memória, empacotada como WAV;
 - transcrição via Deepgram REST (`nova-3`, `smart_format` e `mip_opt_out`);
 - inserção do resultado no aplicativo em foco usando eventos Unicode do macOS;
-- janela flutuante no topo da tela, com waveform que responde ao áudio e animação de letras durante a transcrição;
+- cápsula flutuante no canto superior direito, com ondas que respondem ao áudio e se transformam em traços de texto durante a transcrição;
 - bindings de `ptt`, `command`, `script`, `text` e `disabled`;
 - instalação opcional como LaunchAgent;
 - indicador na barra de menus: `🔴 REC` enquanto grava, `⏳` durante a transcrição e `⚠︎` em caso de erro.
@@ -34,8 +34,14 @@ zig-out/bin/minikeyboard daemon
 
 Para ver a animação sem microfone nem teclado, execute `zig-out/bin/minikeyboard preview`.
 Ela exibe quatro segundos de gravação simulada e quatro segundos de transcrição.
-Durante o uso normal, a janela aparece na tela onde está o ponteiro do mouse,
-não recebe foco nem cliques e desaparece ao concluir a transcrição.
+Durante o uso normal, a janela aparece no canto superior direito da tela onde está
+o ponteiro do mouse. Ela não recebe foco nem cliques. Ao concluir, faz uma saída
+de 120 ms; a inserção do texto aguarda a janela desaparecer por completo.
+A preferência de acessibilidade “Reduzir movimento” também é respeitada.
+
+`zig build test` verifica a posição, preservação do foco, resposta ao nível de
+áudio e fechamento completo antes de liberar a inserção. O teste abre o painel
+por alguns segundos e exige uma sessão gráfica do macOS; não usa microfone nem API.
 
 Configuração é salva em `~/.config/minikeyboard/config.json`.
 

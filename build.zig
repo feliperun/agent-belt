@@ -37,4 +37,18 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run minikeyboard");
     run_step.dependOn(&run_cmd.step);
+
+    const overlay_test = b.addExecutable(.{
+        .name = "overlay-test",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    overlay_test.root_module.addCSourceFile(.{
+        .file = b.path("tests/overlay_test.m"),
+        .flags = &.{"-fobjc-arc"},
+    });
+    overlay_test.root_module.addIncludePath(b.path("src"));
+    overlay_test.root_module.linkFramework("AppKit", .{});
+    overlay_test.root_module.linkFramework("CoreFoundation", .{});
+    const test_cmd = b.addRunArtifact(overlay_test);
+    b.step("test", "Test overlay placement, audio response and dismissal (macOS GUI)").dependOn(&test_cmd.step);
 }

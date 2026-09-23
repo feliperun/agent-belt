@@ -17,6 +17,7 @@ int mk_event_tap_run(mk_event_filter_callback filter, void *context);
 
 int mk_status_init(void);
 void mk_status_set(int status);
+int mk_status_dismiss(void);
 int mk_status_preview(void);
 uint64_t mk_monotonic_ns(void);
 
