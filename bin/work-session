@@ -70,6 +70,11 @@ export TERM="${TERM:-xterm-256color}"
 tmux_clipboard() {
   tmux set-option -g set-clipboard on 2>/dev/null || return 0
   tmux set-option -g allow-passthrough on 2>/dev/null || true
+  # Roda (trackpad, mouse ou o knob do minikeyboard) rola o historico no
+  # copy-mode e sai sozinha no fim; sem isto o terminal traduz a roda em setas
+  # e o agente navega pelo historico do prompt. Option+arrastar mantem a
+  # selecao nativa do terminal.
+  tmux set-option -g mouse on 2>/dev/null || true
   if ! tmux show-options -gqv terminal-features 2>/dev/null |
       grep -qE '^\*:.*clipboard'; then
     tmux set-option -as terminal-features ',*:clipboard' 2>/dev/null || true
