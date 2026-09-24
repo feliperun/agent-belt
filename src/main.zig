@@ -91,6 +91,8 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
     if (std.mem.eql(u8, argv[1], "daemon")) {
         var parsed = try store.load();
         defer parsed.deinit();
+        // The create-agent panel's `agb _summary` then finds the key at once.
+        @import("sessions/intent.zig").importDeepseekKey(.{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map });
         try daemon.run(init.io, allocator, parsed.value, try @import("history.zig").dir(allocator, init.environ_map));
         return;
     }

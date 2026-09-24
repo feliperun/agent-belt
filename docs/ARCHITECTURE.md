@@ -34,7 +34,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/create_panel.m`, `src/create_agent.zig` | the create-agent panel (key 5): streamed transcript, detected fields, confirmation |
 | `src/history.zig` | every recording (audio + transcript) kept 60 days; `agb history` |
 | `src/transcribe_stream.zig` | real-time transcription: Deepgram's live API over a std-only WebSocket client |
-| `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms); `intent.zig` + `jev.zig` turn a spoken request into agent, machine, repo and intent |
+| `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms); `intent.zig` + `jev.zig` turn a spoken request into agent, machine, repo and intent; `deepseek.zig` cleans the request for the agent and names the session |
 | `src/linux/` | the Linux desktop commands run by compositor binds: `menu` (Omarchy's menu or walker), `waybar`, `ptt` (pw-record, wtype), Hyprland `install`; `overlay.qml` is the dictation overlay, hosted in Quickshell |
 | `src/windows/` | the Windows tray daemon (`agent-belt.exe`): notification-area menu, push-to-talk, Win32 bindings; `overlay.zig` draws the dictation overlay with GDI+ |
 | `install.sh` | build, bundle, sign, Keychain, LaunchAgent |

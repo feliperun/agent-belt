@@ -392,8 +392,8 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     const BOOL hasRepo = [repo isKindOfClass:NSString.class] && [repo length];
     NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ %@ --task %@",
         q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(task)];
-    // The agent gets the work only, rewritten as a clear prompt (no "create an
-    // agent on the linux machine…"); the panel's own text if that failed.
+    // The agent gets the work only: the spoken routing ("create an agent with
+    // claude in repo xyz that…") removed by `agb _summary`; the panel's text otherwise.
     NSString *agentPrompt = [self.summary[@"prompt"] length] ? self.summary[@"prompt"] : text;
     [command appendFormat:@" --prompt %@", q(agentPrompt)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];

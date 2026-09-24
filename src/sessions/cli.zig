@@ -408,7 +408,7 @@ fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8, flags: Plan) !u
         say("agb: could not turn that into a session ({s})", .{@errorName(err)});
         return 1;
     };
-    // A short name and the work alone as the agent's prompt.
+    // A short name, and the work alone (spoken routing removed) as the prompt.
     if (intent.summarize(ctx, text)) |summary| {
         if (sys.validSlug(summary.name)) plan.task = summary.name;
         if (summary.prompt.len > 0) plan.prompt = summary.prompt;

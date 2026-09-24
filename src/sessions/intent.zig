@@ -8,6 +8,7 @@ const sys = @import("sys.zig");
 const hosts = @import("hosts.zig");
 const local = @import("local.zig");
 const jev = @import("jev.zig");
+const deepseek = @import("deepseek.zig");
 
 pub const Fixed = struct { agent: ?[]const u8 = null, host: ?[]const u8 = null, repo: ?[]const u8 = null, no_repo: bool = false };
 
@@ -61,34 +62,37 @@ pub fn refreshCache(ctx: sys.Ctx, reg: hosts.Registry, repos_of: *const fn (sys.
 
 // ---------------------------------------------------------------- key
 
-fn apiKey(ctx: sys.Ctx) ?[]const u8 {
-    if (ctx.getenv("TYPESAFE_API_KEY")) |k| if (k.len > 0) return k;
+/// A service key: the environment, else the Keychain (service agent-belt),
+/// else ~/.config/agent-belt/<account>.key.
+fn apiKey(ctx: sys.Ctx, env_name: []const u8, account: []const u8) ?[]const u8 {
+    if (ctx.getenv(env_name)) |k| if (k.len > 0) return k;
     if (sys.platform == .mac) {
-        const out = sys.run(ctx, &.{ "security", "find-generic-password", "-s", "agent-belt", "-a", "jev", "-w" }, null);
+        const out = sys.run(ctx, &.{ "security", "find-generic-password", "-s", "agent-belt", "-a", account, "-w" }, null);
         const k = std.mem.trim(u8, out.stdout, " \r\n");
         if (out.ok and k.len > 0) return k;
     }
-    const file = ctx.join(&.{ ctx.home(), ".config", "agent-belt", "jev.key" }) catch return null;
+    const file = ctx.join(&.{ ctx.home(), ".config", "agent-belt", ctx.fmt("{s}.key", .{account}) catch return null }) catch return null;
     const k = std.mem.trim(u8, sys.readFile(ctx, file) orelse return null, " \r\n");
     return if (k.len > 0) k else null;
 }
 
 // ---------------------------------------------------------------- intent text
 
-const routing_words = [_][]const u8{ "agente", "agent", "claude", "codex", "codecs", "shell", "máquina", "maquina", "repositório", "repositorio", "repo", "windows", "linux", "mac", "aqui" };
+/// Words that make an opening clause a request for a session, not the work.
+const session_words = [_][]const u8{ "agente", "agent", "sessão", "sessao", "session", "shell", "terminal", "claude", "codex", "codecs" };
 
-/// The instruction for the agent: what follows "para"/"pra" when the words
-/// before it are routing ("crie um agente com codex no coreum para …"), else
-/// the whole request.
+/// The work, in the person's own words: what follows "para"/"pra" when the
+/// short opening clause before it asks for a session ("crie um agente no linux
+/// com claude code para …"), else the whole request. Never rewritten.
 pub fn intentOf(text: []const u8) []const u8 {
-    const t = std.mem.trim(u8, text, " .");
-    var lower_buf: [4096]u8 = undefined;
+    const t = std.mem.trim(u8, text, " .\r\n");
+    var lower_buf: [160]u8 = undefined;
     const n = @min(t.len, lower_buf.len);
     const lower = std.ascii.lowerString(lower_buf[0..n], t[0..n]);
     for ([_][]const u8{ " para ", " pra ", " to " }) |marker| {
         const at = std.mem.indexOf(u8, lower, marker) orelse continue;
         const before = lower[0..at];
-        for (routing_words) |w| if (std.mem.indexOf(u8, before, w) != null) {
+        for (session_words) |w| if (std.mem.indexOf(u8, before, w) != null) {
             const rest = std.mem.trim(u8, t[at + marker.len ..], " .");
             if (rest.len > 0) return rest;
         };
@@ -118,31 +122,35 @@ pub fn taskOf(ctx: sys.Ctx, intent: []const u8) ![]const u8 {
 
 pub const Summary = struct { name: []const u8, summary: []const u8, prompt: []const u8 = "", by: []const u8 };
 
-/// The request as the agent should get it, plus a short session name and a
-/// one-line summary, written by a generative model: the request mixes
-/// routing ("crie um agente no linux com claude…") with the work, and only
-/// the work goes to the agent, as a clear, complete prompt. The first model
-/// installed answers, in this order: DeepSeek Flash (dsh), Codex (gpt-6-luna),
-/// Claude Sonnet. Without any, the request's own words. Cached by text.
+/// The whole instruction for the cleaning model (kept identical, first).
+const cleaning =
+    \\You clean a voice-dictated request to start a coding agent. The speech-to-text may misspell names ("cloud" or "clode" = Claude, "codecs" = Codex).
+    \\The request mixes routing (asking to create or open an agent or session, which agent, which machine, which repository or folder) with the work. Routing is decided elsewhere: drop it entirely.
+    \\Reply with only JSON:
+    \\{"prompt": "<the work, in the request's language and the person's own words: routing removed, obvious transcription errors fixed; add nothing, no headings, no lists, no rephrasing beyond that>", "summary": "<one short sentence, in the request's language, of what the agent will do>", "name": "<2 to 4 lowercase English words joined by hyphens naming the work>"}
+    \\Example: "crie um agente com cloud no repositório xyz que revise o login e veja por que o token expira sedo" -> {"prompt": "Revise o login e veja por que o token expira cedo.", "summary": "Revisar o login e investigar a expiração precoce do token.", "name": "login-token-expiry"}
+;
+
+/// The request cleaned for the agent: the spoken routing ("crie um agente
+/// com claude no repositório xyz que…", which Jev decides) removed and
+/// transcription errors fixed, in the person's own words, never embellished;
+/// plus a short session name and a one-line summary. Written by a small model
+/// with no reasoning: DeepSeek Flash over HTTP, about a second
+/// (DEEPSEEK_API_KEY); without it, Codex (gpt-6-luna), then Claude Sonnet.
+/// Without any, the words after the routing clause (`intentOf`). Cached by text.
 pub fn summarize(ctx: sys.Ctx, text: []const u8) !Summary {
     const request = std.mem.trim(u8, text, " \r\n");
-    const fallback = Summary{ .name = try taskOf(ctx, intentOf(request)), .summary = intentOf(request), .prompt = request, .by = "words" };
+    const work = intentOf(request);
+    const fallback = Summary{ .name = try taskOf(ctx, work), .summary = work, .prompt = work, .by = "words" };
     if (request.len == 0) return fallback;
-    const cache = try ctx.join(&.{ try cacheDir(ctx), "..", "requests", try ctx.fmt("{x}", .{std.hash.Wyhash.hash(0, request)}) });
+    const cache = try ctx.join(&.{ try cacheDir(ctx), "..", "names", try ctx.fmt("{x}", .{std.hash.Wyhash.hash(0, request)}) });
     if (sys.readFile(ctx, cache)) |bytes| {
         if (std.json.parseFromSliceLeaky(Summary, ctx.gpa, bytes, .{ .ignore_unknown_fields = true })) |cached| return cached else |_| {}
     }
-    const instructions = try ctx.fmt(
-        \\A person asked, by voice, for a new coding agent session. The request mixes routing (which machine, which agent, which repository) with the work itself.
-        \\Reply with ONLY a JSON object, no other text:
-        \\{{"name": "<2 to 4 lowercase English words joined by hyphens, at most 32 characters, naming the work>", "summary": "<one short sentence, in the request's language, saying what the agent will do>", "prompt": "<the instruction for the agent, in the request's language: only the work, rewritten clearly and completely as a well-formatted prompt, keeping every detail, requirement and constraint; never mention creating an agent, the machine, the agent or the repository>"}}
-        \\
-        \\Request: {s}
-    , .{request});
     const workdir = std.fs.path.dirname(cache).?;
     std.Io.Dir.cwd().createDirPath(ctx.io, workdir) catch {};
-    const reply = generate(ctx, instructions, workdir) orelse return fallback;
-    // Usually fenced (```json … ```): the outermost braces.
+    const reply = generate(ctx, request, workdir) orelse return fallback;
+    // A CLI's answer may be fenced (```json … ```): the outermost braces.
     const open = std.mem.indexOfScalar(u8, reply.text, '{') orelse return fallback;
     const close = std.mem.lastIndexOfScalar(u8, reply.text, '}') orelse return fallback;
     if (close < open) return fallback;
@@ -153,7 +161,7 @@ pub fn summarize(ctx: sys.Ctx, text: []const u8) !Summary {
     const result = Summary{
         .name = name,
         .summary = if (parsed.summary.len > 0) parsed.summary else fallback.summary,
-        .prompt = if (parsed.prompt.len > 0) parsed.prompt else request,
+        .prompt = if (parsed.prompt.len > 0) parsed.prompt else work,
         .by = reply.by,
     };
     sys.writeFileAtomic(ctx, cache, try ctx.fmt("{f}", .{std.json.fmt(result, .{})})) catch {};
@@ -162,29 +170,36 @@ pub fn summarize(ctx: sys.Ctx, text: []const u8) !Summary {
 
 const Reply = struct { text: []const u8, by: []const u8 };
 
-/// Asks the first installed model. On macOS and Linux through the user's
-/// interactive login shell: agents started by launchd have neither the PATH
-/// (asdf shims) nor the keys (DEEPSEEK_API_KEY) set in ~/.zshrc.
-fn generate(ctx: sys.Ctx, instructions: []const u8, workdir: []const u8) ?Reply {
-    const claude_flags = "--output-format text --setting-sources '' --strict-mcp-config --disable-slash-commands";
+/// DeepSeek over HTTP when its key is at hand. Otherwise an agent CLI with low
+/// reasoning (Claude with its own system prompt and tools replaced), on macOS
+/// and Linux through the user's interactive login shell: processes started by
+/// launchd lack the PATH (asdf shims) set in ~/.zshrc.
+fn generate(ctx: sys.Ctx, request: []const u8, workdir: []const u8) ?Reply {
+    if (deepseekKey(ctx)) |key| {
+        if (deepseek.json(ctx.gpa, ctx.io, key, cleaning, request)) |t| return .{ .text = t, .by = "deepseek" } else |err|
+            std.debug.print("[agent-belt] cleaning by DeepSeek failed ({s})\n", .{@errorName(err)});
+    }
+    const task = ctx.fmt("{s}\n\nRequest: {s}", .{ cleaning, request }) catch return null;
     if (sys.platform == .windows) {
         const attempts = [_]struct { []const u8, []const []const u8 }{
-            .{ "codex", &.{ "exec", "--skip-git-repo-check", "-m", "gpt-6-luna", instructions } },
-            .{ "claude", &.{ "-p", "--model", "sonnet", "--output-format", "text", instructions } },
+            .{ "codex", &.{ "exec", "--skip-git-repo-check", "-m", "gpt-6-luna", "-c", "model_reasoning_effort=low", task } },
+            .{ "claude", &.{ "-p", "--model", "sonnet", "--effort", "low", "--tools", "", "--system-prompt", cleaning, "--output-format", "text", request } },
         };
         for (attempts) |a| {
             const bin = sys.which(ctx, a[0]) orelse continue;
             const out = sys.run(ctx, std.mem.concat(ctx.gpa, []const u8, &.{ &.{bin}, a[1] }) catch continue, workdir);
-            if (out.ok and std.mem.indexOf(u8, out.stdout, "\"prompt\"") != null) return .{ .text = out.stdout, .by = a[0] };
+            if (out.ok and std.mem.indexOf(u8, out.stdout, "\"name\"") != null) return .{ .text = out.stdout, .by = a[0] };
         }
         return null;
     }
     const script = "try() { by=$1; shift; command -v \"$1\" >/dev/null 2>&1 || return 1; out=$(\"$@\" 2>/dev/null) || return 1; " ++
-        "case \"$out\" in *'\"prompt\"'*) printf 'AGB-BY:%s\\n%s' \"$by\" \"$out\"; exit 0;; esac; return 1; }; " ++
-        "try deepseek dsh --profile headless \"$AGB_TASK\"; " ++
-        "try codex codex exec --skip-git-repo-check -m gpt-6-luna \"$AGB_TASK\"; " ++
-        "try claude claude -p --model sonnet " ++ claude_flags ++ " \"$AGB_TASK\"; exit 1";
-    ctx.env.put("AGB_TASK", instructions) catch return null;
+        "case \"$out\" in *'\"name\"'*) printf 'AGB-BY:%s\\n%s' \"$by\" \"$out\"; exit 0;; esac; return 1; }; " ++
+        "try codex codex exec --skip-git-repo-check -m gpt-6-luna -c model_reasoning_effort=low \"$AGB_TASK\"; " ++
+        "try claude claude -p --model sonnet --effort low --tools '' --system-prompt \"$AGB_SYSTEM\" --output-format text " ++
+        "--setting-sources '' --strict-mcp-config --disable-slash-commands \"$AGB_REQUEST\"; exit 1";
+    ctx.env.put("AGB_TASK", task) catch return null;
+    ctx.env.put("AGB_SYSTEM", cleaning) catch return null;
+    ctx.env.put("AGB_REQUEST", request) catch return null;
     const shell = ctx.getenv("SHELL") orelse "/bin/sh";
     const out = sys.run(ctx, &.{ shell, "-lic", script }, workdir);
     if (!out.ok) return null;
@@ -193,6 +208,39 @@ fn generate(ctx: sys.Ctx, instructions: []const u8, workdir: []const u8) ?Reply 
     const nl = std.mem.indexOfScalar(u8, rest, '\n') orelse return null;
     return .{ .text = rest[nl + 1 ..], .by = rest[0..nl] };
 }
+
+/// DEEPSEEK_API_KEY from the environment, else as the login shell sets it
+/// (~/.zshrc: launchd's daemon does not have it; it imports it once at start,
+/// see `importDeepseekKey`), else ~/.config/agent-belt/deepseek.key.
+fn deepseekKey(ctx: sys.Ctx) ?[]const u8 {
+    if (ctx.getenv("DEEPSEEK_API_KEY")) |k| if (k.len > 0) return k;
+    if (loginShellKey(ctx)) |k| return k;
+    const file = ctx.join(&.{ ctx.home(), ".config", "agent-belt", "deepseek.key" }) catch return null;
+    const k = std.mem.trim(u8, sys.readFile(ctx, file) orelse return null, " \r\n");
+    return if (k.len > 0) k else null;
+}
+
+fn loginShellKey(ctx: sys.Ctx) ?[]const u8 {
+    if (sys.platform == .windows) return null;
+    const shell = ctx.getenv("SHELL") orelse return null;
+    const out = sys.run(ctx, &.{ shell, "-lic", "printf 'AGB-KEY:%s' \"$DEEPSEEK_API_KEY\"" }, null);
+    const at = std.mem.lastIndexOf(u8, out.stdout, "AGB-KEY:") orelse return null;
+    const k = std.mem.trim(u8, out.stdout[at + 8 ..], " \r\n");
+    return if (out.ok and k.len > 0) k else null;
+}
+
+/// For a daemon started without the login environment: DEEPSEEK_API_KEY read
+/// once from the login shell into this process's environment, so every
+/// `agb _summary` it runs finds it without starting a shell.
+pub fn importDeepseekKey(ctx: sys.Ctx) void {
+    if (sys.platform == .windows) return;
+    if (ctx.getenv("DEEPSEEK_API_KEY") != null) return;
+    const k = loginShellKey(ctx) orelse return;
+    const z = ctx.gpa.dupeZ(u8, k) catch return;
+    _ = setenv("DEEPSEEK_API_KEY", z, 1);
+}
+
+extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 
 // ---------------------------------------------------------------- detection
 
@@ -212,8 +260,8 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
         .repo = fixed.repo,
         .repo_confidence = if (fixed.repo != null) 1 else 0,
         .task = try taskOf(ctx, intent),
-        // The agent gets everything that was said; the summary is for people.
-        .prompt = std.mem.trim(u8, text, " \r\n"),
+        // The work in the person's own words, without the routing clause.
+        .prompt = intent,
         .hosts = host_names.items,
         .repos = &.{},
     };
@@ -236,7 +284,7 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
     // Named outright (or fixed): it beats the repo. Jev's answer does not.
     const host_named = said_host;
 
-    const key = apiKey(ctx) orelse return error.JevKeyMissing;
+    const key = apiKey(ctx, "TYPESAFE_API_KEY", "jev") orelse return error.JevKeyMissing;
     var client = jev.Client.init(ctx.gpa, ctx.io, key);
     defer client.deinit();
     const State = struct { request: []const u8 };
@@ -562,6 +610,11 @@ test "intent drops the routing words" {
     try std.testing.expectEqualStrings("investigar o erro de login", intentOf("Crie um agente com codex no Windows, no repositório Coreum, para investigar o erro de login."));
     try std.testing.expectEqualStrings("revise o README", intentOf("revise o README"));
     try std.testing.expectEqualStrings("Deixe o menu mais rápido para todos", intentOf("Deixe o menu mais rápido para todos"));
+    try std.testing.expectEqualStrings("fazer uma CLI de controle de temperatura, em Rust", intentOf("Crie um agente na minha máquina Linux com Claude Code para fazer uma CLI de controle de temperatura, em Rust."));
+    try std.testing.expectEqualStrings("ver por que o build quebra", intentOf("Abre uma sessão no mac debian pra ver por que o build quebra"));
+    // The work itself may name a repo or a machine before "para": kept whole.
+    const work = "Revise o repositório inteiro e ajuste os testes do linux para rodarem mais rápido";
+    try std.testing.expectEqualStrings(work, intentOf(work));
 }
 
 test "exact names are whole words" {
