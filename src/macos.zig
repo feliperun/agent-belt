@@ -310,3 +310,45 @@ pub const Recorder = struct {
         return copy;
     }
 };
+
+// ---------------------------------------------------------------- create-agent panel
+
+pub fn createPanelShow(text: [:0]const u8) void {
+    c.mk_create_panel_show(text.ptr);
+}
+
+pub fn createPanelVisible() bool {
+    return c.mk_create_panel_visible() != 0;
+}
+
+pub fn createPanelRecording(recording: bool) void {
+    c.mk_create_panel_recording(@intFromBool(recording));
+}
+
+pub fn createPanelLive(allocator: std.mem.Allocator, text: []const u8) void {
+    const z = allocator.dupeZ(u8, text) catch return;
+    defer allocator.free(z);
+    c.mk_create_panel_live(z.ptr);
+}
+
+pub fn createPanelCommit(allocator: std.mem.Allocator, text: []const u8) void {
+    const z = allocator.dupeZ(u8, text) catch return;
+    defer allocator.free(z);
+    c.mk_create_panel_commit(z.ptr);
+}
+
+pub fn createPanelConfirm() void {
+    c.mk_create_panel_confirm();
+}
+
+pub fn createPanelRequest(allocator: std.mem.Allocator, text: []const u8) !void {
+    const z = try allocator.dupeZ(u8, text);
+    defer allocator.free(z);
+    c.mk_create_panel_request(z.ptr);
+}
+
+pub const PcmHandler = *const fn (?*anyopaque, ?*const anyopaque, usize) callconv(.c) void;
+
+pub fn recorderOnPcm(recorder: *Recorder, handler: PcmHandler, context: *anyopaque) void {
+    if (recorder.handle) |h| c.mk_recorder_set_pcm_handler(h, handler, context);
+}

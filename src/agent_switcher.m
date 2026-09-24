@@ -1049,6 +1049,9 @@ static int MKVoiceCommand(NSString *text, BOOL dryRun) {
     return 0;
 }
 
+// The create-agent panel (src/create_panel.m) opens its `agb new` the same way.
+void mk_open_terminal(NSString *command, NSString *title) { MKOpenTerminal(command, title); }
+
 void mk_agents_voice_command(const char *text) {
     NSString *copy = @(text);
     MKAgentsAsync(^{ MKVoiceCommand(copy, NO); });

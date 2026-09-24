@@ -5,25 +5,13 @@ leaves this file (the CHANGELOG records it).
 
 ## Next
 
-### Push-to-talk to create an agent
+### Real-time dictation
 
-Hold key 5 on the keypad: a floating panel opens at the center of the screen, visually
-the sibling of the dictation overlay, recording and transcribing in real time while it
-detects the four parts of a new agent: harness (claude, codex, shell), machine, repo
-and intent. Releasing stops recording but keeps the panel open for review: hold again
-to add or correct by voice, type to fix a wrong word (the panel grows), tap 5 (Enter)
-to create the agent on the chosen machine. With a single machine (no tailnet, or only
-this one in the registry), the machine is always this one; nothing is invented. Repos
-are looked up in configured work roots, with a cached index per machine so detection
-does not wait on ssh.
-
-### Real-time transcription
-
-Stream the audio to Deepgram while the key is held (its live WebSocket API) instead of
-uploading it on release, so the text is ready the moment the key comes up. The
-streaming client is shared by dictation and agent creation. Open question for
-dictation: show the live transcript in the overlay and insert it on release, or type it
-into the focused field as it arrives.
+The streaming client exists (`src/transcribe_stream.zig`, used by the create-agent panel).
+Dictation still uploads on release. Decided experience: the transcript grows live inside the
+overlay while the key is held and is inserted whole on release, which then waits only for
+Deepgram's last words (~350 ms). Typing into the focused field as words arrive was ruled out:
+interim corrections would become delete-and-retype in terminals and agents.
 
 ## Later
 
@@ -57,5 +45,8 @@ a machine.
 
 ### Parity
 
-- Voice-created agents from the Windows tray and the Omarchy bindings.
+- The create-agent panel on Windows (tray, a hotkey) and Omarchy (a Hyprland bind and a
+  Quickshell panel): `agb _intent` and the streaming client are already portable.
+- Repos listed under their project name when the folder differs (`minikeyboard` is
+  agent-belt), so it can be said aloud.
 - The keypad and its lights on Linux (evdev, hidraw) if it is used there.

@@ -156,6 +156,12 @@ file — keep appending.
   description. Its bar only takes plugin widgets through `omarchy bar put`; a command
   module goes straight into `shell.json`. From ssh, the session environment comes from
   `systemctl --user show-environment` (Hyprland's own environ lacks WAYLAND_DISPLAY).
+- **Jev is weakest on Portuguese and on words that are both a machine and a repo** ("no
+  omarchy" when Omarchy has an `omarchy` repo). Exact names are matched in code first
+  (`src/sessions/intent.zig`); a machine answered below 0.6 confidence is only a tiebreak,
+  and the repo settles the machine.
+- **An upgraded HTTP connection must go back to std's pool before `Client.deinit`** (marked
+  closing), or the client asserts "still active requests" (`src/transcribe_stream.zig`).
 - **Windows: `ssh.exe` never exits when its stdout is a pipe inside an ssh session**
   (it prints the output, then hangs). Remote calls from Windows capture through
   temporary files (`sys.runCaptured`); otherwise `agb ls` over ssh hangs forever.

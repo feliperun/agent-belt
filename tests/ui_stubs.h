@@ -20,3 +20,5 @@ int mk_update_run(const char *t) { (void)t; return 0; }
 NSArray<NSDictionary *> *MKAgentsSnapshot(void) { return @[]; }
 void MKAgentsOpenKey(NSString *k) { (void)k; }
 NSString *MKAgentsQuotaLine(void) { return nil; }
+void mk_create_panel_show(const char *t) { (void)t; }
+void mk_create_panel_listen(void) {}

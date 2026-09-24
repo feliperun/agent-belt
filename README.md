@@ -38,14 +38,16 @@
 │ Esc  │ menu │Delete│   ╰────╯
 ├──────┼──────┼──────┤
 │  3   │  4   │  5   │
-│ talk │agent │Return│
+│ talk │agent │ new  │
 └──────┴──────┴──────┘
 ```
 
 - **3, hold:** dictation (with the agent menu open, a voice command).
 - **4:** next agent, those waiting for you first.
 - **1:** agent menu. A tap moves, a double tap opens.
-- **0, 2, 5:** Esc, Delete and Return, repeating while held.
+- **5, hold:** a new agent by voice (below); a tap is Return, or creates the agent while its
+  panel is open.
+- **0, 2:** Esc and Delete, repeating while held.
 - **fn+F5 on the Mac keyboard:** push-to-talk too. A tap starts and the next tap stops;
   holding records until release. Plain F5, the microphone key, stays with macOS Dictation,
   which never lets it go; turn on "Use F1, F2, etc. keys as standard function keys" to swap
@@ -163,10 +165,24 @@ All of it, including the `--detach` mode for scripts and other agents, is in
 
 ### New agent by voice
 
-With the agent menu open, hold the talk key and ask. A Claude Haiku (`claude -p`, with your
-account) works out machine, agent, repository and task, then a new Orca terminal runs
-`agb new` with the instruction as the agent's first prompt. Without the keypad, the menu bar
-menu has **New agent…**, where you type the same sentence.
+Hold key 5 and say it: *"codex no windows no coreum para investigar o erro de login"*. A panel,
+the dictation overlay's sibling, opens at the center of the screen with the words streaming in
+as you speak and what they mean: **agent**, **machine**, **repo** and the **intent** the agent
+will get as its first prompt. Release to review. Hold again to add or correct, type to fix a
+word, or click a field to pick another option; tap 5 (or press Return) to create the agent,
+Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
+
+- Exact names are matched directly; misheard ones ("codecs", "linux dois", "core um") are
+  decided by [Jev](https://docs.typesafe.ai), with its key in the Keychain (service
+  `agent-belt`, account `jev`) or `TYPESAFE_API_KEY`. The repo settles the machine when only
+  one machine has it.
+- With a single machine, the machine is always this one.
+- Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).
+  Each machine lists what is under the paths in `~/.config/agent-belt/repo-roots` (one per
+  line), or `~/dev/micromed`, `~/dev/frb` and `~/dev` without it.
+
+Without the keypad, **New agent…** in the menu bar menu opens the same panel to type into,
+and `agb panel [words]` opens it from a terminal.
 
 ## Lights
 
@@ -227,6 +243,7 @@ agb led <color 0-7> <mode 0-5>    lights by hand
 agb permissions                   open the macOS privacy lists
 agb version · agb update [tag]    version · update now
 agb preview                       show the dictation animation without a microphone (macOS, Windows, Linux)
+agb panel [words] | --close       the create-agent panel
 ```
 
 ## Updates

@@ -56,6 +56,15 @@ void mk_led_agents(int attention);
 int mk_led_set(uint16_t vendor_id, uint16_t product_id, int color, int mode);
 /* tone: 0 idle, 1 working, 2 done, 3 waiting */
 void mk_hud_show(const char *title, const char *detail, int tone);
+// The create-agent panel (src/create_panel.m).
+void mk_create_panel_show(const char *text);
+int mk_create_panel_visible(void);
+void mk_create_panel_recording(int recording);
+void mk_create_panel_live(const char *text);
+void mk_create_panel_commit(const char *text);
+void mk_create_panel_confirm(void);
+void mk_create_panel_request(const char *text);
+void mk_create_panel_listen(void);
 int mk_event_tap_run(mk_event_filter_callback filter, void *context);
 
 int mk_status_init(void);
@@ -71,6 +80,8 @@ uint64_t mk_monotonic_ns(void);
 typedef struct mk_recorder mk_recorder;
 
 mk_recorder *mk_recorder_create(void);
+typedef void (*mk_pcm_callback)(void *context, const void *pcm, size_t length);
+void mk_recorder_set_pcm_handler(mk_recorder *recorder, mk_pcm_callback handler, void *context);
 int mk_recorder_start(mk_recorder *recorder);
 int mk_recorder_finish(mk_recorder *recorder, uint8_t **wav, size_t *wav_size);
 uint32_t mk_audio_level_permille(void);

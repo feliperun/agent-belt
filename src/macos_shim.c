@@ -298,7 +298,15 @@ struct mk_recorder {
     size_t length;
     size_t capacity;
     int started;
+    // Real-time transcription: every captured buffer, as it arrives.
+    mk_pcm_callback on_pcm;
+    void *pcm_context;
 };
+
+void mk_recorder_set_pcm_handler(mk_recorder *recorder, mk_pcm_callback handler, void *context) {
+    recorder->on_pcm = handler;
+    recorder->pcm_context = context;
+}
 
 static atomic_uint mk_audio_level = 0;
 
@@ -338,6 +346,7 @@ static void mk_audio_callback(
         const size_t sample_count = buffer->mAudioDataByteSize / sizeof(int16_t);
         atomic_store_explicit(&mk_audio_level, mk_pcm_level_permille(samples, sample_count), memory_order_relaxed);
         mk_append_pcm(recorder, buffer->mAudioData, buffer->mAudioDataByteSize);
+        if (recorder->on_pcm) recorder->on_pcm(recorder->pcm_context, buffer->mAudioData, buffer->mAudioDataByteSize);
     }
     if (recorder->started) AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
 }

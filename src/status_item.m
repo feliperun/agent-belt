@@ -27,6 +27,39 @@ static int mk_attention;        // 0 nothing, 1 an agent finished, 2 an agent wa
 static int mk_dictation_status; // mk_status_set: nonzero while dictating
 
 
+// The overlay's core: a halo and three drifting contours that breathe with the
+// voice. Shared with the create-agent panel (src/create_panel.m).
+void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fast) {
+    const double energy = sqrt(fmax(0, level));
+    const double radius = 11 + energy * 2.8;
+    // A low-contrast halo and three drifting contours share the same center.
+    NSGradient *halo = [[NSGradient alloc] initWithStartingColor:mk_ink(0.11 + energy * 0.05)
+                                                   endingColor:mk_ink(0)];
+    [halo drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - 22, center.y - 22, 44, 44)]
+ relativeCenterPosition:NSZeroPoint];
+    for (NSUInteger layer = 0; layer < 3; layer++) {
+        NSBezierPath *contour = [NSBezierPath bezierPath];
+        for (NSUInteger i = 0; i <= 90; i++) {
+            const double a = i * 2 * M_PI / 90;
+            const double ripple = sin(a * 3 + t * 1.25 + layer * 1.7) * (1.1 + energy * 2) * (1 - morph * 0.6);
+            const double r = radius + layer * 1.3 + ripple;
+            const double turn = t * (0.12 + morph * 0.25) + layer * 0.25;
+            NSPoint point = NSMakePoint(center.x + cos(a + turn) * r,
+                                        center.y + sin(a + turn) * r * 0.88);
+            if (i == 0) [contour moveToPoint:point]; else [contour lineToPoint:point];
+        }
+        [[NSColor colorWithSRGBRed:0.58 + layer * 0.12 green:0.76 - layer * 0.05
+                              blue:0.96 alpha:0.58 - layer * 0.12] setStroke];
+        contour.lineWidth = 1.05;
+        [contour stroke];
+    }
+    const double angle = t * (fast ? 1.5 : 0.5);
+    NSPoint light = NSMakePoint(center.x + cos(angle) * radius,
+                                center.y + sin(angle) * radius * 0.88);
+    [mk_ink(0.88) setFill];
+    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(light.x - 1.4, light.y - 1.4, 2.8, 2.8)] fill];
+}
+
 @interface MKOverlayView : NSView
 @property(nonatomic) NSInteger mode;
 @property(nonatomic) double started, lastTick, phase;
@@ -109,35 +142,7 @@ static int mk_dictation_status; // mk_status_set: nonzero while dictating
     [self drawSignal:t morph:morph];
 }
 - (void)drawCore:(double)t morph:(double)morph {
-    const NSPoint center = NSMakePoint(34, 39);
-    const double energy = sqrt(fmax(0, self.level));
-    const double radius = 11 + energy * 2.8;
-    // A low-contrast halo and three drifting contours share the same center.
-    NSGradient *halo = [[NSGradient alloc] initWithStartingColor:mk_ink(0.11 + energy * 0.05)
-                                                   endingColor:mk_ink(0)];
-    [halo drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(12, 17, 44, 44)]
- relativeCenterPosition:NSZeroPoint];
-    for (NSUInteger layer = 0; layer < 3; layer++) {
-        NSBezierPath *contour = [NSBezierPath bezierPath];
-        for (NSUInteger i = 0; i <= 90; i++) {
-            const double a = i * 2 * M_PI / 90;
-            const double ripple = sin(a * 3 + t * 1.25 + layer * 1.7) * (1.1 + energy * 2) * (1 - morph * 0.6);
-            const double r = radius + layer * 1.3 + ripple;
-            const double turn = t * (0.12 + morph * 0.25) + layer * 0.25;
-            NSPoint point = NSMakePoint(center.x + cos(a + turn) * r,
-                                        center.y + sin(a + turn) * r * 0.88);
-            if (i == 0) [contour moveToPoint:point]; else [contour lineToPoint:point];
-        }
-        [[NSColor colorWithSRGBRed:0.58 + layer * 0.12 green:0.76 - layer * 0.05
-                              blue:0.96 alpha:0.58 - layer * 0.12] setStroke];
-        contour.lineWidth = 1.05;
-        [contour stroke];
-    }
-    const double angle = t * (self.mode == 2 ? 1.5 : 0.5);
-    NSPoint light = NSMakePoint(center.x + cos(angle) * radius,
-                                center.y + sin(angle) * radius * 0.88);
-    [mk_ink(0.88) setFill];
-    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(light.x - 1.4, light.y - 1.4, 2.8, 2.8)] fill];
+    mk_draw_core(NSMakePoint(34, 39), self.level, t, morph, self.mode == 2);
 }
 - (void)drawSignal:(double)t morph:(double)morph {
     const double energy = fmax(0, self.mode == 1 ? self.level : self.releaseLevel);
@@ -295,6 +300,7 @@ int mk_status_init(void) {
         if (!mk_status_item) return -1;
         mk_status_ready();
         mk_install_status_menu();
+        mk_create_panel_listen(); // agb panel
         mk_overlay_panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, mk_overlay_width, mk_overlay_height)
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
             backing:NSBackingStoreBuffered defer:NO];
@@ -715,7 +721,7 @@ static void mk_refresh_title(void) {
         item.toolTip = [NSString stringWithFormat:@"%@ · %@", states[tone], agent[@"detail"]];
     }
     [menu addItem:NSMenuItem.separatorItem];
-    [self add:menu title:@"Novo agente…" action:@selector(newAgent:)];
+    [self add:menu title:@"Novo agente…   segure 5" action:@selector(newAgent:)];
     [self add:menu title:@"Menu flutuante de agentes   ⌃⌥Espaço" action:@selector(floatingMenu:)];
     NSString *quota = MKAgentsQuotaLine();
     if (quota) {
@@ -732,18 +738,7 @@ static void mk_refresh_title(void) {
 - (void)floatingMenu:(id)sender { (void)sender; mk_agents_menu_click(); }
 - (void)newAgent:(id)sender {
     (void)sender;
-    NSAlert *alert = [NSAlert new];
-    alert.messageText = @"Novo agente";
-    alert.informativeText = @"Descreva o agente, como diria em voz alta. Ex.: no windows com codex no coreum, investigar o login.";
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 380, 24)];
-    field.placeholderString = @"crie um agente aqui com claude no agent-belt para…";
-    alert.accessoryView = field;
-    [alert addButtonWithTitle:@"Criar"];
-    [alert addButtonWithTitle:@"Cancelar"];
-    [NSApp activateIgnoringOtherApps:YES];
-    alert.window.initialFirstResponder = field;
-    if ([alert runModal] == NSAlertFirstButtonReturn && field.stringValue.length)
-        mk_agents_voice_command(field.stringValue.UTF8String);
+    mk_create_panel_show(""); // the same panel as key 5, to type into
 }
 - (void)checkUpdates:(id)sender { (void)sender; mk_update_check_now(); }
 - (void)installUpdate:(id)sender { (void)sender; mk_update_run(mk_update_available()); }

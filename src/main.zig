@@ -129,6 +129,11 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
         return;
     }
 
+    if (std.mem.eql(u8, argv[1], "panel")) {
+        // agb panel [words]: the create-agent panel of the running daemon.
+        return macos.createPanelRequest(allocator, try std.mem.join(allocator, " ", argv[2..]));
+    }
+
     if (std.mem.eql(u8, argv[1], "agents")) {
         if (argc != 3 and argc != 4) return usage();
         const desktop = argc == 4 and std.mem.eql(u8, argv[3], "desktop");
@@ -172,6 +177,8 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
         .disabled, .push_to_talk, .agents_menu => "",
         .cycle_agents => if (args.len > 2 and std.mem.eql(u8, args[2], "desktop")) "desktop" else if (args.len > 2) return usage() else "",
         .key => if (args.len == 3 and config.keyChord(args[2]) != null) args[2] else return usage(),
+        // The tap key (Return by default) when the create panel is closed.
+        .create_agent => if (args.len == 3 and config.keyChord(args[2]) != null) args[2] else if (args.len == 2) "return" else return usage(),
         .command, .script, .text => blk: {
             const joined = try joinArgs(allocator, args[2..]);
             owned_value = joined;
@@ -183,6 +190,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
         .push_to_talk => .{ .action = "push_to_talk", .value = value },
         .cycle_agents => .{ .action = "cycle_agents", .value = value },
         .agents_menu => .{ .action = "agents_menu", .value = value },
+        .create_agent => .{ .action = "create_agent", .value = value },
         .key => .{ .action = "key", .value = value },
         .command => .{ .action = "command", .value = value },
         .script => .{ .action = "script", .value = value },
@@ -205,6 +213,7 @@ fn usage() !void {
         "  agb bind <a-f> ptt\n" ++
         "  agb bind <0-5|a-f> agents [desktop]\n" ++
         "  agb bind <0-5|a-f> menu\n" ++
+        "  agb bind <0-5|a-f> new_agent [tap-key]      hold: speak a new agent; tap: the key (return)\n" ++
         "  agb bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
         "  agb bind <a-f> command <comando>\n" ++
         "  agb bind <a-f> script <comando-ou-script>\n" ++

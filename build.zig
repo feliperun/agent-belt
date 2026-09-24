@@ -57,6 +57,10 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/agent_stats.m"),
             .flags = &.{"-fobjc-arc"},
         });
+        exe.root_module.addCSourceFile(.{
+            .file = b.path("src/create_panel.m"),
+            .flags = &.{"-fobjc-arc"},
+        });
 
         exe.root_module.linkFramework("CoreFoundation", .{});
         exe.root_module.linkFramework("CoreGraphics", .{});
