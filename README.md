@@ -22,7 +22,7 @@
 
 | Gadget | What it does |
 |---|---|
-| 🎙️ **Dictation** | Hold a key, speak, release: Deepgram transcribes and the text lands at the cursor. |
+| 🎙️ **Dictation** | Hold a key and speak: the words appear as you say them, and on release the text lands at the cursor. |
 | 🔀 **Agent switching** | One key jumps to the next agent, first to the one waiting for your decision or the one that just finished. |
 | 📋 **Agent menu** | Every agent with its state, recap, time, cost and tokens, plus Claude and Codex plan quotas. |
 | 🦇 **New agent by voice** | *"Create an agent on Windows with Codex in coreum to look into the login"*: the session opens ready, on any machine of your tailnet. |
@@ -276,8 +276,10 @@ Versions come from [release-please](https://github.com/googleapis/release-please
 - **Input:** a rootless HID monitor reads the macropad (VID `0x514c`, PID `0x8850`); a
   CGEvent tap swallows the letters it would type, the knob's volume keys and the global
   shortcuts.
-- **Dictation:** mono 16 kHz PCM in memory, sent to Deepgram (`nova-3`); the text is typed as
-  Unicode key events only after the overlay is gone.
+- **Dictation:** mono 16 kHz PCM streamed to Deepgram's live API (`nova-3`) while the key is
+  held, the transcript growing in the overlay; on release only the last words are awaited
+  (~350 ms), and the text is typed as Unicode key events once the overlay is gone. Without a
+  stream (no network), the recording is sent whole on release.
 - **Agents:** Orca's `terminal list`, tmux clients (matched to Orca through
   `ORCA_TERMINAL_HANDLE`), the titles agents write to the terminal and the transcripts in
   `~/.claude`.

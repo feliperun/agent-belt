@@ -67,6 +67,7 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 @property(nonatomic) double signalPhase, motion, previousTarget;
 @property(nonatomic) BOOL reducedMotion;
 @property(nonatomic) BOOL command; // listening to a voice command, not dictation
+@property(nonatomic, copy) NSString *live; // the words streaming in while listening
 @property(nonatomic, strong) NSTimer *animationTimer;
 - (void)showMode:(NSInteger)mode;
 - (void)stopAnimation;
@@ -76,6 +77,7 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 @implementation MKOverlayView
 - (BOOL)isOpaque { return NO; }
 - (void)showMode:(NSInteger)mode {
+    if (mode == 1 && self.mode != 1) self.live = nil; // a new recording
     self.releaseLevel = self.level;
     self.mode = mode;
     self.started = self.lastTick = mk_now();
@@ -111,6 +113,12 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
     // Louder speech travels faster; successive attacks add brief bursts of motion.
     self.signalPhase += dt * (2 + self.level * 10 + self.motion * 14);
 }
+// The live words as drawn: the latest lines if they do not all fit.
+- (NSAttributedString *)liveText {
+    NSDictionary *attributes = @{NSFontAttributeName: [NSFont systemFontOfSize:12.5 weight:NSFontWeightRegular],
+                                 NSForegroundColorAttributeName: mk_ink(0.86)};
+    return [[NSAttributedString alloc] initWithString:self.live ?: @"" attributes:attributes];
+}
 - (void)stopAnimation {
     [self.animationTimer invalidate];
     self.animationTimer = nil;
@@ -131,6 +139,15 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 
     const double t = self.reducedMotion ? 0 : self.phase;
     const double morph = self.mode == 2 ? (self.reducedMotion ? 1 : mk_ease((mk_now() - self.started) / 0.7)) : 0;
+    // With live words the pill grows downwards: its usual content stays on top.
+    const CGFloat lift = self.bounds.size.height - mk_overlay_height;
+    if (lift > 0) {
+        [self.liveText drawWithRect:NSMakeRect(22, 12, self.bounds.size.width - 44, lift - 4)
+                            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+        NSAffineTransform *up = [NSAffineTransform transform];
+        [up translateXBy:0 yBy:lift];
+        [up concat];
+    }
     [self drawCore:t morph:morph];
     if (self.mode == 3) {
         mk_label(@"Could not transcribe", NSMakePoint(65, 43), 10.5, mk_ink(0.95));
@@ -210,6 +227,28 @@ static NSTimer *mk_hide_timer;
 static NSTimer *mk_show_timer;
 static CFRunLoopRef mk_status_runloop;
 
+// Live words widen the pill and add up to five lines below it.
+static const CGFloat mk_live_width = 380;
+static const NSUInteger mk_live_lines = 5;
+
+static NSSize mk_overlay_size(void) {
+    NSString *live = mk_overlay_view.live;
+    if (!live.length || mk_overlay_view.mode != 1) return NSMakeSize(mk_overlay_width, mk_overlay_height);
+    NSFont *font = [NSFont systemFontOfSize:12.5 weight:NSFontWeightRegular];
+    const CGFloat width = mk_live_width - 44, line = ceil(font.ascender - font.descender + font.leading) + 1;
+    // Keep only the tail that fits: the latest words are what matter while speaking.
+    NSString *shown = live;
+    while (shown.length > 1 && [shown boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX)
+               options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: font}].size.height > line * mk_live_lines) {
+        NSRange space = [shown rangeOfString:@" " options:0 range:NSMakeRange(1, shown.length - 1)];
+        shown = space.location == NSNotFound ? [shown substringFromIndex:shown.length / 2] : [@"…" stringByAppendingString:[shown substringFromIndex:space.location + 1]];
+    }
+    if (![shown isEqual:live]) mk_overlay_view.live = shown;
+    const CGFloat height = [shown boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
+                                            attributes:@{NSFontAttributeName: font}].size.height;
+    return NSMakeSize(mk_live_width, mk_overlay_height + ceil(height) + 12);
+}
+
 static void mk_position_overlay(void) {
     NSScreen *screen = [NSScreen mainScreen];
     const NSPoint mouse = [NSEvent mouseLocation];
@@ -217,9 +256,10 @@ static void mk_position_overlay(void) {
         if (NSPointInRect(mouse, candidate.frame)) { screen = candidate; break; }
     }
     const NSRect visible = screen.visibleFrame;
-    [mk_overlay_panel setFrame:NSMakeRect(NSMaxX(visible) - mk_overlay_width - 18,
-                                          NSMaxY(visible) - mk_overlay_height - 14,
-                                          mk_overlay_width, mk_overlay_height) display:NO];
+    const NSSize size = mk_overlay_size();
+    [mk_overlay_panel setFrame:NSMakeRect(NSMaxX(visible) - size.width - 18, NSMaxY(visible) - size.height - 14,
+                                          size.width, size.height) display:NO];
+    mk_overlay_view.frame = NSMakeRect(0, 0, size.width, size.height);
 }
 
 static void mk_order_out(void) {
@@ -335,6 +375,19 @@ void mk_play_cue(int cue) {
     });
 }
 
+/// The words streaming in while dictating (or saying a command).
+void mk_status_live(const char *text) {
+    if (!mk_status_runloop) return;
+    NSString *live = @(text ?: "");
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        if (mk_overlay_view.mode != 1) return; // arrived after release
+        mk_overlay_view.live = live;
+        if (mk_overlay_panel.isVisible) mk_position_overlay();
+        [mk_overlay_view setNeedsDisplay:YES];
+    });
+    CFRunLoopWakeUp(mk_status_runloop);
+}
+
 void mk_status_set(int status) {
     mk_led_status(status);
     if (!mk_status_runloop) return;
@@ -351,15 +404,15 @@ void mk_status_set(int status) {
             switch (status) {
                 case 4:
                     mk_refresh_title();
-                    mk_status_item.button.toolTip = @"Agent Belt ouvindo um comando";
+                    mk_status_item.button.toolTip = @"Agent Belt: listening for a command";
                     break;
                 case 1:
                     mk_refresh_title();
-                    mk_status_item.button.toolTip = @"Agent Belt gravando";
+                    mk_status_item.button.toolTip = @"Agent Belt: recording";
                     break;
                 case 2:
                     mk_refresh_title();
-                    mk_status_item.button.toolTip = @"Agent Belt transcrevendo";
+                    mk_status_item.button.toolTip = @"Agent Belt: transcribing";
                     break;
                 case 3:
                     mk_refresh_title();
@@ -381,7 +434,13 @@ int mk_status_preview(void) {
     if (result != 0) return result;
     mk_preview_mode = YES;
     mk_status_set(1);
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 4, false);
+    // The words stream in while listening, as they do from Deepgram.
+    NSArray<NSString *> *words = [@"Agent Belt shows what you say while you say it, and types it all where the cursor is as soon as you let go of the key." componentsSeparatedByString:@" "];
+    for (NSUInteger i = 1; i <= words.count; i++) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.22, false);
+        mk_status_live([[words subarrayWithRange:NSMakeRange(0, i)] componentsJoinedByString:@" "].UTF8String);
+    }
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1, false);
     mk_status_set(2);
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 4, false);
     mk_fade_out(^{});
@@ -687,9 +746,9 @@ static void mk_refresh_title(void) {
     NSColor *light = nil;
     NSString *tip = @"Agent Belt: nothing pending";
     switch (mk_dictation_status) {
-    case 1: light = NSColor.systemOrangeColor; tip = @"Agent Belt gravando"; break;
-    case 4: light = NSColor.systemOrangeColor; tip = @"Agent Belt ouvindo um comando"; break;
-    case 2: light = NSColor.systemTealColor; tip = @"Agent Belt transcrevendo"; break;
+    case 1: light = NSColor.systemOrangeColor; tip = @"Agent Belt: recording"; break;
+    case 4: light = NSColor.systemOrangeColor; tip = @"Agent Belt: listening for a command"; break;
+    case 2: light = NSColor.systemTealColor; tip = @"Agent Belt: transcribing"; break;
     case 3: light = NSColor.systemYellowColor; tip = @"Agent Belt: error, see the log"; break;
     default:
         if (mk_attention == 2) { light = NSColor.systemRedColor; tip = @"Agent Belt: an agent is waiting for you"; }

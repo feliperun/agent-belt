@@ -307,6 +307,13 @@ pub const Recorder = struct {
 
 // ---------------------------------------------------------------- create-agent panel
 
+/// The words streaming in while dictating, shown in the overlay.
+pub fn statusLive(allocator: std.mem.Allocator, text: []const u8) void {
+    const z = allocator.dupeZ(u8, text) catch return;
+    defer allocator.free(z);
+    c.mk_status_live(z.ptr);
+}
+
 pub fn createPanelShow(text: [:0]const u8) void {
     c.mk_create_panel_show(text.ptr);
 }

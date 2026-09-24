@@ -2,14 +2,14 @@ const std = @import("std");
 const Config = @import("config.zig").Config;
 const Binding = @import("config.zig").Binding;
 const macos = @import("macos.zig");
-const deepgram = @import("deepgram.zig");
 const history = @import("history.zig");
+const live_recording = @import("live_recording.zig");
 
 const Daemon = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
     config: Config,
-    recording: ?macos.Recorder = null,
+    recording: ?*live_recording.Live = null,
     recording_key: ?usize = null,
     busy: bool = false,
     /// Push-to-talk started with the agent menu open: the speech is a command.
@@ -77,10 +77,8 @@ const Daemon = struct {
         defer self.ptt_lock.unlock(self.io);
         if (event.pressed) {
             if (self.recording != null or self.busy) return;
-            var recorder = macos.Recorder.init(self.allocator);
-            errdefer recorder.deinit();
-            try recorder.start();
-            self.recording = recorder;
+            // Transcribed while speaking: the words show in the overlay as they come.
+            self.recording = try live_recording.Live.start(self.allocator, self.io, &self.config, &.{}, onLiveText, self);
             self.recording_key = event.key;
             self.command = macos.agentsMenuVisible();
             if (self.command) macos.agentsMenuClose();
@@ -91,36 +89,22 @@ const Daemon = struct {
         }
 
         if (self.recording_key != event.key) return;
-        var recorder = self.recording orelse return;
+        const live = self.recording orelse return;
         self.recording = null;
         self.recording_key = null;
         self.busy = true;
         if (self.config.sounds) macos.playCue(.stop);
         defer self.busy = false;
         defer macos.setStatus(.ready);
-        defer recorder.deinit();
 
         macos.setStatus(.transcribing);
-
-        const wav = try recorder.finish();
-        defer self.allocator.free(wav);
-        if (wav.len <= 44) return error.EmptyRecording;
-
-        const api_key = try macos.deepgramKey(self.allocator, self.config.deepgram_api_key_env);
-        defer self.allocator.free(api_key);
-        const dg = deepgram.Client{
-            .io = self.io,
-            .allocator = self.allocator,
-            .api_key = api_key,
-            .model = self.config.deepgram_model,
-            .language = self.config.deepgram_language,
-            .smart_format = self.config.deepgram_smart_format,
-            .mip_opt_out = self.config.deepgram_mip_opt_out,
-        };
         std.debug.print("[agent-belt] TRANSCRIBING...\n", .{});
-        const text = try dg.transcribe(wav);
-        defer self.allocator.free(text);
-        history.saveAsync(self.io, self.history_dir, .dictation, wav, text);
+        const result = live.stop(); // the final words, ~350 ms after release
+        defer if (result.wav.len > 0) self.allocator.free(result.wav);
+        defer if (result.text) |t| self.allocator.free(t);
+        if (result.wav.len <= 44) return error.EmptyRecording;
+        history.saveAsync(self.io, self.history_dir, .dictation, result.wav, result.text orelse "");
+        const text = result.text orelse return error.TranscriptionFailed;
         if (text.len == 0) {
             std.debug.print("[agent-belt] no speech detected\n", .{});
             return;
@@ -133,6 +117,11 @@ const Daemon = struct {
         }
         try macos.insertText(text);
         std.debug.print("[agent-belt] INSERTED ({d} characters)\n", .{text.len});
+    }
+
+    fn onLiveText(context: ?*anyopaque, text: []const u8) void {
+        const self: *Daemon = @ptrCast(@alignCast(context.?));
+        macos.statusLive(self.allocator, text);
     }
 };
 

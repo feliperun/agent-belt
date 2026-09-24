@@ -5,13 +5,12 @@ leaves this file (the CHANGELOG records it).
 
 ## Next
 
-### Real-time dictation
+### Real-time dictation on Windows and Linux
 
-The streaming client exists (`src/transcribe_stream.zig`, used by the create-agent panel).
-Dictation still uploads on release. Decided experience: the transcript grows live inside the
-overlay while the key is held and is inserted whole on release, which then waits only for
-Deepgram's last words (~350 ms). Typing into the focused field as words arrive was ruled out:
-interim corrections would become delete-and-retype in terminals and agents.
+On the Mac the words stream into the overlay while the key is held and are typed on release
+(`src/live_recording.zig` over `src/transcribe_stream.zig`). The Windows tray and the Linux
+bindings still send the recording whole on release; the streaming client is portable, so
+they can show the words live the same way.
 
 ### Quota and reset watch
 
