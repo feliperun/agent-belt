@@ -149,8 +149,8 @@ pub fn uninstall(ctx: sys.Ctx) !u8 {
 const rate = 16000;
 const Recorder = struct {
     handle: ?w.HWAVEIN = null,
-    headers: [4]w.WAVEHDR = undefined,
-    buffers: [4][3200]u8 = undefined, // 100 ms each
+    headers: [8]w.WAVEHDR = undefined,
+    buffers: [8][audio_level.window_bytes]u8 = undefined, // 20 ms each, like the Mac meter
     pcm: std.ArrayList(u8) = .empty,
 
     fn start(self: *Recorder) bool {

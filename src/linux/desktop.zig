@@ -267,12 +267,12 @@ fn readMode(ctx: sys.Ctx) u8 {
     return if (text.len > 0 and text[0] >= '0' and text[0] <= '2') text[0] - '0' else 0;
 }
 
-/// The level of the last 100 ms pw-record wrote.
+/// The level of the last 20 ms pw-record wrote.
 fn recordingLevel(ctx: sys.Ctx) f64 {
     const file = std.Io.Dir.cwd().openFile(ctx.io, runtimeFile(ctx, "agb-ptt.wav") catch return 0, .{}) catch return 0;
     defer file.close(ctx.io);
     const len = file.length(ctx.io) catch return 0;
-    var buf: [3200]u8 = undefined;
+    var buf: [audio_level.window_bytes]u8 = undefined;
     if (len < 44 + buf.len) return 0;
     const n = file.readPositionalAll(ctx.io, &buf, (len - buf.len) & ~@as(u64, 1)) catch return 0;
     return @as(f64, @floatFromInt(audio_level.permille(buf[0..n]))) / 1000.0;

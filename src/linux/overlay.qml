@@ -55,7 +55,7 @@ ShellRoot {
         implicitWidth: 252
         implicitHeight: 78
         color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
+        exclusionMode: ExclusionMode.Normal // below the bar, as on the Mac
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
         WlrLayershell.namespace: "agent-belt"
