@@ -523,7 +523,8 @@ fn showPlan() void {
     }) catch "");
     const summary: ?intent.Summary = if (g_summary) |s| s.summary else null;
     setText(g_intent, if (summary) |s| (g_ctx.fmt("→ {s}", .{s.summary}) catch "") else "→ summarizing…");
-    const session: []const u8 = if (summary) |s| (g_ctx.fmt("Session {s} · ", .{s.name}) catch "") else "";
+    if (g_dialog) |dlg| setText(dlg, if (summary) |s| (g_ctx.fmt("Agent Belt: new agent · {s}", .{s.name}) catch "Agent Belt: new agent") else "Agent Belt: new agent");
+    const session: []const u8 = "";
     setText(g_hint, if (g_create_pending) "Naming the session…" else if (plan.repo == null) (g_ctx.fmt("{s}No repo: works in ~/agents · Enter creates · Esc cancels", .{session}) catch "") else (g_ctx.fmt("{s}Enter creates the agent · Esc cancels", .{session}) catch ""));
 }
 

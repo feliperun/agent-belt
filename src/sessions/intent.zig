@@ -448,7 +448,12 @@ fn spokenName(ctx: sys.Ctx, h: hosts.Host) ![]const u8 {
     if (std.mem.startsWith(u8, h.name, "mac")) return "mac, macbook";
     const tail = h.name[if (std.mem.indexOfScalar(u8, h.name, '-')) |i| i + 1 else 0..];
     const base = std.mem.trimEnd(u8, tail, "0123456789");
-    if (base.len == tail.len) return tail;
+    if (base.len == tail.len) {
+        // "frb-linux-hermes" is said "hermes" (or "linux hermes").
+        const last = tail[if (std.mem.lastIndexOfScalar(u8, tail, '-')) |i| i + 1 else 0..];
+        if (last.len == tail.len) return tail;
+        return ctx.fmt("{s}, {s}", .{ last, try std.mem.replaceOwned(u8, ctx.gpa, tail, "-", " ") });
+    }
     const ordinals = [_][]const u8{ "", "one, um, first", "two, dois, second", "three, três, third", "four, quatro, fourth", "five, cinco, fifth" };
     const d = tail[base.len] - '0';
     return ctx.fmt("{s} {c}, {s} {s}", .{ base, tail[base.len], base, if (d < ordinals.len) ordinals[d] else "" });
@@ -488,6 +493,10 @@ test "exact names are whole words" {
     try std.testing.expectEqualStrings("frb-linux2", (try exactHost(ctx, reg, "um shell no linux 2")).?);
     try std.testing.expectEqualStrings("frb-linux", (try exactHost(ctx, reg, "um shell no linux")).?);
     try std.testing.expectEqualStrings("felipe-windows", (try exactHost(ctx, reg, "codex no Windows")).?);
+    var with_hermes = machines ++ [_]hosts.Host{.{ .name = "frb-linux-hermes", .target = "ford@frb-linux", .kind = .posix }};
+    const reg2 = hosts.Registry{ .path = "", .hosts = &with_hermes, .self_line = "macbook-pro", .self = "macbook-pro" };
+    try std.testing.expectEqualStrings("frb-linux-hermes", (try exactHost(ctx, reg2, "abrir nova sessão do Hermes para criar uma skill")).?);
+    try std.testing.expectEqualStrings("frb-linux", (try exactHost(ctx, reg2, "um shell no linux")).?);
     try std.testing.expect((try exactHost(ctx, reg, "no mac-debian")) == null);
 }
 

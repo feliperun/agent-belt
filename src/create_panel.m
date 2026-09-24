@@ -119,7 +119,17 @@ static NSRunningApplication *mk_previous_app;
     mk_draw_core(NSMakePoint(36, self.bounds.size.height - 38), self.recording ? self.level : 0.02, self.phase, 0, self.detecting);
     [NSGraphicsContext restoreGraphicsState];
     NSString *title = self.recording ? @"Listening for the new agent" : @"New agent";
-    [title drawAtPoint:NSMakePoint(68, 16) withAttributes:@{NSFontAttributeName: MKFont(13, NSFontWeightSemibold), NSForegroundColorAttributeName: MKInk(0.92)}];
+    NSDictionary *titleAttributes = @{NSFontAttributeName: MKFont(13, NSFontWeightSemibold), NSForegroundColorAttributeName: MKInk(0.92)};
+    [title drawAtPoint:NSMakePoint(68, 16) withAttributes:titleAttributes];
+    // The session's name, as it will appear in every list, next to the title.
+    NSString *text = [self.fullText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *name = [self.summarized isEqual:text] ? self.summary[@"name"] : nil;
+    if (name.length && !self.recording) {
+        const CGFloat x = 68 + [title sizeWithAttributes:titleAttributes].width + 10;
+        [[@"·  " stringByAppendingString:name] drawAtPoint:NSMakePoint(x, 16)
+            withAttributes:@{NSFontAttributeName: [NSFont monospacedSystemFontOfSize:12.5 weight:NSFontWeightSemibold],
+                             NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:0.62 green:0.86 blue:0.72 alpha:0.98]}];
+    }
 }
 
 - (void)tick {
@@ -200,12 +210,11 @@ static NSRunningApplication *mk_previous_app;
         : text.length && !self.recording ? @"→ summarizing…" : @"";
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
     const BOOL noRepo = plan && (![repo isKindOfClass:NSString.class] || ![repo length]);
-    NSString *session = summary ? [NSString stringWithFormat:@"session %@   ·   ", summary[@"name"]] : @"";
     self.hint.stringValue = self.createWhenNamed ? @"naming the session…"
         : self.recording ? @"release 5 to review"
         : self.detecting ? @"understanding…"
-        : noRepo ? [NSString stringWithFormat:@"%@no repo: in ~/agents   ·   5 creates   ·   Esc cancels", session]
-        : [NSString stringWithFormat:@"%@5 or Return creates   ·   hold 5 to say more   ·   Esc cancels", session];
+        : noRepo ? @"no repo: in ~/agents   ·   5 creates   ·   hold 5 to say more   ·   Esc cancels"
+        : @"5 or Return creates   ·   hold 5 to say more   ·   Esc cancels";
     [self relayout];
 }
 
@@ -295,6 +304,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
             self.summary = summary;
             self.summarized = text;
             [self refresh];
+            [self setNeedsDisplay:YES]; // the name in the header
             if (self.createWhenNamed) [self confirm];
         });
     });
