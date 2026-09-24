@@ -32,6 +32,8 @@ pub const Live = struct {
     stopping: std.atomic.Value(bool) = .init(false),
     sender: ?std.Thread = null,
     final: ?[]u8 = null,
+    /// The live stream is open: words arrive while speaking.
+    streaming: std.atomic.Value(bool) = .init(false),
 
     pub fn start(gpa: std.mem.Allocator, io: std.Io, config: *const Config, keyterms: []const []const u8, on_text: OnText, context: ?*anyopaque) !*Live {
         const self = try gpa.create(Live);
@@ -74,6 +76,7 @@ pub const Live = struct {
             std.debug.print("[agent-belt] streaming unavailable ({s}); transcribing on release\n", .{@errorName(err)});
             return;
         };
+        self.streaming.store(true, .release);
         var shown: u32 = 0;
         while (true) {
             const done = self.stopping.load(.acquire);
@@ -92,6 +95,11 @@ pub const Live = struct {
             std.Io.sleep(self.io, .fromMilliseconds(40), .awake) catch {};
         }
         self.final = stream.finish(self.gpa) catch null;
+    }
+
+    /// Whether the words are streaming (else they come only on release).
+    pub fn isStreaming(self: *Live) bool {
+        return self.streaming.load(.acquire);
     }
 
     /// Stops recording and returns the audio and the final transcript. Frees self.

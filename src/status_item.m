@@ -175,7 +175,9 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
             const double y = 28 + amplitude * (sin(u * (4 + detail * 2) * M_PI - travel + layer * 0.6) * 0.72 +
                                               sin(u * 9 * M_PI + travel * 0.6) * 0.28);
             const double inset = 28 * mk_ease(morph * 2);
-            const NSPoint point = NSMakePoint(66 + inset + u * (160 - inset), y);
+            // Across the pill, whatever its width (it widens with live words).
+            const CGFloat span = self.bounds.size.width - 66 - 26;
+            const NSPoint point = NSMakePoint(66 + inset + u * (span - inset), y);
             if (i == 0) [wave moveToPoint:point]; else [wave lineToPoint:point];
         }
         [mk_ink((0.7 - layer * 0.19) * (1 - morph)) setStroke];

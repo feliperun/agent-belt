@@ -97,9 +97,11 @@ const Daemon = struct {
         defer self.busy = false;
         defer macos.setStatus(.ready);
 
-        macos.setStatus(.transcribing);
+        // Streaming: only the last words are missing (~350 ms), and the overlay
+        // keeps showing what was said. Without it, the whole recording is sent.
+        if (!live.isStreaming()) macos.setStatus(.transcribing);
         std.debug.print("[agent-belt] TRANSCRIBING...\n", .{});
-        const result = live.stop(); // the final words, ~350 ms after release
+        const result = live.stop();
         defer if (result.wav.len > 0) self.allocator.free(result.wav);
         defer if (result.text) |t| self.allocator.free(t);
         if (result.wav.len <= 44) return error.EmptyRecording;
