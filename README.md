@@ -177,9 +177,13 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
   `agent-belt`, account `jev`) or `TYPESAFE_API_KEY`. The repo settles the machine when only
   one machine has it.
 - With a single machine, the machine is always this one.
-- The session gets a short, meaningful name and the panel a one-line summary of the intent,
-  written by whichever agent the machine has (`claude -p` with Haiku, else `codex exec`);
-  the agent itself gets everything that was said.
+- The agent gets only the work, rewritten as a clear, complete prompt ("crie um agente no
+  linux com claude code para…" becomes the task itself), and the session a short name; the
+  panel shows both. The first model installed writes them, in this order: DeepSeek Flash
+  (`dsh --profile headless`), Codex (`gpt-6-luna`), Claude Sonnet, run through your login
+  shell so their PATH and keys are found. Without any, the words as said.
+- A machine said by name wins; a repo it lacks is left for you to pick. Unnamed, the repo
+  decides the machine ("no mac debian" is on the Linux box that has it).
 - No repo is fine: research ("pesquise alternativas ao tmux") runs in `~/agents/<task>`,
   and the repo field offers **none (research)** to choose it.
 - Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).

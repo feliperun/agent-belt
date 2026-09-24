@@ -408,6 +408,11 @@ fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8, flags: Plan) !u
         say("agb: could not turn that into a session ({s})", .{@errorName(err)});
         return 1;
     };
+    // A short name and the work alone as the agent's prompt.
+    if (intent.summarize(ctx, text)) |summary| {
+        if (sys.validSlug(summary.name)) plan.task = summary.name;
+        if (summary.prompt.len > 0) plan.prompt = summary.prompt;
+    } else |_| {}
     plan.dry_run = flags.dry_run;
     plan.no_repo = flags.no_repo;
     plan.no_attach = flags.no_attach;

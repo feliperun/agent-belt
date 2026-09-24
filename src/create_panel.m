@@ -392,8 +392,10 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     const BOOL hasRepo = [repo isKindOfClass:NSString.class] && [repo length];
     NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ %@ --task %@",
         q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(task)];
-    // The agent gets everything that is in the panel now, as said and typed.
-    [command appendFormat:@" --prompt %@", q(text)];
+    // The agent gets the work only, rewritten as a clear prompt (no "create an
+    // agent on the linux machine…"); the panel's own text if that failed.
+    NSString *agentPrompt = [self.summary[@"prompt"] length] ? self.summary[@"prompt"] : text;
+    [command appendFormat:@" --prompt %@", q(agentPrompt)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];
     fprintf(stderr, "[agent-belt] new agent: %s\n", command.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus

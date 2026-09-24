@@ -559,7 +559,7 @@ fn createFromPlan(dialog: w.HWND) void {
     const title = g_ctx.fmt("{s} · {s} @ {s}", .{ task, plan.agent, plan.host }) catch "Agent Belt";
     // Without a repo the agent works in ~/agents/<task> (research).
     const repo_args: []const []const u8 = if (plan.repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
-    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", current } }) catch return;
+    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", if (summary.prompt.len > 0) summary.prompt else current } }) catch return;
     openTerminal(title, args);
     _ = w.DestroyWindow(dialog);
 }

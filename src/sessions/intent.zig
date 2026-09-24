@@ -116,53 +116,82 @@ pub fn taskOf(ctx: sys.Ctx, intent: []const u8) ![]const u8 {
 
 // ---------------------------------------------------------------- name and summary
 
-pub const Summary = struct { name: []const u8, summary: []const u8, by: []const u8 };
+pub const Summary = struct { name: []const u8, summary: []const u8, prompt: []const u8 = "", by: []const u8 };
 
-/// A short, meaningful session name and a one-line summary of the request,
-/// written by whichever agent this machine has (Jev decides, it does not
-/// write): claude -p (Haiku), else codex exec, else the request's first
-/// words. Cached by text, so asking again is free.
+/// The request as the agent should get it, plus a short session name and a
+/// one-line summary, written by a generative model: the request mixes
+/// routing ("crie um agente no linux com claude…") with the work, and only
+/// the work goes to the agent, as a clear, complete prompt. The first model
+/// installed answers, in this order: DeepSeek Flash (dsh), Codex (gpt-6-luna),
+/// Claude Sonnet. Without any, the request's own words. Cached by text.
 pub fn summarize(ctx: sys.Ctx, text: []const u8) !Summary {
     const request = std.mem.trim(u8, text, " \r\n");
-    const fallback = Summary{ .name = try taskOf(ctx, intentOf(request)), .summary = intentOf(request), .by = "words" };
+    const fallback = Summary{ .name = try taskOf(ctx, intentOf(request)), .summary = intentOf(request), .prompt = request, .by = "words" };
     if (request.len == 0) return fallback;
-    const cache = try ctx.join(&.{ try cacheDir(ctx), "..", "summaries", try ctx.fmt("{x}", .{std.hash.Wyhash.hash(0, request)}) });
+    const cache = try ctx.join(&.{ try cacheDir(ctx), "..", "requests", try ctx.fmt("{x}", .{std.hash.Wyhash.hash(0, request)}) });
     if (sys.readFile(ctx, cache)) |bytes| {
         if (std.json.parseFromSliceLeaky(Summary, ctx.gpa, bytes, .{ .ignore_unknown_fields = true })) |cached| return cached else |_| {}
     }
     const instructions = try ctx.fmt(
-        \\A person asked for a new coding agent session with the request below.
+        \\A person asked, by voice, for a new coding agent session. The request mixes routing (which machine, which agent, which repository) with the work itself.
         \\Reply with ONLY a JSON object, no other text:
-        \\{{"name": "<2 to 4 lowercase English words joined by hyphens, at most 32 characters, naming the work, e.g. login-timeout-fix>", "summary": "<one short sentence, in the request's language, saying what the agent will do; no machine, agent or repository names>"}}
+        \\{{"name": "<2 to 4 lowercase English words joined by hyphens, at most 32 characters, naming the work>", "summary": "<one short sentence, in the request's language, saying what the agent will do>", "prompt": "<the instruction for the agent, in the request's language: only the work, rewritten clearly and completely as a well-formatted prompt, keeping every detail, requirement and constraint; never mention creating an agent, the machine, the agent or the repository>"}}
         \\
         \\Request: {s}
     , .{request});
     const workdir = std.fs.path.dirname(cache).?;
     std.Io.Dir.cwd().createDirPath(ctx.io, workdir) catch {};
-    const reply = blk: {
-        if (sys.which(ctx, "claude")) |claude| {
-            // No settings, MCP servers or slash commands: ~5 s instead of ~12 s,
-            // run outside any repo so no project context is loaded.
-            const out = sys.run(ctx, &.{ claude, "-p", "--model", "haiku", "--output-format", "text", "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands", instructions }, workdir);
-            if (out.ok) break :blk .{ out.stdout, "claude" };
-        }
-        if (sys.which(ctx, "codex")) |codex| {
-            const out = sys.run(ctx, &.{ codex, "exec", "--skip-git-repo-check", instructions }, workdir);
-            if (out.ok) break :blk .{ out.stdout, "codex" };
-        }
-        return fallback;
-    };
+    const reply = generate(ctx, instructions, workdir) orelse return fallback;
     // Usually fenced (```json … ```): the outermost braces.
-    const open = std.mem.indexOfScalar(u8, reply[0], '{') orelse return fallback;
-    const close = std.mem.lastIndexOfScalar(u8, reply[0], '}') orelse return fallback;
+    const open = std.mem.indexOfScalar(u8, reply.text, '{') orelse return fallback;
+    const close = std.mem.lastIndexOfScalar(u8, reply.text, '}') orelse return fallback;
     if (close < open) return fallback;
-    const Parsed = struct { name: []const u8 = "", summary: []const u8 = "" };
-    const parsed = std.json.parseFromSliceLeaky(Parsed, ctx.gpa, reply[0][open .. close + 1], .{ .ignore_unknown_fields = true }) catch return fallback;
+    const Parsed = struct { name: []const u8 = "", summary: []const u8 = "", prompt: []const u8 = "" };
+    const parsed = std.json.parseFromSliceLeaky(Parsed, ctx.gpa, reply.text[open .. close + 1], .{ .ignore_unknown_fields = true }) catch return fallback;
     const name = try sys.slugFromWords(ctx, try std.mem.replaceOwned(u8, ctx.gpa, parsed.name, "-", " "), 4);
     if (name.len == 0 or name.len > 32 or !sys.validSlug(name)) return fallback;
-    const result = Summary{ .name = name, .summary = if (parsed.summary.len > 0) parsed.summary else fallback.summary, .by = reply[1] };
+    const result = Summary{
+        .name = name,
+        .summary = if (parsed.summary.len > 0) parsed.summary else fallback.summary,
+        .prompt = if (parsed.prompt.len > 0) parsed.prompt else request,
+        .by = reply.by,
+    };
     sys.writeFileAtomic(ctx, cache, try ctx.fmt("{f}", .{std.json.fmt(result, .{})})) catch {};
     return result;
+}
+
+const Reply = struct { text: []const u8, by: []const u8 };
+
+/// Asks the first installed model. On macOS and Linux through the user's
+/// interactive login shell: agents started by launchd have neither the PATH
+/// (asdf shims) nor the keys (DEEPSEEK_API_KEY) set in ~/.zshrc.
+fn generate(ctx: sys.Ctx, instructions: []const u8, workdir: []const u8) ?Reply {
+    const claude_flags = "--output-format text --setting-sources '' --strict-mcp-config --disable-slash-commands";
+    if (sys.platform == .windows) {
+        const attempts = [_]struct { []const u8, []const []const u8 }{
+            .{ "codex", &.{ "exec", "--skip-git-repo-check", "-m", "gpt-6-luna", instructions } },
+            .{ "claude", &.{ "-p", "--model", "sonnet", "--output-format", "text", instructions } },
+        };
+        for (attempts) |a| {
+            const bin = sys.which(ctx, a[0]) orelse continue;
+            const out = sys.run(ctx, std.mem.concat(ctx.gpa, []const u8, &.{ &.{bin}, a[1] }) catch continue, workdir);
+            if (out.ok and std.mem.indexOf(u8, out.stdout, "\"prompt\"") != null) return .{ .text = out.stdout, .by = a[0] };
+        }
+        return null;
+    }
+    const script = "try() { by=$1; shift; command -v \"$1\" >/dev/null 2>&1 || return 1; out=$(\"$@\" 2>/dev/null) || return 1; " ++
+        "case \"$out\" in *'\"prompt\"'*) printf 'AGB-BY:%s\\n%s' \"$by\" \"$out\"; exit 0;; esac; return 1; }; " ++
+        "try deepseek dsh --profile headless \"$AGB_TASK\"; " ++
+        "try codex codex exec --skip-git-repo-check -m gpt-6-luna \"$AGB_TASK\"; " ++
+        "try claude claude -p --model sonnet " ++ claude_flags ++ " \"$AGB_TASK\"; exit 1";
+    ctx.env.put("AGB_TASK", instructions) catch return null;
+    const shell = ctx.getenv("SHELL") orelse "/bin/sh";
+    const out = sys.run(ctx, &.{ shell, "-lic", script }, workdir);
+    if (!out.ok) return null;
+    const marker = std.mem.lastIndexOf(u8, out.stdout, "AGB-BY:") orelse return null;
+    const rest = out.stdout[marker + 7 ..];
+    const nl = std.mem.indexOfScalar(u8, rest, '\n') orelse return null;
+    return .{ .text = rest[nl + 1 ..], .by = rest[0..nl] };
 }
 
 // ---------------------------------------------------------------- detection
@@ -204,6 +233,8 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
         plan.host_confidence = 0.9;
         said_host = true;
     };
+    // Named outright (or fixed): it beats the repo. Jev's answer does not.
+    const host_named = said_host;
 
     const key = apiKey(ctx) orelse return error.JevKeyMissing;
     var client = jev.Client.init(ctx.gpa, ctx.io, key);
@@ -230,33 +261,21 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
         try options.append(ctx.gpa, .{ .name = "unspecified", .description = "the request names no machine" });
         try questions.append(ctx.gpa, .{ .key = "machine", .instructions = "On which machine should the new agent run?", .options = options.items });
     }
-    var repo_names: std.ArrayList([]const u8) = .empty;
     var said_repo = fixed.repo != null or fixed.no_repo;
+    // "no mac debian" names where to work; "alternativas ao tmux" names a topic.
+    var repo_as_place = false;
     if (!said_repo) {
         const sources: []const []const u8 = if (fixed.host != null) &.{plan.host} else host_names.items;
         if (try exactRepo(ctx, reg, sources, text, if (said_host and fixed.host == null) plan.host else null)) |r| {
             plan.repo = r;
             plan.repo_confidence = 0.95;
             said_repo = true;
+            repo_as_place = try saidAsPlace(ctx, text, r);
         }
     }
     if (!said_repo) {
         const sources: []const []const u8 = if (fixed.host != null) &.{plan.host} else host_names.items;
-        for (sources) |h| for (try cachedRepos(ctx, h)) |r| {
-            for (repo_names.items) |n| {
-                if (std.mem.eql(u8, n, r)) break;
-            } else try repo_names.append(ctx.gpa, r);
-        };
-        if (repo_names.items.len > 0) {
-            var options: std.ArrayList(jev.Option) = .empty;
-            for (repo_names.items[0..@min(repo_names.items.len, 250)]) |r| try options.append(ctx.gpa, .{ .name = r });
-            try options.append(ctx.gpa, .{ .name = "unspecified", .description = "the request names no repository" });
-            try questions.append(ctx.gpa, .{
-                .key = "repo",
-                .instructions = try ctx.fmt("Which of these git repositories should the new agent work in? Names were transcribed from speech and may be split or misspelled (\"core 1\" can be \"coreum\", \"mac debian\" is \"mac-debian\"). The request may also name the machine ({s}); a machine name is not the repository.", .{try machineWords(ctx, reg)}),
-                .options = options.items,
-            });
-        }
+        if (try repoQuestion(ctx, reg, sources)) |q| try questions.append(ctx.gpa, q);
     }
     // Research needs no repo, even when it is about something that names one
     // ("alternativas ao tmux" when there is a tmux repo).
@@ -268,51 +287,105 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
             .{ .name = "research", .description = "research, comparison, writing or exploration that needs no existing codebase" },
         },
     });
-    var host_guess: ?[]const u8 = null;
-    var research = false;
+    var found = Found{ .said_host = said_host };
     if (questions.items.len > 0) {
         const answers = try client.choices(ctx.gpa, state, questions.items);
-        for (questions.items, answers) |q, ans| {
-            if (std.mem.eql(u8, ans.choice, "unspecified")) continue;
-            if (std.mem.eql(u8, q.key, "harness")) {
-                plan.agent = ans.choice;
-                plan.agent_confidence = ans.confidence;
-            } else if (std.mem.eql(u8, q.key, "workspace")) {
-                research = std.mem.eql(u8, ans.choice, "research") and ans.confidence >= 0.8 and !saysRepo(text);
-            } else if (std.mem.eql(u8, q.key, "machine")) {
-                // Unsure (it confuses "mac-debian" with the Mac): only a tiebreak.
-                if (ans.confidence >= 0.6) {
-                    plan.host = ans.choice;
-                    plan.host_confidence = ans.confidence;
-                    said_host = true;
-                } else host_guess = ans.choice;
-            } else {
-                plan.repo = ans.choice;
-                plan.repo_confidence = ans.confidence;
-            }
-        }
+        applyAnswers(&plan, &found, text, questions.items, answers);
     }
+    said_host = found.said_host;
 
-    if (research) {
+    if (found.research and !repo_as_place) {
         plan.repo = null;
         plan.repo_confidence = 1;
     }
 
-    // The repo settles the machine: kept if the machine said has it, moved when
-    // only one other machine has it ("mac debian" lives on the second Linux).
-    if (plan.repo) |repo| if (fixed.host == null) {
-        const has = try hostsWith(ctx, reg, repo);
-        const keep = said_host and contains(has, plan.host);
-        if (!keep) {
-            const pick: ?[]const u8 = if (has.len == 1) has[0] else if (host_guess != null and contains(has, host_guess.?)) host_guess else if (contains(has, self_name)) self_name else null;
-            if (pick) |h| {
-                plan.host = h;
-                plan.host_confidence = plan.repo_confidence;
-            }
-        }
-    };
+    if (fixed.host == null) try settleMachine(ctx, reg, &plan, host_named, said_host, found.host_guess, self_name);
     plan.repos = try cachedRepos(ctx, plan.host);
     return plan;
+}
+
+/// The repo among every machine's repos (Jev takes up to 255 options), or
+/// null when no repo is known.
+fn repoQuestion(ctx: sys.Ctx, reg: hosts.Registry, sources: []const []const u8) !?jev.Question {
+    var repo_names: std.ArrayList([]const u8) = .empty;
+    for (sources) |h| for (try cachedRepos(ctx, h)) |r| {
+        if (!contains(repo_names.items, r)) try repo_names.append(ctx.gpa, r);
+    };
+    if (repo_names.items.len == 0) return null;
+    var options: std.ArrayList(jev.Option) = .empty;
+    for (repo_names.items[0..@min(repo_names.items.len, 250)]) |r| try options.append(ctx.gpa, .{ .name = r });
+    try options.append(ctx.gpa, .{ .name = "unspecified", .description = "the request names no repository" });
+    return .{
+        .key = "repo",
+        .instructions = try ctx.fmt("Which of these git repositories should the new agent work in? Names were transcribed from speech and may be split or misspelled (\"core 1\" can be \"coreum\", \"mac debian\" is \"mac-debian\"). The request may also name the machine ({s}); a machine name is not the repository.", .{try machineWords(ctx, reg)}),
+        .options = options.items,
+    };
+}
+
+/// What Jev's answers said beyond the plan itself.
+const Found = struct {
+    said_host: bool,
+    host_guess: ?[]const u8 = null,
+    research: bool = false,
+};
+
+fn applyAnswers(plan: *Plan, found: *Found, text: []const u8, questions: []const jev.Question, answers: anytype) void {
+    for (questions, answers) |q, ans| {
+        if (std.mem.eql(u8, ans.choice, "unspecified")) continue;
+        if (std.mem.eql(u8, q.key, "harness")) {
+            plan.agent = ans.choice;
+            plan.agent_confidence = ans.confidence;
+        } else if (std.mem.eql(u8, q.key, "workspace")) {
+            found.research = std.mem.eql(u8, ans.choice, "research") and ans.confidence >= 0.8 and !saysRepo(text);
+        } else if (std.mem.eql(u8, q.key, "machine")) {
+            // Unsure (it confuses "mac-debian" with the Mac): only a tiebreak.
+            if (ans.confidence >= 0.6) {
+                plan.host = ans.choice;
+                plan.host_confidence = ans.confidence;
+                found.said_host = true;
+            } else found.host_guess = ans.choice;
+        } else {
+            plan.repo = ans.choice;
+            plan.repo_confidence = ans.confidence;
+        }
+    }
+}
+
+/// The repo settles the machine: kept if the machine said has it, moved when
+/// only one other machine has it ("mac debian" lives on the second Linux).
+/// A machine named outright stays: a repo it lacks is dropped instead (the
+/// person picks one, or the agent works without).
+fn settleMachine(ctx: sys.Ctx, reg: hosts.Registry, plan: *Plan, host_named: bool, said_host: bool, host_guess: ?[]const u8, self_name: []const u8) !void {
+    const repo = plan.repo orelse return;
+    const has = try hostsWith(ctx, reg, repo);
+    if (contains(has, plan.host)) return;
+    if (host_named) {
+        plan.repo = null;
+        plan.repo_confidence = 0;
+        return;
+    }
+    // Jev's machine, or none: the repo's machine instead.
+    const guess = host_guess orelse (if (said_host) plan.host else null);
+    const pick: ?[]const u8 = if (has.len == 1) has[0] else if (guess != null and contains(has, guess.?)) guess else if (contains(has, self_name)) self_name else null;
+    if (pick) |h| {
+        plan.host = h;
+        plan.host_confidence = plan.repo_confidence;
+    }
+}
+
+/// The repo's name follows a word that makes it a place: "no mac debian",
+/// "em coreum", "in faberun", "repo agent-belt".
+fn saidAsPlace(ctx: sys.Ctx, text: []const u8, repo: []const u8) !bool {
+    const list = try wordsOf(ctx, text);
+    const lower = try std.ascii.allocLowerString(ctx.gpa, repo);
+    const first = std.mem.sliceTo(try std.mem.replaceOwned(u8, ctx.gpa, lower, "-", " "), ' ');
+    for (list, 0..) |w, i| {
+        if (i == 0 or !(std.mem.eql(u8, w, lower) or std.mem.eql(u8, w, first))) continue;
+        for ([_][]const u8{ "no", "na", "em", "in", "on", "repo", "repositório", "repositorio", "dentro" }) |place| {
+            if (std.mem.eql(u8, list[i - 1], place)) return true;
+        }
+    }
+    return false;
 }
 
 /// The request names the repo as such ("no repositório X", "in repo X").
@@ -410,7 +483,27 @@ fn exactRepo(ctx: sys.Ctx, reg: hosts.Registry, sources: []const []const u8, tex
 /// The machine whose spoken name appears as whole words; the longest name wins
 /// ("linux 2" over "linux"). None, or a tie, leaves it to Jev.
 fn exactHost(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8) !?[]const u8 {
-    const list = try wordsOf(ctx, text);
+    const all = try wordsOf(ctx, text);
+    // Words that spell a repo's name are the repo, not a machine: "mac" in
+    // "mac debian" (the mac-debian repo) does not mean the Mac.
+    var covered = try ctx.gpa.alloc(bool, all.len);
+    @memset(covered, false);
+    for (reg.hosts) |h| for (cachedRepos(ctx, h.name) catch &.{}) |repo| {
+        const spaced = try std.mem.replaceOwned(u8, ctx.gpa, try std.ascii.allocLowerString(ctx.gpa, repo), "-", " ");
+        var parts: std.ArrayList([]const u8) = .empty;
+        var it = std.mem.tokenizeScalar(u8, spaced, ' ');
+        while (it.next()) |p| try parts.append(ctx.gpa, p);
+        if (parts.items.len < 2) continue;
+        var i: usize = 0;
+        while (i + parts.items.len <= all.len) : (i += 1) {
+            for (parts.items, 0..) |p, j| {
+                if (!std.mem.eql(u8, all[i + j], p)) break;
+            } else @memset(covered[i .. i + parts.items.len], true);
+        }
+    };
+    var kept: std.ArrayList([]const u8) = .empty;
+    for (all, covered) |w, c| try kept.append(ctx.gpa, if (c) "" else w);
+    const list = kept.items;
     var best: ?[]const u8 = null;
     var best_len: usize = 0;
     var tie = false;
@@ -504,4 +597,14 @@ test "a repo said as such" {
     try std.testing.expect(saysRepo("pesquisa no repositório tmux"));
     try std.testing.expect(saysRepo("claude in the repo coreum"));
     try std.testing.expect(!saysRepo("pesquisar alternativas ao tmux"));
+}
+
+test "a repo named as the place" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    try std.testing.expect(try saidAsPlace(ctx, "quero um shell no mac debian", "mac-debian"));
+    try std.testing.expect(try saidAsPlace(ctx, "codex em coreum", "coreum"));
+    try std.testing.expect(!(try saidAsPlace(ctx, "pesquisar alternativas ao tmux", "tmux")));
 }
