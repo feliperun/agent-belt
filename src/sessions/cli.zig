@@ -9,6 +9,7 @@ const std = @import("std");
 const sys = @import("sys.zig");
 const hosts = @import("hosts.zig");
 const local = @import("local.zig");
+const intent = @import("intent.zig");
 
 pub const Env = struct {
     ctx: sys.Ctx,
@@ -18,7 +19,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_repos-cache" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -56,6 +57,11 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
         return 0;
     }
     if (std.mem.eql(u8, verb, "_run")) return runLocal(env, try parseRun(rest));
+    if (std.mem.eql(u8, verb, "_intent")) return cmdIntent(env, rest);
+    if (std.mem.eql(u8, verb, "_repos-cache")) {
+        try intent.refreshCache(ctx, try loadRegistry(ctx), reposOf);
+        return 0;
+    }
     if (std.mem.eql(u8, verb, "_adopt-list")) {
         for (try local.adoptList(ctx)) |a| _ = print(ctx, try ctx.fmt("{s}|{s}|{s}|{s}\n", .{ a.pid, a.agent, a.dir, a.conversation }));
         return 0;
@@ -66,6 +72,44 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
         return print(ctx, try ctx.fmt("ok|{s}\n", .{name}));
     }
     return 2;
+}
+
+/// `agb _intent [--agent a] [--host h] [--repo r] <words…>`: the create-agent
+/// panel's detection, as JSON. Fixed parts are taken as is and not asked.
+fn cmdIntent(env: Env, args: []const []const u8) !u8 {
+    const ctx = env.ctx;
+    var fixed: intent.Fixed = .{};
+    var words: std.ArrayList([]const u8) = .empty;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (i + 1 < args.len and std.mem.eql(u8, a, "--agent")) {
+            i += 1;
+            fixed.agent = args[i];
+        } else if (i + 1 < args.len and std.mem.eql(u8, a, "--host")) {
+            i += 1;
+            fixed.host = args[i];
+        } else if (i + 1 < args.len and std.mem.eql(u8, a, "--repo")) {
+            i += 1;
+            fixed.repo = args[i];
+        } else try words.append(ctx.gpa, a);
+    }
+    const reg = try loadRegistry(ctx);
+    const plan = intent.detect(ctx, reg, try std.mem.join(ctx.gpa, " ", words.items), fixed) catch |err| {
+        _ = print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(.{ .@"error" = @errorName(err) }, .{})}));
+        return 1;
+    };
+    return print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(plan, .{})}));
+}
+
+fn reposOf(ctx: sys.Ctx, h: hosts.Host) ?[]const u8 {
+    const reg = loadRegistry(ctx) catch return null;
+    if (reg.isSelf(h)) {
+        const names = local.listRepos(ctx) catch return null;
+        return std.mem.join(ctx.gpa, "\n", names) catch null;
+    }
+    const out = remote(ctx, h, &.{"_repos"});
+    return if (out.ok) out.stdout else null;
 }
 
 fn print(ctx: sys.Ctx, bytes: []const u8) u8 {

@@ -77,24 +77,40 @@ pub fn reposDir(ctx: sys.Ctx) ![]const u8 {
     return ctx.join(&.{ ctx.home(), "dev" });
 }
 
-/// Git repositories directly under the repos directory (and ~/dev/frb, where
-/// personal projects live).
-pub fn listRepos(ctx: sys.Ctx) ![]const []const u8 {
-    var names: std.ArrayList([]const u8) = .empty;
+/// Where repositories live on this machine: the paths listed in
+/// ~/.config/agent-belt/repo-roots (one per line, ~ for home), or else the
+/// repos directory plus ~/dev/frb and ~/dev.
+pub fn repoRoots(ctx: sys.Ctx) ![]const []const u8 {
     var roots: std.ArrayList([]const u8) = .empty;
+    const config = try ctx.join(&.{ ctx.home(), ".config", "agent-belt", "repo-roots" });
+    if (sys.readFile(ctx, config)) |text| {
+        var lines = std.mem.tokenizeAny(u8, text, "\r\n");
+        while (lines.next()) |raw| {
+            const line = std.mem.trim(u8, raw, " \t");
+            if (line.len == 0 or line[0] == '#') continue;
+            try roots.append(ctx.gpa, if (std.mem.startsWith(u8, line, "~")) try std.mem.concat(ctx.gpa, u8, &.{ ctx.home(), line[1..] }) else line);
+        }
+        if (roots.items.len > 0) return roots.items;
+    }
     try roots.append(ctx.gpa, try reposDir(ctx));
     if (sys.platform != .windows) {
         try roots.append(ctx.gpa, try ctx.join(&.{ ctx.home(), "dev", "frb" }));
         try roots.append(ctx.gpa, try ctx.join(&.{ ctx.home(), "dev" }));
     }
-    for (roots.items) |root| {
+    return roots.items;
+}
+
+/// Git repositories directly under the repo roots.
+pub fn listRepos(ctx: sys.Ctx) ![]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    for (try repoRoots(ctx)) |root| {
         var dir = std.Io.Dir.cwd().openDir(ctx.io, root, .{ .iterate = true }) catch continue;
         defer dir.close(ctx.io);
         var it = dir.iterate();
         while (it.next(ctx.io) catch null) |entry| {
             if (entry.kind != .directory and entry.kind != .sym_link) continue;
-            const git = try ctx.join(&.{ root, entry.name, ".git" });
-            if (!sys.exists(ctx, git)) continue;
+            // A directory .git: a repository. A worktree (a session's) has a .git file.
+            if (!sys.isDir(ctx, try ctx.join(&.{ root, entry.name, ".git" }))) continue;
             var seen = false;
             for (names.items) |n| if (std.mem.eql(u8, n, entry.name)) {
                 seen = true;
@@ -128,11 +144,7 @@ fn gitCommon(ctx: sys.Ctx, path: []const u8) ?[]const u8 {
 pub fn resolveRepo(ctx: sys.Ctx, arg: []const u8) !?[]const u8 {
     const as_path = if (sys.platform == .windows) try sys.fromMsys(ctx, arg) else arg;
     if (gitTop(ctx, as_path)) |top| return top;
-    const roots: []const []const u8 = if (sys.platform == .windows)
-        &.{try reposDir(ctx)}
-    else
-        &.{ try reposDir(ctx), try ctx.join(&.{ ctx.home(), "dev", "frb" }), try ctx.join(&.{ ctx.home(), "dev" }) };
-    for (roots) |root| if (gitTop(ctx, try ctx.join(&.{ root, arg }))) |top| return top;
+    for (try repoRoots(ctx)) |root| if (gitTop(ctx, try ctx.join(&.{ root, arg }))) |top| return top;
     return null;
 }
 

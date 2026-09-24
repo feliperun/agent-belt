@@ -99,7 +99,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Test the CLI, bindings, agent switching and overlay (GUI parts on macOS)");
-    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/audio_level.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/sessions/intent.zig", "src/audio_level.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(path), .target = target, .optimize = optimize,
