@@ -495,12 +495,12 @@ fn showPlan() void {
         }
     };
     setText(g_fields, g_ctx.fmt("Agent  {s}{s}        Machine  {s}{s}        Repo  {s}{s}", .{
-        plan.agent,                   unsure.mark(plan.agent_confidence),
-        plan.host,                    unsure.mark(plan.host_confidence),
-        plan.repo orelse "(missing)", if (plan.repo != null) unsure.mark(plan.repo_confidence) else "",
+        plan.agent,              unsure.mark(plan.agent_confidence),
+        plan.host,               unsure.mark(plan.host_confidence),
+        plan.repo orelse "none", if (plan.repo != null) unsure.mark(plan.repo_confidence) else "",
     }) catch "");
     setText(g_intent, g_ctx.fmt("→ {s}", .{plan.prompt}) catch "");
-    setText(g_hint, if (plan.repo == null) "Which repo? Say it in the request." else "Enter creates the agent · Esc cancels");
+    setText(g_hint, if (plan.repo == null) (g_ctx.fmt("No repo: the agent works in ~/agents/{s} · Enter creates · Esc cancels", .{plan.task}) catch "") else "Enter creates the agent · Esc cancels");
 }
 
 fn createFromPlan(dialog: w.HWND) void {
@@ -509,12 +509,11 @@ fn createFromPlan(dialog: w.HWND) void {
         return;
     };
     const plan = d.plan orelse return;
-    const repo = plan.repo orelse {
-        setText(g_hint, "Which repo? Say it in the request.");
-        return;
-    };
     const title = g_ctx.fmt("{s} · {s} @ {s}", .{ plan.task, plan.agent, plan.host }) catch "Agent Belt";
-    openTerminal(title, &.{ "new", "--agent", plan.agent, "--host", plan.host, "--repo", repo, "--task", plan.task, "--prompt", plan.prompt });
+    // Without a repo the agent works in ~/agents/<task> (research).
+    const repo_args: []const []const u8 = if (plan.repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
+    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", plan.task, "--prompt", plan.prompt } }) catch return;
+    openTerminal(title, args);
     _ = w.DestroyWindow(dialog);
 }
 

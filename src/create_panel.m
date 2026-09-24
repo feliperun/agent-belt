@@ -176,8 +176,9 @@ static NSRunningApplication *mk_previous_app;
         const double confidence = self.fixed[key] ? 1 : [plan[[key stringByAppendingString:@"_confidence"]] doubleValue];
         const BOOL missing = ![value isKindOfClass:NSString.class] || ![value length];
         const BOOL unsure = !missing && confidence < 0.6;
-        NSString *shown = missing ? @"?" : unsure ? [value stringByAppendingString:@" ?"] : value;
-        NSColor *color = missing ? [NSColor colorWithSRGBRed:0.98 green:0.72 blue:0.45 alpha:0.95] : MKInk(unsure ? 0.6 : 0.95);
+        // No repo is fine: the agent works in ~/agents/<task> (research).
+        NSString *shown = missing ? ([key isEqual:@"repo"] ? @"none" : @"?") : unsure ? [value stringByAppendingString:@" ?"] : value;
+        NSColor *color = MKInk(missing ? 0.55 : unsure ? 0.6 : 0.95);
         NSMutableAttributedString *title = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@  ", labels[i]]
             attributes:@{NSFontAttributeName: MKFont(11, NSFontWeightRegular), NSForegroundColorAttributeName: MKInk(0.5)}];
         [title appendAttributedString:[[NSAttributedString alloc] initWithString:[shown stringByAppendingString:@" ▾"]
@@ -186,8 +187,11 @@ static NSRunningApplication *mk_previous_app;
     }
     NSString *prompt = plan[@"prompt"];
     self.intent.stringValue = prompt.length ? [NSString stringWithFormat:@"→ %@", prompt] : @"";
+    id repo = self.fixed[@"repo"] ?: plan[@"repo"];
+    const BOOL noRepo = plan && (![repo isKindOfClass:NSString.class] || ![repo length]);
     self.hint.stringValue = self.recording ? @"release 5 to review"
         : self.detecting ? @"understanding…"
+        : noRepo ? [NSString stringWithFormat:@"no repo: works in ~/agents/%@   ·   5 or Return creates   ·   Esc cancels", plan[@"task"]]
         : @"5 or Return creates   ·   hold 5 to say more   ·   Esc cancels";
     [self relayout];
 }
@@ -204,8 +208,11 @@ static NSRunningApplication *mk_previous_app;
     if (!text.length) return;
     const NSUInteger serial = ++self.serial;
     NSMutableArray *arguments = [NSMutableArray arrayWithObject:@"_intent"];
-    for (NSString *key in @[@"agent", @"host", @"repo"])
-        if (self.fixed[key]) [arguments addObjectsFromArray:@[[@"--" stringByAppendingString:key], self.fixed[key]]];
+    for (NSString *key in @[@"agent", @"host", @"repo"]) {
+        if (!self.fixed[key]) continue;
+        if ([key isEqual:@"repo"] && !self.fixed[key].length) [arguments addObject:@"--no-repo"]; // chosen: no repo
+        else [arguments addObjectsFromArray:@[[@"--" stringByAppendingString:key], self.fixed[key]]];
+    }
     [arguments addObject:text];
     self.detecting = YES;
     [self refresh];
@@ -275,6 +282,13 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     if (![options isKindOfClass:NSArray.class] || !options.count) return;
     NSString *current = self.fixed[key] ?: self.plan[key];
     NSMenu *menu = [NSMenu new];
+    if ([key isEqual:@"repo"]) { // research: no repo at all
+        NSMenuItem *none = [menu addItemWithTitle:@"none (research, in ~/agents)" action:@selector(choose:) keyEquivalent:@""];
+        none.target = self;
+        none.representedObject = @[key, @""];
+        if (![current isKindOfClass:NSString.class] || ![current length]) none.state = NSControlStateValueOn;
+        [menu addItem:NSMenuItem.separatorItem];
+    }
     for (NSString *option in options) {
         NSMenuItem *item = [menu addItemWithTitle:option action:@selector(choose:) keyEquivalent:@""];
         item.target = self;
@@ -299,22 +313,14 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSDictionary *plan = self.plan;
     NSString *agent = self.fixed[@"agent"] ?: plan[@"agent"], *host = self.fixed[@"host"] ?: plan[@"host"];
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
-    if (!plan || ![repo isKindOfClass:NSString.class] || ![repo length]) {
-        self.hint.stringValue = @"which repo? say it, type it or pick it in the repo field";
-        NSRect f = mk_panel.frame;
-        for (int i = 0; i < 6; i++) { // a short shake, like a rejected password
-            f.origin.x += (i % 2 ? -8 : 8);
-            [mk_panel setFrame:f display:YES];
-            [NSThread sleepForTimeInterval:0.03];
-        }
-        return;
-    }
+    if (!plan) return; // still reading the request
     NSString *agb = NSBundle.mainBundle.executablePath;
     NSString *(^q)(NSString *) = ^(NSString *s) {
         return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
     };
-    NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ --repo %@ --task %@",
-        q(agb), q(agent), q(host), q(repo), q(plan[@"task"])];
+    const BOOL hasRepo = [repo isKindOfClass:NSString.class] && [repo length];
+    NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ %@ --task %@",
+        q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(plan[@"task"])];
     NSString *prompt = plan[@"prompt"];
     if (prompt.length) [command appendFormat:@" --prompt %@", q(prompt)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", plan[@"task"], agent, host];

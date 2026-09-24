@@ -177,6 +177,8 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
   `agent-belt`, account `jev`) or `TYPESAFE_API_KEY`. The repo settles the machine when only
   one machine has it.
 - With a single machine, the machine is always this one.
+- No repo is fine: research ("pesquise alternativas ao tmux") runs in `~/agents/<task>`,
+  and the repo field offers **none (research)** to choose it.
 - Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).
   Each machine lists what is under the paths in `~/.config/agent-belt/repo-roots` (one per
   line), or `~/dev/micromed`, `~/dev/frb` and `~/dev` without it.

@@ -9,7 +9,7 @@ const hosts = @import("hosts.zig");
 const local = @import("local.zig");
 const jev = @import("jev.zig");
 
-pub const Fixed = struct { agent: ?[]const u8 = null, host: ?[]const u8 = null, repo: ?[]const u8 = null };
+pub const Fixed = struct { agent: ?[]const u8 = null, host: ?[]const u8 = null, repo: ?[]const u8 = null, no_repo: bool = false };
 
 pub const Plan = struct {
     agent: []const u8,
@@ -179,7 +179,7 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
         try questions.append(ctx.gpa, .{ .key = "machine", .instructions = "On which machine should the new agent run?", .options = options.items });
     }
     var repo_names: std.ArrayList([]const u8) = .empty;
-    var said_repo = fixed.repo != null;
+    var said_repo = fixed.repo != null or fixed.no_repo;
     if (!said_repo) {
         const sources: []const []const u8 = if (fixed.host != null) &.{plan.host} else host_names.items;
         if (try exactRepo(ctx, reg, sources, text, if (said_host and fixed.host == null) plan.host else null)) |r| {
@@ -206,7 +206,18 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
             });
         }
     }
+    // Research needs no repo, even when it is about something that names one
+    // ("alternativas ao tmux" when there is a tmux repo).
+    if (!fixed.no_repo and fixed.repo == null) try questions.append(ctx.gpa, .{
+        .key = "workspace",
+        .instructions = "Where will the new coding agent work? Names of tools or topics that the request is about are not where it works.",
+        .options = &.{
+            .{ .name = "repository", .description = "changing, reviewing, debugging or building code in an existing repository" },
+            .{ .name = "research", .description = "research, comparison, writing or exploration that needs no existing codebase" },
+        },
+    });
     var host_guess: ?[]const u8 = null;
+    var research = false;
     if (questions.items.len > 0) {
         const answers = try client.choices(ctx.gpa, state, questions.items);
         for (questions.items, answers) |q, ans| {
@@ -214,6 +225,8 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
             if (std.mem.eql(u8, q.key, "harness")) {
                 plan.agent = ans.choice;
                 plan.agent_confidence = ans.confidence;
+            } else if (std.mem.eql(u8, q.key, "workspace")) {
+                research = std.mem.eql(u8, ans.choice, "research") and ans.confidence >= 0.8 and !saysRepo(text);
             } else if (std.mem.eql(u8, q.key, "machine")) {
                 // Unsure (it confuses "mac-debian" with the Mac): only a tiebreak.
                 if (ans.confidence >= 0.6) {
@@ -226,6 +239,11 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
                 plan.repo_confidence = ans.confidence;
             }
         }
+    }
+
+    if (research) {
+        plan.repo = null;
+        plan.repo_confidence = 1;
     }
 
     // The repo settles the machine: kept if the machine said has it, moved when
@@ -243,6 +261,15 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
     };
     plan.repos = try cachedRepos(ctx, plan.host);
     return plan;
+}
+
+/// The request names the repo as such ("no repositório X", "in repo X").
+fn saysRepo(text: []const u8) bool {
+    var buf: [4096]u8 = undefined;
+    const n = @min(text.len, buf.len);
+    const lower = std.ascii.lowerString(buf[0..n], text[0..n]);
+    for ([_][]const u8{ "repositório", "repositorio", "repo ", "repository" }) |w| if (std.mem.indexOf(u8, lower, w) != null) return true;
+    return false;
 }
 
 fn contains(list: []const []const u8, item: []const u8) bool {
@@ -410,4 +437,10 @@ test "exact names are whole words" {
     try std.testing.expectEqualStrings("frb-linux", (try exactHost(ctx, reg, "um shell no linux")).?);
     try std.testing.expectEqualStrings("felipe-windows", (try exactHost(ctx, reg, "codex no Windows")).?);
     try std.testing.expect((try exactHost(ctx, reg, "no mac-debian")) == null);
+}
+
+test "a repo said as such" {
+    try std.testing.expect(saysRepo("pesquisa no repositório tmux"));
+    try std.testing.expect(saysRepo("claude in the repo coreum"));
+    try std.testing.expect(!saysRepo("pesquisar alternativas ao tmux"));
 }

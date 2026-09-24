@@ -256,7 +256,7 @@ fn agentCommand(ctx: sys.Ctx, opts: CreateOptions, worktree: []const u8) ![]cons
     return cmd.items;
 }
 
-pub const CreateError = error{ NoRepo, NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, InvalidTask } || std.mem.Allocator.Error;
+pub const CreateError = error{ NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, InvalidTask } || std.mem.Allocator.Error;
 
 /// Creates (or reuses) the task's session and attaches this terminal to it, or,
 /// with no_attach, returns its name.
@@ -271,7 +271,13 @@ pub fn create(ctx: sys.Ctx, opts: CreateOptions) CreateError![]const u8 {
         if (opts.no_attach) return name;
         attach(ctx, name, opts.detach_others);
     }
-    const repo_arg = opts.repo orelse return error.NoRepo;
+    // No repo (research, a first sketch): a plain directory ~/agents/<task>,
+    // kept after the session so what the agent wrote can be found.
+    const repo_arg = opts.repo orelse {
+        const workdir = try ctx.join(&.{ agentsDir(ctx), opts.task });
+        std.Io.Dir.cwd().createDirPath(ctx.io, workdir) catch return error.WorktreeFailed;
+        return startAgent(ctx, opts, opts.task, workdir);
+    };
     const repo_root = (resolveRepo(ctx, repo_arg) catch null) orelse return error.NotARepo;
     const repo_name = std.fs.path.basename(repo_root);
     const worktree = try ctx.fmt("{s}-{s}", .{ repo_root, opts.task });
@@ -296,6 +302,18 @@ pub fn create(ctx: sys.Ctx, opts: CreateOptions) CreateError![]const u8 {
         }
     }
 
+    return startAgent(ctx, opts, session, worktree);
+}
+
+/// Where agents without a repo work: ~/agents.
+pub fn agentsDir(ctx: sys.Ctx) []const u8 {
+    return ctx.join(&.{ ctx.home(), "agents" }) catch "agents";
+}
+
+/// Starts the agent in `dir` as tmux session `session`, then attaches (or
+/// returns the name with no_attach).
+fn startAgent(ctx: sys.Ctx, opts: CreateOptions, session: []const u8, dir: []const u8) CreateError![]const u8 {
+    const worktree = dir;
     const no_trust = if (ctx.getenv("WORK_NO_AUTOTRUST")) |v| std.mem.eql(u8, v, "1") else false;
     if (!no_trust) switch (opts.agent) {
         .claude => trustClaude(ctx, worktree),

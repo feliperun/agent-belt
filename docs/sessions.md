@@ -33,7 +33,7 @@ agb tm [name]                     a plain tmux session, no worktree or agent
 |---|---|---|
 | agent | `claude`, `codex` or `shell` | `claude` |
 | machine | a registry name, a unique prefix, a dash-separated part (`windows` for `felipe-windows`), or `here` | this machine |
-| repo | a repository name on that machine (checked by asking it) or a path | the repo this terminal is in |
+| repo | a repository name on that machine (checked by asking it) or a path | the repo this terminal is in; none elsewhere |
 | what to do | the agent's first prompt; its first words also name the task | none |
 
 ```sh
@@ -47,7 +47,11 @@ A sentence that starts with a verb (`create`, `crie`, `open`, `start`…) is rea
 create-agent panel reads speech (`agb _intent`: exact names in code, the rest decided by Jev),
 then checked like any other input.
 
-Flags, anywhere: `--agent`, `--host`, `--repo`, `--task`, `--prompt`, `-d` (detach other
+Without a repo (research, a first sketch) the agent works in `~/agents/<task>`: a plain
+directory, no worktree or branch, kept after the session. That is what happens on another
+machine when no repo is named, outside a repo here, or with `--no-repo`.
+
+Flags, anywhere: `--agent`, `--host`, `--repo`, `--no-repo`, `--task`, `--prompt`, `-d` (detach other
 clients when attaching), `--detach` (create and print the session name instead of
 attaching: for scripts and orchestrators), `--dry-run` (print the plan).
 

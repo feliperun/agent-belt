@@ -92,6 +92,8 @@ fn cmdIntent(env: Env, args: []const []const u8) !u8 {
         } else if (i + 1 < args.len and std.mem.eql(u8, a, "--repo")) {
             i += 1;
             fixed.repo = args[i];
+        } else if (std.mem.eql(u8, a, "--no-repo")) {
+            fixed.no_repo = true;
         } else try words.append(ctx.gpa, a);
     }
     const reg = try loadRegistry(ctx);
@@ -179,6 +181,8 @@ pub const Plan = struct {
     prompt: ?[]const u8 = null,
     detach_others: bool = false,
     dry_run: bool = false,
+    /// Run without a repo (research): in ~/agents/<task>, even inside a repo.
+    no_repo: bool = false,
     no_attach: bool = false,
 };
 
@@ -228,6 +232,8 @@ pub fn parseNew(ctx: sys.Ctx, reg: hosts.Registry, args: []const []const u8, rep
             plan.dry_run = true;
         } else if (std.mem.eql(u8, a, "--detach") or std.mem.eql(u8, a, "--no-attach")) {
             plan.no_attach = true;
+        } else if (std.mem.eql(u8, a, "--no-repo")) {
+            plan.no_repo = true;
         } else {
             try words.append(ctx.gpa, a);
         }
@@ -280,7 +286,7 @@ fn cmdNew(env: Env, args: []const []const u8) !u8 {
         var words: std.ArrayList([]const u8) = .empty;
         var flags = Plan{};
         for (args) |a| {
-            if (std.mem.eql(u8, a, "--dry-run")) flags.dry_run = true else if (std.mem.eql(u8, a, "--detach") or std.mem.eql(u8, a, "--no-attach")) flags.no_attach = true else if (std.mem.eql(u8, a, "-d")) flags.detach_others = true else try words.append(ctx.gpa, a);
+            if (std.mem.eql(u8, a, "--dry-run")) flags.dry_run = true else if (std.mem.eql(u8, a, "--no-repo")) flags.no_repo = true else if (std.mem.eql(u8, a, "--detach") or std.mem.eql(u8, a, "--no-attach")) flags.no_attach = true else if (std.mem.eql(u8, a, "-d")) flags.detach_others = true else try words.append(ctx.gpa, a);
         }
         return newFromWords(env, reg, try std.mem.join(ctx.gpa, " ", words.items), flags);
     }
@@ -303,21 +309,24 @@ fn usageNew() void {
         \\  agb new codex windows coreum fix the login
         \\  agb new claude linux2 agent-belt review the README
         \\  agb new create an agent on windows with codex in coreum to look into the login
-        \\flags: --agent --host --repo --task --prompt --detach (print the session, don't attach) -d --dry-run
+        \\  agb new claude here --no-repo research tmux alternatives   (no repo: works in ~/agents/<task>)
+        \\flags: --agent --host --repo --no-repo --task --prompt --detach (print the session, don't attach) -d --dry-run
     , .{});
 }
 
 fn execute(env: Env, input: Plan) !u8 {
     const ctx = env.ctx;
     var plan = input;
-    // Here, no repo given: the repo this terminal is in.
-    if (plan.host == null and plan.repo == null) {
+    // Here, no repo given: the repo this terminal is in (none outside a repo,
+    // or with --no-repo: the agent works in ~/agents/<task>).
+    if (plan.no_repo) plan.repo = null;
+    if (plan.host == null and plan.repo == null and !plan.no_repo) {
         const out = sys.run(ctx, &.{ sys.which(ctx, "git") orelse "git", "rev-parse", "--show-toplevel" }, null);
         if (out.ok) plan.repo = out.text();
     }
     const where = if (plan.host) |h| h.name else "here";
     if (plan.dry_run) {
-        _ = print(ctx, try ctx.fmt("agent={s} machine={s} repo={s} task={s} prompt={s}\n", .{ @tagName(plan.agent), where, plan.repo orelse "-", plan.task.?, plan.prompt orelse "-" }));
+        _ = print(ctx, try ctx.fmt("agent={s} machine={s} repo={s} task={s} prompt={s}\n", .{ @tagName(plan.agent), where, plan.repo orelse "none (~/agents)", plan.task.?, plan.prompt orelse "-" }));
         return 0;
     }
     if (plan.host) |h| {
@@ -343,10 +352,6 @@ fn runLocal(env: Env, plan: Plan) !u8 {
     const ctx = env.ctx;
     const name = local.create(ctx, .{ .task = plan.task.?, .repo = plan.repo, .agent = plan.agent, .prompt = plan.prompt, .detach_others = plan.detach_others, .no_attach = plan.no_attach }) catch |err| {
         switch (err) {
-            error.NoRepo => {
-                say("agb: which repository? none given and this is not a repo. Here:", .{});
-                for (local.listRepos(ctx) catch &.{}) |r| say("  {s}", .{r});
-            },
             error.NotARepo => say("agb: '{s}' is not a git repository here", .{plan.repo orelse ""}),
             error.WorktreeClash => say("agb: the worktree path exists and is not a worktree of this repo; pick another task name", .{}),
             error.AgentNotFound => say("agb: {s} is not installed on this machine", .{@tagName(plan.agent)}),
@@ -400,6 +405,7 @@ fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8, flags: Plan) !u
         return 1;
     };
     plan.dry_run = flags.dry_run;
+    plan.no_repo = flags.no_repo;
     plan.no_attach = flags.no_attach;
     plan.detach_others = flags.detach_others;
     say("agb: {s} on {s} in {s}: {s}", .{ @tagName(plan.agent), if (plan.host) |h| h.name else "this machine", plan.repo orelse "-", plan.task.? });
@@ -412,9 +418,10 @@ pub fn planFromIntent(reg: hosts.Registry, detected: intent.Plan) !Plan {
     var plan = Plan{ .agent = local.parseAgent(detected.agent) orelse .claude };
     const host = reg.find(detected.host) orelse return error.UnknownHost;
     plan.host = if (reg.isSelf(host)) null else host;
-    const repo = detected.repo orelse return error.NoRepo;
-    if (!sys.validRepo(repo)) return error.UnsafeRepo;
-    plan.repo = repo;
+    if (detected.repo) |repo| {
+        if (!sys.validRepo(repo)) return error.UnsafeRepo;
+        plan.repo = repo;
+    } else plan.no_repo = true; // research: ~/agents/<task>
     if (!sys.validSlug(detected.task)) return error.UnsafeTask;
     plan.task = detected.task;
     plan.prompt = if (detected.prompt.len > 0) detected.prompt else null;
