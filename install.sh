@@ -26,16 +26,19 @@ die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 # Stops the LaunchAgent and any daemon started by hand in a terminal: two
 # daemons would double every key.
 stop_daemons() {
-  launchctl bootout "$domain/$label" 2>/dev/null || true
+  # launchctl bootout waits for the daemon to exit, and has waited for minutes
+  # with it still running ("languishing"). So it runs in the background while
+  # the daemon is ended here: SIGTERM until bootout returns, SIGKILL at the end.
   launchctl bootout "$domain/com.frb.minikeyboard" 2>/dev/null || true # before the rename
-  pkill -f '/minikeyboard daemon$' 2>/dev/null || true
-  pkill -f '/agent-belt daemon$' 2>/dev/null || true
-  pkill -f '/agb daemon$' 2>/dev/null || true
+  launchctl bootout "$domain/$label" 2>/dev/null &
+  local bootout=$!
   for _ in $(seq 1 50); do
-    pgrep -f '/(agb|agent-belt) daemon$' >/dev/null || return 0
-    sleep 0.1
+    kill -0 "$bootout" 2>/dev/null || break
+    pkill -f '/(agb|agent-belt|minikeyboard) daemon$' 2>/dev/null || true
+    sleep 0.2
   done
-  pkill -9 -f '/(agb|agent-belt) daemon$' 2>/dev/null || true
+  pkill -9 -f '/(agb|agent-belt|minikeyboard) daemon$' 2>/dev/null || true
+  wait "$bootout" 2>/dev/null || true
 }
 
 keep_config=0
