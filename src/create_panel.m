@@ -112,7 +112,7 @@ static NSRunningApplication *mk_previous_app;
     [flip concat];
     mk_draw_core(NSMakePoint(36, self.bounds.size.height - 38), self.recording ? self.level : 0.02, self.phase, 0, self.detecting);
     [NSGraphicsContext restoreGraphicsState];
-    NSString *title = self.recording ? @"Ouvindo o novo agente" : @"Novo agente";
+    NSString *title = self.recording ? @"Listening for the new agent" : @"New agent";
     [title drawAtPoint:NSMakePoint(68, 16) withAttributes:@{NSFontAttributeName: MKFont(13, NSFontWeightSemibold), NSForegroundColorAttributeName: MKInk(0.92)}];
 }
 
@@ -169,7 +169,7 @@ static NSRunningApplication *mk_previous_app;
     }
     self.text.editable = !self.recording;
     NSDictionary *plan = self.plan;
-    NSArray *labels = @[@"agente", @"máquina", @"repo"], *keys = @[@"agent", @"host", @"repo"];
+    NSArray *labels = @[@"agent", @"machine", @"repo"], *keys = @[@"agent", @"host", @"repo"];
     for (NSUInteger i = 0; i < 3; i++) {
         NSString *key = keys[i];
         id value = self.fixed[key] ?: plan[key];
@@ -186,9 +186,9 @@ static NSRunningApplication *mk_previous_app;
     }
     NSString *prompt = plan[@"prompt"];
     self.intent.stringValue = prompt.length ? [NSString stringWithFormat:@"→ %@", prompt] : @"";
-    self.hint.stringValue = self.recording ? @"solte o 5 para revisar"
-        : self.detecting ? @"entendendo…"
-        : @"5 ou Return cria   ·   segure 5 para falar mais   ·   Esc cancela";
+    self.hint.stringValue = self.recording ? @"release 5 to review"
+        : self.detecting ? @"understanding…"
+        : @"5 or Return creates   ·   hold 5 to say more   ·   Esc cancels";
     [self relayout];
 }
 
@@ -217,7 +217,7 @@ static NSRunningApplication *mk_previous_app;
             self.detecting = NO;
             if ([plan isKindOfClass:NSDictionary.class] && plan[@"agent"]) self.plan = plan;
             else if ([plan isKindOfClass:NSDictionary.class] && plan[@"error"])
-                self.hint.stringValue = [NSString stringWithFormat:@"não consegui entender: %@", plan[@"error"]];
+                self.hint.stringValue = [NSString stringWithFormat:@"could not understand: %@", plan[@"error"]];
             [self refresh];
         });
     });
@@ -300,7 +300,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSString *agent = self.fixed[@"agent"] ?: plan[@"agent"], *host = self.fixed[@"host"] ?: plan[@"host"];
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
     if (!plan || ![repo isKindOfClass:NSString.class] || ![repo length]) {
-        self.hint.stringValue = @"falta o repositório: diga, digite ou escolha no campo repo";
+        self.hint.stringValue = @"which repo? say it, type it or pick it in the repo field";
         NSRect f = mk_panel.frame;
         for (int i = 0; i < 6; i++) { // a short shake, like a rejected password
             f.origin.x += (i % 2 ? -8 : 8);
@@ -318,7 +318,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSString *prompt = plan[@"prompt"];
     if (prompt.length) [command appendFormat:@" --prompt %@", q(prompt)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", plan[@"task"], agent, host];
-    fprintf(stderr, "[agent-belt] novo agente: %s\n", command.UTF8String);
+    fprintf(stderr, "[agent-belt] new agent: %s\n", command.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus
     mk_create_panel_show(NULL);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ mk_open_terminal(command, title); });

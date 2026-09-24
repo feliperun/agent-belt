@@ -32,7 +32,7 @@ The vocabulary of the codebase.
 | Orca | its CLI (`orca terminal list/show/switch/create`) via `MKOrca` |
 | tmux | `list-panes`, `list-clients`, `capture-pane`, `send-keys` via `MKTmux` |
 | Claude Code / Codex | read-only: `~/.claude/sessions`, transcripts, `~/.codex/sessions` |
-| `claude -p` | turns a spoken request into `agb new` arguments |
+| Jev (`agb _intent`) | turns a spoken or typed request into agent, machine, repo and intent |
 | GitHub | release checks and source tarballs |
 
 ## Invariants

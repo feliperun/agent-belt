@@ -39,7 +39,7 @@ static NSString *MKUpdateScript(void) {
 // group: the update runs in a session of its own, logging to a file.
 static int MKStartUpdate(NSString *tag) {
     NSString *script = MKUpdateScript();
-    if (!script) { fprintf(stderr, "[agent-belt] update.sh não encontrado no app; reinstale com ./install.sh\n"); return -1; }
+    if (!script) { fprintf(stderr, "[agent-belt] update.sh is missing from the app; reinstall with ./install.sh\n"); return -1; }
     NSString *log = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/agent-belt-update.log"];
     NSString *line = [NSString stringWithFormat:@"exec %@ %@ >>%@ 2>&1", [script stringByReplacingOccurrencesOfString:@" " withString:@"\\ "],
                       tag ?: @"", [log stringByReplacingOccurrencesOfString:@" " withString:@"\\ "]];
@@ -51,7 +51,7 @@ static int MKStartUpdate(NSString *tag) {
     extern char **environ;
     int result = posix_spawn(&pid, "/bin/bash", NULL, &attr, argv, environ);
     posix_spawnattr_destroy(&attr);
-    fprintf(stderr, "[agent-belt] atualizando para %s (log: %s)\n", (tag ?: @"a última versão").UTF8String, log.UTF8String);
+    fprintf(stderr, "[agent-belt] updating to %s (log: %s)\n", (tag ?: @"the latest version").UTF8String, log.UTF8String);
     return result == 0 ? 0 : -1;
 }
 
@@ -84,7 +84,7 @@ static void MKNotifyUpdate(NSString *tag, NSString *notes, NSString *url) {
         (void)error;
         if (!granted) return;
         UNMutableNotificationContent *content = [UNMutableNotificationContent new];
-        content.title = [NSString stringWithFormat:@"Agent Belt %@ disponível", tag];
+        content.title = [NSString stringWithFormat:@"Agent Belt %@ is available", tag];
         // Release notes are Markdown: keep the readable lines.
         NSMutableArray *lines = [NSMutableArray array];
         for (NSString *line in [notes componentsSeparatedByString:@"\n"]) {
@@ -92,7 +92,7 @@ static void MKNotifyUpdate(NSString *tag, NSString *notes, NSString *url) {
                                stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
             if (clean.length && ![clean hasPrefix:@"["]) [lines addObject:clean];
         }
-        content.body = lines.count ? [lines componentsJoinedByString:@"\n"] : @"Nova versão publicada.";
+        content.body = lines.count ? [lines componentsJoinedByString:@"\n"] : @"A new version is out.";
         content.categoryIdentifier = @"agent-belt-update";
         content.userInfo = @{@"tag": tag, @"url": url ?: @""};
         [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:tag content:content trigger:nil]
@@ -115,7 +115,7 @@ static void MKCheckForUpdate(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             mk_update_tag = tag;
             mk_update_url = release[@"html_url"];
-            fprintf(stderr, "[agent-belt] nova versão disponível: %s\n", tag.UTF8String);
+            fprintf(stderr, "[agent-belt] new version available: %s\n", tag.UTF8String);
             MKNotifyUpdate(tag, [release[@"body"] isKindOfClass:NSString.class] ? release[@"body"] : @"", mk_update_url);
         });
     }] resume];
@@ -127,7 +127,7 @@ void mk_updater_start(const char *version) {
     delegate = [MKUpdateDelegate new];
     UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
     center.delegate = delegate;
-    UNNotificationAction *update = [UNNotificationAction actionWithIdentifier:@"update" title:@"Atualizar" options:UNNotificationActionOptionNone];
+    UNNotificationAction *update = [UNNotificationAction actionWithIdentifier:@"update" title:@"Update" options:UNNotificationActionOptionNone];
     [center setNotificationCategories:[NSSet setWithObject:
         [UNNotificationCategory categoryWithIdentifier:@"agent-belt-update" actions:@[update] intentIdentifiers:@[] options:0]]];
     static dispatch_source_t timer;
@@ -137,9 +137,9 @@ void mk_updater_start(const char *version) {
     dispatch_resume(timer);
 }
 
-// Agent menu footer: "⬆️ v0.2.0 disponível · agb update", or NULL.
+// Agent menu footer: "⬆️ v0.2.0 available · agb update", or NULL.
 const char *mk_update_line(void) {
-    return mk_update_tag ? [NSString stringWithFormat:@"⬆️ %@ disponível · agb update", mk_update_tag].UTF8String : NULL;
+    return mk_update_tag ? [NSString stringWithFormat:@"⬆️ %@ available · agb update", mk_update_tag].UTF8String : NULL;
 }
 
 // Menu bar: check now; the result lands in the menu and, if new, a notification.

@@ -6,11 +6,11 @@ int main(int argc, char **argv) { @autoreleasepool {
     if (argc != 2) return 2;
     [NSApplication sharedApplication];
     MKMenuView *v = [[MKMenuView alloc] initWithFrame:NSMakeRect(0, 0, mk_menu_width, mk_menu_height(4, YES))];
-    v.labels = @[@"Corrigir o login depois do update", @"Revisar o PR de pagamentos", @"Migrar a fila para o novo worker", @"Documentar a API de agendamento"];
-    v.details = @[@"codex · 42 min · $3,10 · 4,2M tok · Encontrei a causa: o token expira antes do refresh",
-                  @"claude · 1 h 05 · $6,48 · 9,8M tok · Revisão pronta, dois comentários de segurança",
-                  @"claude · 18 min · $1,22 · 1,4M tok · Rodando os testes de integração",
-                  @"claude · 3 h 12 · $12,90 · 21,3M tok · Rascunho do guia publicado"];
+    v.labels = @[@"Fix the login after the update", @"Review the payments PR", @"Move the queue to the new worker", @"Document the scheduling API"];
+    v.details = @[@"codex · 42 min · $3.10 · 4.2M tok · Found it: the token expires before the refresh",
+                  @"claude · 1 h 05 · $6.48 · 9.8M tok · Review done, two security comments",
+                  @"claude · 18 min · $1.22 · 1.4M tok · Running the integration tests",
+                  @"claude · 3 h 12 · $12.90 · 21.3M tok · Guide draft published"];
     v.tones = @[@3, @2, @1, @0];
     v.footer = @"Claude 5h 23% · 7d 41%   Codex 5h 6% · 7d 22%";
     v.selected = 0;

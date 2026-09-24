@@ -110,7 +110,7 @@ fn omarchyPick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 
     return if (choice.len > 0) choice else null;
 }
 
-const new_agent = "+ Novo agente…";
+const new_agent = "+ New agent…";
 
 fn menu(ctx: sys.Ctx) !u8 {
     const reg = try hosts.load(ctx);
@@ -120,7 +120,7 @@ fn menu(ctx: sys.Ctx) !u8 {
     for (c.rows) |r| try lines.print(ctx.gpa, "\n{s} · {s} · {s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name });
     const choice = pick(ctx, "Agent Belt", lines.items) orelse return 0;
     if (std.mem.eql(u8, choice, new_agent)) {
-        const words = pick(ctx, "agente máquina repo o que fazer", "") orelse return 0;
+        const words = pick(ctx, "agent, machine, repo, what to do", "") orelse return 0;
         var argv: std.ArrayList([]const u8) = .empty;
         try argv.append(ctx.gpa, "new");
         var it = std.mem.tokenizeAny(u8, words, " \t");
@@ -188,7 +188,7 @@ fn pttStart(ctx: sys.Ctx) !u8 {
     if (sys.which(ctx, "quickshell") != null) {
         _ = std.process.spawn(ctx.io, .{ .argv = &.{ selfExe(ctx), "_overlay" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
     } else {
-        notify(ctx, "🎙️ Ouvindo", "solte o atalho para transcrever", 60_000);
+        notify(ctx, "🎙️ Listening", "release the shortcut to transcribe", 60_000);
     }
     return 0;
 }
@@ -217,25 +217,25 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     defer std.Io.Dir.cwd().deleteFile(ctx.io, wav_path) catch {};
     if (wav.len < 44 + 16000 / 5) { // under ~100 ms: an accidental tap
         setMode(ctx, 0);
-        notify(ctx, "Agent Belt", "gravação curta demais", 1500);
+        notify(ctx, "Agent Belt", "recording too short", 1500);
         return 0;
     }
     const key = deepgramKey(ctx) orelse {
         setMode(ctx, 0);
-        notify(ctx, "Agent Belt", "sem chave do Deepgram: DEEPGRAM_API_KEY=… agb install", 6000);
+        notify(ctx, "Agent Belt", "no Deepgram key: DEEPGRAM_API_KEY=… agb install", 6000);
         return 1;
     };
     setMode(ctx, 2);
     defer setMode(ctx, 0);
-    if (sys.which(ctx, "quickshell") == null) notify(ctx, "🔐 Transcrevendo", "decifrando sua voz…", 30_000);
+    if (sys.which(ctx, "quickshell") == null) notify(ctx, "🔐 Transcribing", "deciphering your voice…", 30_000);
     const defaults = config.Config{};
     const client = deepgram.Client{ .io = ctx.io, .allocator = ctx.gpa, .api_key = key, .model = defaults.deepgram_model, .language = defaults.deepgram_language, .smart_format = defaults.deepgram_smart_format, .mip_opt_out = defaults.deepgram_mip_opt_out };
     const text = client.transcribe(wav) catch |err| {
-        notify(ctx, "Agent Belt", ctx.fmt("transcrição falhou: {s}", .{@errorName(err)}) catch "", 5000);
+        notify(ctx, "Agent Belt", ctx.fmt("transcription failed: {s}", .{@errorName(err)}) catch "", 5000);
         return 1;
     };
     if (text.len == 0) {
-        notify(ctx, "Agent Belt", "nenhuma fala detectada", 1500);
+        notify(ctx, "Agent Belt", "no speech detected", 1500);
         return 0;
     }
     // Like on the Mac, the overlay leaves before the text is typed.
@@ -249,7 +249,7 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         ctx.env.put("AGB_TEXT", text) catch return 1;
         // wl-copy leaves a process serving the clipboard; with our pipes open we would wait on it forever.
         const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy >/dev/null 2>&1" }, null).ok;
-        notify(ctx, "Agent Belt", if (copied) "texto copiado: cole com Ctrl+V" else "instale wtype para digitar o texto", 5000);
+        notify(ctx, "Agent Belt", if (copied) "copied: paste with Ctrl+V" else "install wtype to type the text", 5000);
     }
     return 0;
 }

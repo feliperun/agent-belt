@@ -133,11 +133,11 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
     const double morph = self.mode == 2 ? (self.reducedMotion ? 1 : mk_ease((mk_now() - self.started) / 0.7)) : 0;
     [self drawCore:t morph:morph];
     if (self.mode == 3) {
-        mk_label(@"Não foi possível transcrever", NSMakePoint(65, 43), 10.5, mk_ink(0.95));
-        mk_label(@"Veja o erro no terminal", NSMakePoint(65, 24), 10, mk_ink(0.5));
+        mk_label(@"Could not transcribe", NSMakePoint(65, 43), 10.5, mk_ink(0.95));
+        mk_label(@"See the log for the error", NSMakePoint(65, 24), 10, mk_ink(0.5));
         return;
     }
-    mk_label(self.mode == 1 ? (self.command ? @"Comando de voz" : @"Ouvindo") : (self.command ? @"Entendendo" : @"Transcrevendo"),
+    mk_label(self.mode == 1 ? (self.command ? @"Voice command" : @"Listening") : (self.command ? @"Understanding" : @"Transcribing"),
              NSMakePoint(65, 44), 12, mk_ink(0.92));
     [self drawSignal:t morph:morph];
 }
@@ -171,7 +171,7 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 // While the transcription is on its way, a line of glyphs keeps deciphering
 // into a phrase: letters settle left to right, hold, then scramble again.
 - (void)drawCipher:(double)t opacity:(double)opacity {
-    NSString *phrase = self.command ? @"decifrando o pedido" : @"decifrando sua voz";
+    NSString *phrase = self.command ? @"deciphering your ask" : @"deciphering your voice";
     static NSString *const pool = @"abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/\\|?!";
     NSDictionary *resolved = @{NSFontAttributeName: [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium],
                                NSForegroundColorAttributeName: mk_ink(opacity * 0.85)};
@@ -363,7 +363,7 @@ void mk_status_set(int status) {
                     break;
                 case 3:
                     mk_refresh_title();
-                    mk_status_item.button.toolTip = @"Agent Belt: erro, consulte o terminal";
+                    mk_status_item.button.toolTip = @"Agent Belt: error, see the log";
                     mk_hide_timer = [NSTimer timerWithTimeInterval:2.2 repeats:NO block:^(NSTimer *timer) {
                         (void)timer;
                         mk_fade_out(^{});
@@ -539,15 +539,15 @@ static CGFloat mk_menu_height(NSUInteger rows, BOOL footer) {
     clip.lineBreakMode = NSLineBreakByTruncatingTail;
     NSMutableParagraphStyle *right = [clip mutableCopy];
     right.alignment = NSTextAlignmentRight;
-    [@"Agentes" drawInRect:NSMakeRect(18, 11, 120, 16) withAttributes:@{
+    [@"Agents" drawInRect:NSMakeRect(18, 11, 120, 16) withAttributes:@{
         NSFontAttributeName: [NSFont systemFontOfSize:11.5 weight:NSFontWeightSemibold],
         NSForegroundColorAttributeName: mk_ink(0.6)}];
-    NSString *hint = self.clickable ? @"clique para abrir" : @"toque: próximo · 2× ou ↩: abrir";
+    NSString *hint = self.clickable ? @"click to open" : @"tap: next · double tap or ↩: open";
     [hint drawInRect:NSMakeRect(130, 12, mk_menu_width - 148, 14) withAttributes:@{
         NSFontAttributeName: [NSFont systemFontOfSize:10 weight:NSFontWeightMedium],
         NSForegroundColorAttributeName: mk_ink(0.38), NSParagraphStyleAttributeName: right}];
 
-    NSArray *states = @[@"ocioso", @"trabalhando", @"terminou", @"aguardando você"];
+    NSArray *states = @[@"idle", @"working", @"finished", @"waiting for you"];
     for (NSUInteger i = 0; i < self.labels.count; i++) {
         const CGFloat y = mk_menu_header + i * mk_menu_row;
         const int tone = self.tones[i].intValue;
@@ -685,15 +685,15 @@ static NSImage *mk_belt_icon(NSColor *light) {
 
 static void mk_refresh_title(void) {
     NSColor *light = nil;
-    NSString *tip = @"Agent Belt: nada pendente";
+    NSString *tip = @"Agent Belt: nothing pending";
     switch (mk_dictation_status) {
     case 1: light = NSColor.systemOrangeColor; tip = @"Agent Belt gravando"; break;
     case 4: light = NSColor.systemOrangeColor; tip = @"Agent Belt ouvindo um comando"; break;
     case 2: light = NSColor.systemTealColor; tip = @"Agent Belt transcrevendo"; break;
-    case 3: light = NSColor.systemYellowColor; tip = @"Agent Belt: erro, veja o log"; break;
+    case 3: light = NSColor.systemYellowColor; tip = @"Agent Belt: error, see the log"; break;
     default:
-        if (mk_attention == 2) { light = NSColor.systemRedColor; tip = @"Agent Belt: um agente aguarda você"; }
-        else if (mk_attention == 1) { light = NSColor.systemGreenColor; tip = @"Agent Belt: um agente terminou"; }
+        if (mk_attention == 2) { light = NSColor.systemRedColor; tip = @"Agent Belt: an agent is waiting for you"; }
+        else if (mk_attention == 1) { light = NSColor.systemGreenColor; tip = @"Agent Belt: an agent finished"; }
     }
     mk_status_item.button.image = mk_belt_icon(light);
     mk_status_item.button.title = @"";
@@ -717,8 +717,8 @@ static void mk_refresh_title(void) {
     header.enabled = NO;
     [menu addItem:NSMenuItem.separatorItem];
     NSArray<NSDictionary *> *agents = MKAgentsSnapshot();
-    NSArray *dots = @[@"⚪", @"🔵", @"🟢", @"🔴"], *states = @[@"ocioso", @"trabalhando", @"terminou", @"aguardando você"];
-    if (!agents.count) [menu addItemWithTitle:@"Nenhum agente rodando" action:nil keyEquivalent:@""].enabled = NO;
+    NSArray *dots = @[@"⚪", @"🔵", @"🟢", @"🔴"], *states = @[@"idle", @"working", @"finished", @"waiting for you"];
+    if (!agents.count) [menu addItemWithTitle:@"No agents running" action:nil keyEquivalent:@""].enabled = NO;
     for (NSDictionary *agent in agents) {
         const int tone = MAX(0, MIN(3, [agent[@"tone"] intValue]));
         NSMenuItem *item = [self add:menu title:[NSString stringWithFormat:@"%@  %@", dots[tone], agent[@"title"]] action:@selector(openAgent:)];
@@ -726,18 +726,18 @@ static void mk_refresh_title(void) {
         item.toolTip = [NSString stringWithFormat:@"%@ · %@", states[tone], agent[@"detail"]];
     }
     [menu addItem:NSMenuItem.separatorItem];
-    [self add:menu title:@"Novo agente…   segure 5" action:@selector(newAgent:)];
-    [self add:menu title:@"Menu flutuante de agentes   ⌃⌥Espaço" action:@selector(floatingMenu:)];
+    [self add:menu title:@"New agent…   hold 5" action:@selector(newAgent:)];
+    [self add:menu title:@"Agent menu   ⌃⌥Space" action:@selector(floatingMenu:)];
     NSString *quota = MKAgentsQuotaLine();
     if (quota) {
         [menu addItem:NSMenuItem.separatorItem];
         [menu addItemWithTitle:quota action:nil keyEquivalent:@""].enabled = NO;
     }
     [menu addItem:NSMenuItem.separatorItem];
-    if (update) [self add:menu title:[NSString stringWithFormat:@"Atualizar para %s", update] action:@selector(installUpdate:)];
-    else [self add:menu title:@"Verificar atualizações" action:@selector(checkUpdates:)];
-    [self add:menu title:@"Permissões…" action:@selector(permissions:)];
-    [self add:menu title:@"Abrir log" action:@selector(openLog:)];
+    if (update) [self add:menu title:[NSString stringWithFormat:@"Update to %s", update] action:@selector(installUpdate:)];
+    else [self add:menu title:@"Check for updates" action:@selector(checkUpdates:)];
+    [self add:menu title:@"Permissions…" action:@selector(permissions:)];
+    [self add:menu title:@"Open log" action:@selector(openLog:)];
 }
 - (void)openAgent:(NSMenuItem *)item { MKAgentsOpenKey(item.representedObject); }
 - (void)floatingMenu:(id)sender { (void)sender; mk_agents_menu_click(); }

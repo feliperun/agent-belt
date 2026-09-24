@@ -52,7 +52,7 @@ pub const Controller = struct {
         defer self.lock.unlock(self.io);
         if (!self.pressed or self.press != press or self.recording != null) return;
         self.recording = Recording.start(self) catch |err| {
-            std.debug.print("[agent-belt] criar agente: {s}\n", .{@errorName(err)});
+            std.debug.print("[agent-belt] new agent: {s}\n", .{@errorName(err)});
             return;
         };
     }
@@ -78,6 +78,7 @@ const Recording = struct {
         if (owner.config.sounds) macos.playCue(.start);
         macos.recorderOnPcm(&self.recorder, onPcm, self);
         try self.recorder.start();
+        std.debug.print("[agent-belt] NEW AGENT: recording, release 5 to review\n", .{});
         self.sender = try std.Thread.spawn(.{}, sendLoop, .{self});
         return self;
     }
@@ -110,7 +111,7 @@ const Recording = struct {
             .language = self.owner.config.deepgram_language,
             .keyterms = terms,
         }) catch |err| {
-            std.debug.print("[agent-belt] streaming indisponível ({s}); transcrevo ao soltar\n", .{@errorName(err)});
+            std.debug.print("[agent-belt] streaming unavailable ({s}); transcribing on release\n", .{@errorName(err)});
             return;
         };
         var shown: u32 = 0;
@@ -141,6 +142,7 @@ const Recording = struct {
         self.stopping.store(true, .release);
         if (self.sender) |t| t.join();
         if (self.owner.config.sounds) macos.playCue(.stop);
+        std.debug.print("[agent-belt] NEW AGENT: recording stopped\n", .{});
         // The stream never opened (no network, no key): transcribe the recording.
         const text = self.final orelse batch(self.owner, wav);
         macos.createPanelCommit(gpa, text orelse "");

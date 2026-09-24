@@ -113,7 +113,7 @@ pub fn interactive(ctx: Ctx, argv: []const []const u8, cwd: ?[]const u8) u8 {
 pub fn handOver(ctx: Ctx, argv: []const []const u8) noreturn {
     if (platform != .windows) {
         const err = std.process.replace(ctx.io, .{ .argv = argv, .environ_map = ctx.env });
-        std.debug.print("agb: não consegui executar {s}: {s}\n", .{ argv[0], @errorName(err) });
+        std.debug.print("agb: could not run {s}: {s}\n", .{ argv[0], @errorName(err) });
         std.process.exit(127);
     }
     std.process.exit(interactive(ctx, argv, null));

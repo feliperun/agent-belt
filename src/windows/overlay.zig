@@ -233,7 +233,7 @@ fn render() void {
     }
 
     drawCore(g, t, morph);
-    text(g, if (mode == 1) w.L("Ouvindo") else w.L("Transcrevendo"), label_font, 62, 13, ink(0.92));
+    text(g, if (mode == 1) w.L("Listening") else w.L("Transcribing"), label_font, 62, 13, ink(0.92));
     drawSignal(g, t, morph);
 
     var pos = w.POINT{};
@@ -314,7 +314,7 @@ fn drawSignal(g: Gp, t: f64, morph: f64) void {
 
 // Letters settle left to right, hold, then scramble again.
 fn drawCipher(g: Gp, t: f64, opacity: f64) void {
-    const phrase = "decifrando sua voz";
+    const phrase = "deciphering your voice";
     const pool = "abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/\\|?!";
     const cycle = 2.8;
     const local = @mod(t, cycle) / cycle;

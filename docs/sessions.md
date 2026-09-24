@@ -43,8 +43,9 @@ agb new shell linux2 mac-debian --task scratch --detach
 agb new create an agent on windows with codex in coreum to look into the login
 ```
 
-A sentence that starts with a verb (`create`, `crie`, `open`, `start`…) is turned into
-those arguments by a Claude Haiku (`claude -p`), then checked like any other input.
+A sentence that starts with a verb (`create`, `crie`, `open`, `start`…) is read like the
+create-agent panel reads speech (`agb _intent`: exact names in code, the rest decided by Jev),
+then checked like any other input.
 
 Flags, anywhere: `--agent`, `--host`, `--repo`, `--task`, `--prompt`, `-d` (detach other
 clients when attaching), `--detach` (create and print the session name instead of

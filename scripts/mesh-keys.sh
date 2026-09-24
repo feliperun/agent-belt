@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # mesh-keys.sh [--dry-run]
 #
-# Deixa cada maquina do registro capaz de abrir ssh em todas as outras.
-# Idempotente -- roda quantas vezes quiser. Duas coisas derrubam um par:
+# Makes every machine in the registry able to ssh into every other one.
+# Idempotent: run it as often as you like. Two things break a pair:
 #
-#   1. authorized_keys sem a chave da origem -> "Permission denied (publickey)"
-#   2. known_hosts com host key velha        -> "HOST IDENTIFICATION HAS CHANGED"
+#   1. authorized_keys without the source's key -> "Permission denied (publickey)"
+#   2. known_hosts with an old host key         -> "HOST IDENTIFICATION HAS CHANGED"
 #
-# O (2) e comum aqui porque maquina reinstalada troca a host key e so quem
-# nunca conectou antes nao percebe. O script trata os dois.
+# (2) is common because a reinstalled machine gets a new host key, and only a
+# machine that never connected before does not notice. The script fixes both.
 #
-# So maquinas `posix` sao alteradas. No Windows o authorized_keys do usuario e
-# ignorado quando a conta e administradora: o sshd usa
-# C:\ProgramData\ssh\administrators_authorized_keys, com ACL restrita a SYSTEM
-# + Administradores, e mexer nele pede cuidado com a DACL. Como o Windows ja
-# aceita as outras maquinas, o script so reporta o que falta la.
+# Only `posix` machines are changed. On Windows the user's authorized_keys is
+# ignored for administrator accounts: sshd reads
+# C:\ProgramData\ssh\administrators_authorized_keys, with an ACL limited to
+# SYSTEM + Administrators, and editing it needs care with the DACL. Windows
+# already accepts the other machines, so the script only reports what is missing.
 
 set -uo pipefail
 
@@ -35,19 +35,18 @@ while read -r kw a b c || [ -n "$kw" ]; do
   esac
 done < "$CONFIG"
 
-# A propria maquina nao entra por ssh: loopback quase nunca esta autorizado, e
-# nao precisa estar.
+# This machine is not reached over ssh: loopback is rarely authorized, and
+# does not need to be.
 is_self() { [ "$1" = "$SELF" ]; }
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/meshkeys.XXXXXX") || die "sem diretorio temporario"
 trap 'rm -rf "$tmp"' EXIT
 
-# Nao basta pegar ~/.ssh/id_ed25519.pub de cada maquina: o ~/.ssh/config pode
-# forcar uma IdentityFile diferente por destino (a felipe-windows oferece
-# id_ed25519_tailnet_mesh para uns hosts e id_ed25519 para outros). Quem sabe a
-# resposta certa e o proprio ssh da origem: `ssh -G <destino>` lista, ja
-# resolvido, o que ele vai oferecer.
-printf '== coletando as chaves que cada maquina oferece a cada destino\n'
+# Taking each machine's ~/.ssh/id_ed25519.pub is not enough: ~/.ssh/config may
+# force a different IdentityFile per target (felipe-windows offers
+# id_ed25519_tailnet_mesh to some hosts and id_ed25519 to others). The source's
+# own ssh knows: `ssh -G <target>` prints, resolved, what it will offer.
+printf '== collecting the keys each machine offers to each target\n'
 cat > "$tmp/collect.sh" <<'COL'
 case "$(uname -s)" in MSYS*|MINGW*) PATH="$PATH:/c/Windows/System32/OpenSSH" ;; esac
 while read -r t; do
@@ -79,9 +78,9 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
   n=0
   [ -f "$tmp/offers.$name" ] && n=$(grep -c ' ssh-' "$tmp/offers.$name")
   if [ "$n" -gt 0 ]; then
-    printf '   %-18s %s chave(s) oferecida(s)\n' "$name" "$n"
+    printf '   %-18s %s key(s) offered\n' "$name" "$n"
   else
-    printf '   %-18s NADA (fora do ar, ou sem chave em ~/.ssh)\n' "$name"
+    printf '   %-18s NONE (offline, or no key in ~/.ssh)\n' "$name"
   fi
 done
 
@@ -90,17 +89,16 @@ while read -r t b c; do
   [ -n "$b" ] || continue
   if ! grep -qF "$b" ~/.ssh/authorized_keys; then printf "%s %s %s\n" "$t" "$b" "$c" >> ~/.ssh/authorized_keys; a=$((a+1)); fi
 done
-echo "chaves novas: $a"'
+echo "new keys: $a"'
 
-printf '\n== distribuindo\n'
+printf '\n== distributing\n'
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
   name="${NAMES[$i]}"; target="${TARGETS[$i]}"
   if [ "${KINDS[$i]}" = msys ]; then
-    printf '   %-18s pulado (Windows: veja o cabecalho deste script)\n' "$name"
+    printf '   %-18s skipped (Windows: see this script\'s header)\n' "$name"
     continue
   fi
-  # O que cada origem oferece *para esta maquina*, com o comentario dizendo de
-  # quem e a chave.
+  # What each source offers *to this machine*, the comment saying whose key it is.
   : > "$tmp/push"
   for ((j = 0; j < ${#NAMES[@]}; j++)); do
     [ "$j" = "$i" ] && continue
@@ -111,7 +109,7 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
   done
   sort -u -k2,2 "$tmp/push" -o "$tmp/push"
   if [ "$dry" = 1 ]; then
-    printf '   %-18s receberia %s chave(s)\n' "$name" "$(wc -l < "$tmp/push" | tr -d ' ')"
+    printf '   %-18s would receive %s key(s)\n' "$name" "$(wc -l < "$tmp/push" | tr -d ' ')"
     continue
   fi
   printf '   %-18s ' "$name"
@@ -124,11 +122,11 @@ done
 
 # ------------------------------------------------------------- host keys --
 #
-# Maquina reinstalada troca a host key, e quem ja tinha o registro antigo passa
-# a recusar a conexao antes mesmo de tentar autenticar. A referencia e o
-# known_hosts de quem esta rodando este script: ele alcanca todas as maquinas,
-# entao o que esta guardado aqui e o que vale. So na falta de registro local a
-# chave e lida da rede (ssh-keyscan).
+# A reinstalled machine gets a new host key, and whoever had the old one refuses
+# the connection before even authenticating. The reference is the known_hosts
+# of the machine running this script: it reaches every machine, so what it has
+# stored wins. Only without a local record is the key read from the network
+# (ssh-keyscan).
 printf '\n== host keys\n'
 : > "$tmp/hostkeys"
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
@@ -136,10 +134,10 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
   stored=$(ssh-keygen -F "$h" 2>/dev/null | grep -v '^#' | awk '$2 == "ssh-ed25519" { print $3 }' | head -1)
   if [ -z "$stored" ]; then
     stored=$(ssh-keyscan -t ed25519 "$h" 2>/dev/null | awk '{ print $3 }' | head -1)
-    [ -n "$stored" ] && printf '   %-18s lida da rede (sem registro local)\n' "$h"
+    [ -n "$stored" ] && printf '   %-18s read from the network (not known locally)\n' "$h"
   fi
   if [ -z "$stored" ]; then
-    printf '   %-18s SEM HOST KEY (maquina fora do ar?)\n' "$h"
+    printf '   %-18s NO HOST KEY (machine offline?)\n' "$h"
     continue
   fi
   printf '%s %s\n' "$h" "$stored" >> "$tmp/hostkeys"
@@ -168,10 +166,10 @@ done
 FIX
 } > "$tmp/fixhk.sh"
 
-# O script e a lista de host keys viajam no mesmo stdin: o `while read` do
-# final consome o que vier depois do `done`. E o unico jeito de mandar script
-# *e* dados para o Windows, onde argumento com aspas nao sobrevive ao
-# `powershell -c` do sshd.
+# The script and the host key list travel on the same stdin: the final
+# `while read` consumes what comes after `done`. It is the only way to send a
+# script *and* data to Windows, where a quoted argument does not survive sshd's
+# `powershell -c`.
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
   printf '   em %s:\n' "${NAMES[$i]}"
   grep -v "^${TARGETS[$i]#*@} " "$tmp/hostkeys" > "$tmp/hk.in"
@@ -189,13 +187,13 @@ done
 
 printf '\n== conferindo o mesh (pode demorar alguns segundos)\n'
 
-# O probe vai por stdin, nao como argumento: e a unica forma de mandar um
-# script com aspas para o Windows, onde o sshd embrulha tudo em `powershell -c`
-# e destroi quoting de shell. `bash -s` le o script de stdin nos dois mundos.
+# The probe goes on stdin, not as an argument: the only way to send a script
+# with quotes to Windows, where sshd wraps everything in `powershell -c` and
+# destroys shell quoting. `bash -s` reads the script from stdin on both.
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
   printf '   de %s:\n' "${NAMES[$i]}"
   {
-    # No MSYS2 o ssh e o do Windows e nao esta no PATH do login shell.
+    # On MSYS2 ssh is Windows' own and not on the login shell's PATH.
     printf 'case "$(uname -s)" in MSYS*|MINGW*) PATH="$PATH:/c/Windows/System32/OpenSSH" ;; esac\n'
     printf 'for t in'
     for ((j = 0; j < ${#NAMES[@]}; j++)); do
@@ -210,8 +208,8 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
   if is_self "${NAMES[$i]}"; then
     bash "$tmp/probe.sh"
   elif [ "${KINDS[$i]}" = msys ]; then
-    # -l junto com -s: sem o login shell o MSYS2 nao poe nem /usr/bin no PATH,
-    # e o script morre em "uname: command not found".
+    # -l with -s: without a login shell MSYS2 does not even put /usr/bin on the
+    # PATH, and the script dies with "uname: command not found".
     ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'C:\msys64\usr\bin\bash.exe -l -s' < "$tmp/probe.sh" 2>&1 \
       | tr -d '\r' | grep -E ' ok$| FALHA$'
   else

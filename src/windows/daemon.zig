@@ -11,6 +11,7 @@ const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
 const overlay = @import("overlay.zig");
+const intent = @import("../sessions/intent.zig");
 
 const WM_TRAY = w.WM_APP + 1;
 const WM_PTT = w.WM_APP + 2; // wparam 1 start, 0 stop
@@ -352,24 +353,24 @@ fn showMenu() void {
     const ready = g_rows_ready;
     g_rows_lock.unlock(g_ctx.io);
     if (!ready) {
-        _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Procurando sessões…"));
+        _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Looking for sessions…"));
     } else if (rows.len == 0) {
-        _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Nenhuma sessão de agente"));
+        _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("No agent sessions"));
     }
     for (rows, 0..) |r, i| {
         if (i >= 30) break;
         // Win32 menus draw emoji in monochrome, so the agent is spelled out.
-        const label = g_ctx.fmt("{s}\t{s} · {s}{s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name, if (r.attached) " · anexada" else "" }) catch continue;
+        const label = g_ctx.fmt("{s}\t{s} · {s}{s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name, if (r.attached) " · attached" else "" }) catch continue;
         _ = w.AppendMenuW(menu, w.MF_STRING, CMD_SESSION + i, w.wide(g_ctx.gpa, label) catch continue);
     }
     _ = w.AppendMenuW(menu, w.MF_SEPARATOR, 0, null);
-    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_NEW, w.L("Novo agente…"));
-    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_SESSIONS, w.L("Sessões no terminal    Ctrl+Alt+↑"));
-    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_REFRESH, w.L("Atualizar lista"));
+    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_NEW, w.L("New agent…"));
+    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_SESSIONS, w.L("Sessions in a terminal    Ctrl+Alt+↑"));
+    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_REFRESH, w.L("Refresh"));
     _ = w.AppendMenuW(menu, w.MF_SEPARATOR, 0, null);
-    _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Ditar: segure Ctrl+Alt+D"));
-    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_LOG, w.L("Abrir log"));
-    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_QUIT, w.L("Sair do Agent Belt"));
+    _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Dictate: hold Ctrl+Alt+D"));
+    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_LOG, w.L("Open log"));
+    _ = w.AppendMenuW(menu, w.MF_STRING, CMD_QUIT, w.L("Quit Agent Belt"));
     var pt = w.POINT{};
     _ = w.GetCursorPos(&pt);
     _ = w.SetForegroundWindow(hwnd); // required for the menu to close on outside clicks
@@ -393,6 +394,28 @@ fn showMenu() void {
 
 // ---------------------------------------------------------------- new agent dialog
 
+// A request typed into the dialog is read like the Mac's create panel: agent,
+// machine, repo and intent (agb _intent, backed by Jev), shown as they are
+// detected, the intent highlighted. Create runs agb new with exactly that.
+
+const WM_PLAN = w.WM_APP + 7; // wparam: request serial, lparam: *Detected
+const ID_CREATE = 1;
+const ID_CANCEL = 2;
+const ID_EDIT = 3;
+const TIMER_DETECT = 7;
+
+const Detected = struct {
+    arena: std.heap.ArenaAllocator,
+    plan: ?intent.Plan = null,
+    failure: ?[]const u8 = null,
+};
+
+var g_fields: ?w.HWND = null;
+var g_intent: ?w.HWND = null;
+var g_hint: ?w.HWND = null;
+var g_detected: ?*Detected = null;
+var g_serial: usize = 0;
+
 fn showNewDialog() void {
     if (g_dialog) |d| {
         _ = w.SetForegroundWindow(d);
@@ -400,38 +423,152 @@ fn showNewDialog() void {
     }
     const cx = w.GetSystemMetrics(0);
     const cy = w.GetSystemMetrics(1);
-    const dialog = w.CreateWindowExW(w.WS_EX_TOPMOST, w.L("AgentBeltNew"), w.L("Agent Belt: novo agente"), w.WS_CAPTION | w.WS_SYSMENU | w.WS_VISIBLE, @divTrunc(cx - 560, 2), @divTrunc(cy - 170, 3), 560, 170, null, null, g_instance, null) orelse return;
+    const dialog = w.CreateWindowExW(w.WS_EX_TOPMOST, w.L("AgentBeltNew"), w.L("Agent Belt: new agent"), w.WS_CAPTION | w.WS_SYSMENU | w.WS_VISIBLE, @divTrunc(cx - 640, 2), @divTrunc(cy - 250, 3), 640, 250, null, null, g_instance, null) orelse return;
     g_dialog = dialog;
     const font = w.CreateFontW(-15, 0, 0, 0, w.FW_NORMAL, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
-    const label = w.CreateWindowExW(0, w.L("STATIC"), w.L("Descreva o agente: agente, máquina, repo e o que fazer. Ex.: codex linux2 mac-debian rode os testes"), w.WS_CHILD | w.WS_VISIBLE, 16, 12, 520, 40, dialog, null, g_instance, null);
-    g_edit = w.CreateWindowExW(w.WS_EX_CLIENTEDGE, w.L("EDIT"), w.L(""), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.ES_AUTOHSCROLL, 16, 58, 520, 28, dialog, null, g_instance, null);
-    const button = w.CreateWindowExW(0, w.L("BUTTON"), w.L("Criar"), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.BS_DEFPUSHBUTTON, 436, 96, 100, 30, dialog, @ptrFromInt(1), g_instance, null);
-    if (font) |f| for ([_]?w.HWND{ label, g_edit, button }) |c| if (c) |ctl| {
+    const small = w.CreateFontW(-13, 0, 0, 0, w.FW_NORMAL, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
+    const bold = w.CreateFontW(-18, 0, 0, 0, w.FW_SEMIBOLD, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
+    const label = w.CreateWindowExW(0, w.L("STATIC"), w.L("Describe the new agent: which agent, machine and repo, and what to do."), w.WS_CHILD | w.WS_VISIBLE, 16, 12, 600, 22, dialog, null, g_instance, null);
+    g_edit = w.CreateWindowExW(w.WS_EX_CLIENTEDGE, w.L("EDIT"), w.L(""), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.ES_AUTOHSCROLL, 16, 40, 600, 28, dialog, @ptrFromInt(ID_EDIT), g_instance, null);
+    g_fields = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 80, 600, 22, dialog, null, g_instance, null);
+    g_intent = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 106, 600, 28, dialog, null, g_instance, null);
+    g_hint = w.CreateWindowExW(0, w.L("STATIC"), w.L("e.g. codex on windows in coreum to look into the login error"), w.WS_CHILD | w.WS_VISIBLE, 16, 142, 600, 20, dialog, null, g_instance, null);
+    const create = w.CreateWindowExW(0, w.L("BUTTON"), w.L("Create"), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.BS_DEFPUSHBUTTON, 516, 172, 100, 30, dialog, @ptrFromInt(ID_CREATE), g_instance, null);
+    for ([_]?w.HWND{ label, g_edit, g_fields, create }) |c| if (c) |ctl| if (font) |f| {
         _ = w.SendMessageW(ctl, w.WM_SETFONT, @intFromPtr(f), 1);
+    };
+    if (small) |f| if (g_hint) |h| {
+        _ = w.SendMessageW(h, w.WM_SETFONT, @intFromPtr(f), 1);
+    };
+    if (bold) |f| if (g_intent) |h| {
+        _ = w.SendMessageW(h, w.WM_SETFONT, @intFromPtr(f), 1);
     };
     _ = w.SetForegroundWindow(dialog);
     _ = w.SetFocus(g_edit);
+    // Fresh repo lists for the detection, in the background.
+    _ = std.Thread.spawn(.{}, refreshRepos, .{}) catch null;
+}
+
+fn refreshRepos() void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var ctx = g_ctx;
+    ctx.gpa = arena.allocator();
+    const reg = hosts.load(ctx) catch return;
+    intent.refreshCache(ctx, reg, cli.reposOf) catch {};
+}
+
+fn setText(hwnd: ?w.HWND, text: []const u8) void {
+    const h = hwnd orelse return;
+    const wide = w.wide(g_ctx.gpa, text) catch return;
+    _ = w.SetWindowTextW(h, wide);
+}
+
+fn detectThread(dialog: w.HWND, serial: usize, text: []const u8) void {
+    const d = std.heap.page_allocator.create(Detected) catch return;
+    d.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
+    var ctx = g_ctx;
+    ctx.gpa = d.arena.allocator();
+    if (hosts.load(ctx)) |reg| {
+        d.plan = intent.detect(ctx, reg, text, .{}) catch |err| blk: {
+            d.failure = @errorName(err);
+            break :blk null;
+        };
+    } else |err| d.failure = @errorName(err);
+    if (w.PostMessageW(dialog, WM_PLAN, serial, @bitCast(@intFromPtr(d))) == 0) {
+        d.arena.deinit();
+        std.heap.page_allocator.destroy(d);
+    }
+}
+
+fn showPlan() void {
+    const d = g_detected orelse return;
+    const plan = d.plan orelse {
+        setText(g_fields, "");
+        setText(g_intent, "");
+        setText(g_hint, if (d.failure) |f| (g_ctx.fmt("Could not read the request: {s}", .{f}) catch "") else "");
+        return;
+    };
+    const unsure = struct {
+        fn mark(c: f64) []const u8 {
+            return if (c < 0.6) " ?" else "";
+        }
+    };
+    setText(g_fields, g_ctx.fmt("Agent  {s}{s}        Machine  {s}{s}        Repo  {s}{s}", .{
+        plan.agent,                   unsure.mark(plan.agent_confidence),
+        plan.host,                    unsure.mark(plan.host_confidence),
+        plan.repo orelse "(missing)", if (plan.repo != null) unsure.mark(plan.repo_confidence) else "",
+    }) catch "");
+    setText(g_intent, g_ctx.fmt("→ {s}", .{plan.prompt}) catch "");
+    setText(g_hint, if (plan.repo == null) "Which repo? Say it in the request." else "Enter creates the agent · Esc cancels");
+}
+
+fn createFromPlan(dialog: w.HWND) void {
+    const d = g_detected orelse {
+        setText(g_hint, "Still reading the request…");
+        return;
+    };
+    const plan = d.plan orelse return;
+    const repo = plan.repo orelse {
+        setText(g_hint, "Which repo? Say it in the request.");
+        return;
+    };
+    const title = g_ctx.fmt("{s} · {s} @ {s}", .{ plan.task, plan.agent, plan.host }) catch "Agent Belt";
+    openTerminal(title, &.{ "new", "--agent", plan.agent, "--host", plan.host, "--repo", repo, "--task", plan.task, "--prompt", plan.prompt });
+    _ = w.DestroyWindow(dialog);
 }
 
 fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
     switch (msg) {
-        w.WM_COMMAND => if ((wparam & 0xFFFF) == 1) {
-            var buf: [1024]u16 = undefined;
-            const n = if (g_edit) |e| w.GetWindowTextW(e, &buf, buf.len) else 0;
-            const text = std.unicode.utf16LeToUtf8Alloc(g_ctx.gpa, buf[0..@intCast(n)]) catch "";
-            _ = w.DestroyWindow(hwnd);
-            if (text.len > 0) {
-                var words: std.ArrayList([]const u8) = .empty;
-                words.append(g_ctx.gpa, "new") catch {};
-                var it = std.mem.tokenizeAny(u8, text, " \t");
-                while (it.next()) |word| words.append(g_ctx.gpa, word) catch {};
-                openTerminal("Agent Belt: novo agente", words.items);
+        w.WM_COMMAND => {
+            const id = wparam & 0xFFFF;
+            const code = (wparam >> 16) & 0xFFFF;
+            if (id == ID_CREATE) createFromPlan(hwnd);
+            if (id == ID_CANCEL) _ = w.DestroyWindow(hwnd);
+            if (id == ID_EDIT and code == 0x0300) { // EN_CHANGE: detect once typing pauses
+                _ = w.SetTimer(hwnd, TIMER_DETECT, 400, null);
+                setText(g_hint, "Reading…");
             }
             return 0;
+        },
+        w.WM_TIMER => if (wparam == TIMER_DETECT) {
+            _ = w.KillTimer(hwnd, TIMER_DETECT);
+            var buf: [2048]u16 = undefined;
+            const n = if (g_edit) |e| w.GetWindowTextW(e, &buf, buf.len) else 0;
+            const text = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, buf[0..@intCast(n)]) catch return 0;
+            if (std.mem.trim(u8, text, " ").len == 0) return 0;
+            g_serial += 1;
+            _ = std.Thread.spawn(.{}, detectThread, .{ hwnd, g_serial, text }) catch {};
+            return 0;
+        },
+        WM_PLAN => {
+            const d: *Detected = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            if (wparam != g_serial) { // a newer request is on its way
+                d.arena.deinit();
+                std.heap.page_allocator.destroy(d);
+                return 0;
+            }
+            if (g_detected) |old| {
+                old.arena.deinit();
+                std.heap.page_allocator.destroy(old);
+            }
+            g_detected = d;
+            showPlan();
+            return 0;
+        },
+        0x0138 => if (g_intent != null and lparam == @as(isize, @bitCast(@intFromPtr(g_intent.?)))) { // WM_CTLCOLORSTATIC: the intent in the accent color
+            _ = w.SetTextColor(@ptrFromInt(wparam), w.rgb(37, 99, 235));
+            _ = w.SetBkMode(@ptrFromInt(wparam), w.TRANSPARENT);
+            return @bitCast(@intFromPtr(w.GetSysColorBrush(15)));
         },
         w.WM_DESTROY => {
             g_dialog = null;
             g_edit = null;
+            if (g_detected) |old| {
+                old.arena.deinit();
+                std.heap.page_allocator.destroy(old);
+            }
+            g_detected = null;
             return 0;
         },
         else => {},
@@ -583,7 +720,7 @@ pub fn run(ctx: sys.Ctx, version: []const u8) !u8 {
     overlay.create(g_instance, overlayProc);
 
     g_tray = .{ .hWnd = g_hwnd, .uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP, .uCallbackMessage = WM_TRAY, .hIcon = icon };
-    const tip = w.L("Agent Belt · Ctrl+Alt+D dita · Ctrl+Alt+Espaço menu");
+    const tip = w.L("Agent Belt · Ctrl+Alt+D dictates · Ctrl+Alt+Space menu");
     @memcpy(g_tray.szTip[0..tip.len], tip);
     _ = w.Shell_NotifyIconW(w.NIM_ADD, &g_tray);
     defer _ = w.Shell_NotifyIconW(w.NIM_DELETE, &g_tray);

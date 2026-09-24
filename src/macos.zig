@@ -93,12 +93,6 @@ pub fn voiceCommand(allocator: std.mem.Allocator, text: []const u8) !void {
     c.mk_agents_voice_command(z.ptr);
 }
 
-pub fn agentsNew(allocator: std.mem.Allocator, text: []const u8, dry_run: bool) !void {
-    const z = try allocator.dupeZ(u8, text);
-    defer allocator.free(z);
-    if (c.mk_agents_new(z.ptr, @intFromBool(dry_run)) != 0) return error.AgentNotCreated;
-}
-
 pub fn updaterStart(comptime version: []const u8) void {
     c.mk_updater_start(version ++ "");
 }
@@ -171,7 +165,7 @@ pub const HidListener = struct {
     pub fn run(self: *HidListener) !void {
         _ = self.allocator;
         if (c.mk_status_init() != 0) {
-            std.log.warn("não consegui criar indicador na barra de menus", .{});
+            std.log.warn("could not create the menu bar item", .{});
         }
         self.debug_input = std.c.getenv("AGENT_BELT_DEBUG_INPUT") != null;
         if (self.on_f5 != null) c.mk_set_f5_handler(f5Callback, self);
@@ -181,9 +175,9 @@ pub const HidListener = struct {
         const result = c.mk_event_tap_run(eventFilter, self);
         if (result != 0) {
             if (result == -4) {
-                std.log.err("não consegui criar o event tap; dê ao binário a permissão de Accessibility", .{});
+                std.log.err("could not create the event tap; give the app the Accessibility permission", .{});
             } else {
-                std.log.err("não consegui abrir o monitor HID (código={d}); dê ao binário a permissão de Input Monitoring", .{result});
+                std.log.err("could not open the HID monitor (code={d}); give the app the Input Monitoring permission", .{result});
             }
             return error.HidOpenFailed;
         }
@@ -193,7 +187,7 @@ pub const HidListener = struct {
 fn hidThread(listener: *HidListener) void {
     const result = c.mk_hid_run(listener.vendor_id, listener.product_id, hidCallback, knobCallback, null, listener);
     if (result != 0) {
-        std.log.err("não consegui abrir o monitor HID (código={d}); dê ao binário a permissão de Input Monitoring", .{result});
+        std.log.err("could not open the HID monitor (code={d}); give the app the Input Monitoring permission", .{result});
     } else {
         std.log.info("monitor HID encerrado", .{});
     }

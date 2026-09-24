@@ -68,9 +68,9 @@ int mk_check_permissions(void) {
         // Straight to the list that still misses the app.
         mk_open_privacy(!input ? "ListenEvent" : "Accessibility");
     }
-    fprintf(stderr, "[agent-belt] faltam permissões em Ajustes do Sistema > Privacidade e Segurança: %s%s%s\n",
-            input ? "" : "Monitoramento de Entrada", !input && !accessibility ? ", " : "",
-            accessibility ? "" : "Acessibilidade");
+    fprintf(stderr, "[agent-belt] missing permissions in System Settings > Privacy & Security: %s%s%s\n",
+            input ? "" : "Input Monitoring", !input && !accessibility ? ", " : "",
+            accessibility ? "" : "Accessibility");
     return -1;
 }
 
@@ -118,23 +118,23 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
             NSString *trimmed = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
             if ([trimmed hasPrefix:@"pid = "]) pid = [trimmed substringFromIndex:6];
         }
-        if (!agent.length) printf("daemon:       não instalado (rode ./install.sh)\n");
-        else if (pid) printf("daemon:       rodando (pid %s)\n", pid.UTF8String);
+        if (!agent.length) printf("daemon:       not installed (run ./install.sh)\n");
+        else if (pid) printf("daemon:       running (pid %s)\n", pid.UTF8String);
         else printf("daemon:       instalado, mas parado\n");
 
         NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/agent-belt.log"];
         NSString *log = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
-        NSRange ready = [log rangeOfString:@"] pronto" options:NSBackwardsSearch];
-        NSRange missing = [log rangeOfString:@"] faltam permissões" options:NSBackwardsSearch];
+        NSRange ready = [log rangeOfString:@"] ready" options:NSBackwardsSearch];
+        NSRange missing = [log rangeOfString:@"] missing permissions" options:NSBackwardsSearch];
         if (missing.location != NSNotFound && (ready.location == NSNotFound || missing.location > ready.location)) {
             NSString *line = [[log substringFromIndex:missing.location + 2] componentsSeparatedByString:@"\n"].firstObject;
-            printf("permissões:   %s\n", line.UTF8String);
+            printf("permissions:  %s\n", line.UTF8String);
         } else {
-            printf("permissões:   %s\n", ready.location != NSNotFound ? "ok" : "desconhecido (daemon ainda não iniciou)");
+            printf("permissions:  %s\n", ready.location != NSNotFound ? "ok" : "unknown (the daemon has not started yet)");
         }
 
         NSUInteger devices = MKDeviceCount(vendor_id, product_id);
-        printf("dispositivo:  %s (VID=0x%04x PID=0x%04x)\n", devices ? "conectado" : "não encontrado", vendor_id, product_id);
+        printf("keypad:       %s (VID=0x%04x PID=0x%04x)\n", devices ? "connected" : "not found", vendor_id, product_id);
 
         NSDictionary *query = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
@@ -149,16 +149,16 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
         // Keychain grant shows up here as the system prompt, not mid-dictation.
         char *secret = keychain ? mk_keychain_secret("agent-belt", "deepgram") : NULL;
         if (secret) { memset(secret, 0, strlen(secret)); free(secret); }
-        printf("deepgram:     %s\n", secret ? "chave no Keychain, legível pelo app"
-                                    : keychain ? "chave no Keychain, mas o app não tem acesso (rode status de novo e autorize)"
-                                    : getenv(key_env) ? "só no ambiente do terminal (o LaunchAgent não vê)" : "sem chave");
+        printf("deepgram:     %s\n", secret ? "key in the Keychain, readable by the app"
+                                    : keychain ? "key in the Keychain, but the app has no access (run status again and allow it)"
+                                    : getenv(key_env) ? "only in the terminal environment (the LaunchAgent does not see it)" : "no key");
 
         printf("config:       %s/.config/agent-belt/config.json\n", NSHomeDirectory().UTF8String);
         printf("log:          %s\n", logPath.UTF8String);
         NSArray *lines = [log componentsSeparatedByString:@"\n"];
         NSUInteger shown = 0;
         for (NSInteger i = (NSInteger)lines.count - 1; i >= 0 && shown < 5; i--) if ([lines[i] length]) shown++;
-        if (shown) printf("\núltimas linhas do log:\n");
+        if (shown) printf("\nlast log lines:\n");
         NSUInteger start = lines.count;
         for (NSUInteger found = 0; start > 0 && found < shown; ) if ([lines[--start] length]) found++;
         for (NSUInteger i = start; i < lines.count; i++) if ([lines[i] length]) printf("  %s\n", [lines[i] UTF8String]);

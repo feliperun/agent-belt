@@ -257,7 +257,7 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
     NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
     NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
     NSDictionary *result = orca ? MKOrca(@[@"terminal", @"list", @"--limit", @"100"]) : nil;
-    if (orca && !result) fprintf(stderr, "[agent-belt] Orca: CLI indisponível; confira AGENT_BELT_ORCA_CLI\n");
+    if (orca && !result) fprintf(stderr, "[agent-belt] Orca: its CLI is unavailable; check AGENT_BELT_ORCA_CLI\n");
     for (NSDictionary *terminal in MKArray(result[@"terminals"])) {
         if (!MKLiveTerminal(terminal)) continue;
         NSString *handle = terminal[@"handle"];
@@ -455,7 +455,7 @@ static void MKRestoreWindows(NSRunningApplication *app) {
 }
 
 static BOOL MKFocusFailed(MKAgentTarget *target, const char *step) {
-    fprintf(stderr, "[agent-belt] %s: falhou em %s\n", target.label.UTF8String, step);
+    fprintf(stderr, "[agent-belt] %s: could not %s\n", target.label.UTF8String, step);
     return NO;
 }
 
@@ -465,7 +465,7 @@ static BOOL MKFocus(MKAgentTarget *target) {
         MKRestoreWindows(target.app);
         if (target.terminal && !MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal]))
             return MKFocusFailed(target, "orca terminal switch");
-        if (!MKBringToFront(target.app)) return MKFocusFailed(target, "trazer o app para frente");
+        if (!MKBringToFront(target.app)) return MKFocusFailed(target, "bring the app forward");
         if (!MKWaitFrontmost(target.app)) return MKFocusFailed(target, "esperar o app ficar em primeiro plano");
         return YES;
     }
@@ -476,7 +476,7 @@ static BOOL MKFocus(MKAgentTarget *target) {
     if (AXUIElementPerformAction((__bridge AXUIElementRef)window, kAXRaiseAction) != kAXErrorSuccess) return NO;
     if ([target.bundle isEqual:@"com.anthropic.claudefordesktop"]) {
         id code = MKFindCodeControl(window);
-        if (!code) { fprintf(stderr, "[agent-belt] Claude: modo Code não exposto pela acessibilidade\n"); return NO; }
+        if (!code) { fprintf(stderr, "[agent-belt] Claude: Code mode is not exposed to Accessibility\n"); return NO; }
         if (!MKBool(MKAttr(code, kAXValueAttribute)) && !MKPress(code)) return NO;
     }
     if (target.control && !MKPress(target.control)) return NO;
@@ -561,13 +561,13 @@ static NSUInteger MKPickIndex(NSArray<MKAgentTarget *> *ring, NSString *lastKey,
 }
 
 static void MKShowHud(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
-    NSString *state = @[@"", @"trabalhando", @"terminou", @"aguardando você"][target.state];
+    NSString *state = @[@"", @"working", @"finished", @"waiting for you"][target.state];
     NSUInteger others = 0;
     for (MKAgentTarget *other in ring)
         if (other != target && other.state >= MKStateDone) others++;
     NSMutableString *detail = [NSMutableString stringWithFormat:@"%lu/%lu", (unsigned long)target.position, (unsigned long)ring.count];
     if (state.length) [detail appendFormat:@" · %@", state];
-    if (others) [detail appendFormat:@" · mais %lu pedindo atenção", (unsigned long)others];
+    if (others) [detail appendFormat:@" · %lu more asking for attention", (unsigned long)others];
     mk_hud_show(MKTitleOf(target).UTF8String, detail.UTF8String, (int)target.state);
 }
 // Focus succeeded: remember it, clear "finished", refresh HUD-less state.
@@ -614,11 +614,11 @@ static NSArray<MKAgentTarget *> *MKRefreshRing(BOOL desktop) {
 
 static int MKCycle(BOOL desktop) {
     if (!AXIsProcessTrusted()) {
-        fprintf(stderr, "[agent-belt] alternar agents requer permissão de Accessibility\n");
+        fprintf(stderr, "[agent-belt] switching agents needs the Accessibility permission\n");
         return -1;
     }
     MKRefreshRing(desktop);
-    if (!mk_ring.count) { fprintf(stderr, "[agent-belt] nenhum terminal com coding agent (Orca ou work)\n"); return -1; }
+    if (!mk_ring.count) { fprintf(stderr, "[agent-belt] no terminal with a coding agent (Orca or agb sessions)\n"); return -1; }
     NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
     NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
@@ -628,7 +628,7 @@ static int MKCycle(BOOL desktop) {
         MKShowHud(target, mk_ring);
         return 0;
     }
-    fprintf(stderr, "[agent-belt] não consegui focar nenhuma sessão (veja as falhas acima)\n");
+    fprintf(stderr, "[agent-belt] could not focus any session (see the failures above)\n");
     return -1;
 }
 
@@ -708,7 +708,7 @@ static void MKMenuPress(void) {
     case MKMenuShow: {
         if (!AXIsProcessTrusted()) { fprintf(stderr, "[agent-belt] menu de agents requer Accessibility\n"); return; }
         mk_menu_ring = MKRefreshRing(NO);
-        if (!mk_menu_ring.count) { mk_hud_show("Nenhum coding agent", "Orca ou work", 0); return; }
+        if (!mk_menu_ring.count) { mk_hud_show("No coding agents", "Orca or agb sessions", 0); return; }
         NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
         mk_menu_selected = MKPickIndex(mk_menu_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
         mk_menu_visible = YES;
@@ -733,7 +733,7 @@ static void MKMenuPress(void) {
         MKAgentTarget *target = mk_menu_ring[mk_menu_selected];
         MKMenuClose();
         if (MKFocus(target)) MKOpened(target, mk_menu_ring);
-        else mk_hud_show(MKTitleOf(target).UTF8String, "não consegui abrir; a sessão ainda existe?", 3);
+        else mk_hud_show(MKTitleOf(target).UTF8String, "could not open it; is the session still there?", 3);
         return;
     }
     }
@@ -798,11 +798,11 @@ int mk_agents_command(int mode, int desktop) {
         MKDetectWaiting(targets);
         MKEnrich(targets);
         for (MKAgentTarget *target in targets)
-            printf("%-12s %s\n             %s\n", [@[@"ocioso", @"trabalhando", @"terminou", @"aguardando"][target.state] UTF8String],
+            printf("%-12s %s\n             %s\n", [@[@"idle", @"working", @"finished", @"waiting"][target.state] UTF8String],
                    MKTitleOf(target).UTF8String, target.detail.UTF8String);
-        if (!targets.count) printf("Nenhum terminal com coding agent (Orca ou work).\n");
+        if (!targets.count) printf("No terminal with a coding agent (Orca or agb sessions).\n");
         NSString *quotas = MKQuotaLine();
-        printf("\ncotas: %s\n", quotas ? quotas.UTF8String : "indisponíveis");
+        printf("\nquotas: %s\n", quotas ? quotas.UTF8String : "unavailable");
         return 0;
     }
 }
@@ -890,7 +890,7 @@ static void MKNotifyAway(NSArray<MKAgentTarget *> *ring) {
         NSString *name = MKEnrichedName(target);
         NSTask *task = [NSTask new]; // no timeout: a text message takes ~3 s
         task.executableURL = [NSURL fileURLWithPath:ford];
-        task.arguments = @[[NSString stringWithFormat:@"🔴 %@ está esperando uma decisão sua há %.0f min", name,
+        task.arguments = @[[NSString stringWithFormat:@"🔴 %@ has been waiting for your decision for %.0f min", name,
                             (now - since[target.key].doubleValue) / 60]];
         task.standardOutput = task.standardError = [NSFileHandle fileHandleWithNullDevice];
         if ([task launchAndReturnError:nil]) fprintf(stderr, "[agent-belt] aviso no WhatsApp: %s\n", name.UTF8String);
@@ -920,86 +920,10 @@ void mk_agents_monitor(void) {
     dispatch_resume(timer);
 }
 
-// ---------------------------------------------------------------- new agents by voice
+// ---------------------------------------------------------------- new agents
 
-// Held push-to-talk while the agent menu is up: the transcript is a command such
-// as "crie um agente no windows com codex no coreum para investigar o login".
-// A small model turns it into work's arguments; a new Orca terminal runs work.
-
-static NSData *MKRunLong(NSString *path, NSArray<NSString *> *arguments, double timeout) {
-    if (!path) return nil;
-    NSTask *task = [NSTask new];
-    task.executableURL = [NSURL fileURLWithPath:path];
-    task.arguments = arguments;
-    NSMutableDictionary *environment = [NSProcessInfo.processInfo.environment mutableCopy];
-    if (!environment[@"LANG"]) environment[@"LANG"] = @"en_US.UTF-8";
-    task.environment = environment;
-    NSPipe *pipe = [NSPipe pipe];
-    task.standardOutput = pipe;
-    task.standardError = [NSFileHandle fileHandleWithNullDevice];
-    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
-    if (![task launchAndReturnError:nil]) return nil;
-    __block NSData *output = nil;
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        output = [pipe.fileHandleForReading readDataToEndOfFile];
-        dispatch_semaphore_signal(done);
-    });
-    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC))) != 0) {
-        [task terminate];
-        return nil;
-    }
-    [task waitUntilExit];
-    return task.terminationStatus == 0 ? output : nil;
-}
-
-static NSArray<NSString *> *MKWorkHosts(void) {
-    NSString *config = [NSString stringWithContentsOfFile:[NSHomeDirectory() stringByAppendingPathComponent:@".config/work/hosts.conf"]
-                                                 encoding:NSUTF8StringEncoding error:nil];
-    NSMutableArray *hosts = [NSMutableArray array];
-    for (NSString *line in [config componentsSeparatedByString:@"\n"]) {
-        NSArray *words = [line componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if (words.count >= 2 && [words[0] isEqual:@"host"]) [hosts addObject:words[1]];
-    }
-    return hosts;
-}
-
-static NSArray<NSString *> *MKLocalRepos(void) {
-    NSMutableOrderedSet *repos = [NSMutableOrderedSet orderedSet];
-    for (NSString *dir in @[@"dev/micromed", @"dev/frb", @"dev"]) {
-        NSString *root = [NSHomeDirectory() stringByAppendingPathComponent:dir];
-        for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:nil])
-            if ([NSFileManager.defaultManager fileExistsAtPath:[[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@".git"]])
-                [repos addObject:name];
-    }
-    return repos.array;
-}
-
-static NSString *MKShellQuote(NSString *value) {
-    return [NSString stringWithFormat:@"'%@'", [value stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
-}
-
-// Pure: the model's reply (JSON, possibly wrapped in prose) to a work command
-// agb new line, or nil with a reason. Hosts must be known; task must be a slug.
-static NSString *MKWorkCommand(NSString *reply, NSArray<NSString *> *hosts, NSString **why, NSDictionary **parsed) {
-    NSRange open = [reply rangeOfString:@"{"], close = [reply rangeOfString:@"}" options:NSBackwardsSearch];
-    if (open.location == NSNotFound || close.location == NSNotFound || close.location < open.location) { *why = @"não entendi o comando"; return nil; }
-    NSData *json = [[reply substringWithRange:NSMakeRange(open.location, close.location - open.location + 1)] dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *spec = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
-    if (![spec isKindOfClass:NSDictionary.class]) { *why = @"não entendi o comando"; return nil; }
-    if (parsed) *parsed = spec;
-    NSString *host = MKString(spec[@"host"]), *agent = MKString(spec[@"agent"]).lowercaseString;
-    NSString *repo = MKString(spec[@"repo"]), *task = MKString(spec[@"task"]), *prompt = MKString(spec[@"prompt"]);
-    if (host.length && ![hosts containsObject:host]) { *why = [NSString stringWithFormat:@"máquina desconhecida: %@", host]; return nil; }
-    if (![@[@"claude", @"codex", @"shell"] containsObject:agent]) agent = @"claude";
-    if ([task rangeOfString:@"^[A-Za-z0-9._-]{1,40}$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"faltou um nome curto para a tarefa"; return nil; }
-    if (!repo.length || [repo rangeOfString:@"^[A-Za-z0-9._-]+$" options:NSRegularExpressionSearch].location == NSNotFound) { *why = @"diga em qual repositório"; return nil; }
-    NSMutableString *command = [NSMutableString stringWithFormat:@"agb new --task %@ --repo %@", task, repo];
-    if (host.length) [command appendFormat:@" --host %@", host];
-    [command appendFormat:@" --agent %@", agent];
-    if (prompt.length) [command appendFormat:@" --prompt %@", MKShellQuote(prompt)];
-    return command;
-}
+// A new agent's `agb new` runs in a new Orca terminal (Terminal without Orca).
+// The create-agent panel (src/create_panel.m) decides what to run.
 
 static void MKOpenTerminal(NSString *command, NSString *title) {
     NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
@@ -1017,47 +941,8 @@ static void MKOpenTerminal(NSString *command, NSString *title) {
     [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:script]];
 }
 
-static int MKVoiceCommand(NSString *text, BOOL dryRun) {
-    NSArray *hosts = MKWorkHosts(), *repos = MKLocalRepos();
-    mk_hud_show("Entendendo o comando…", text.UTF8String, 1);
-    NSString *instructions = [NSString stringWithFormat:
-        @"Converta o pedido de voz abaixo nos argumentos de uma ferramenta que cria uma sessão de coding agent. "
-         "Responda SOMENTE um objeto JSON, sem texto fora dele, com as chaves:\n"
-         "host: uma destas máquinas, ou null para esta máquina (%@). \"windows\" costuma ser a que tem windows no nome; \"mac\"/\"aqui\"/\"local\" é null.\n"
-         "agent: \"claude\", \"codex\" ou \"shell\" (claude se não disser).\n"
-         "repo: o nome do repositório; prefira um destes quando parecer o mesmo (%@); null se não disser.\n"
-         "task: slug curto em minúsculas com hífens (até 30 caracteres) que resuma a tarefa.\n"
-         "prompt: a instrução para o agente, em português, reescrita com clareza, sem mencionar máquina/agente/repositório.\n\n"
-         "Pedido: %@", [hosts componentsJoinedByString:@", "], [repos componentsJoinedByString:@", "], text];
-    NSData *reply = MKRunLong(MKToolPath(@"claude", @"AGENT_BELT_CLAUDE"),
-                              @[@"-p", @"--model", @"haiku", @"--output-format", @"text", instructions], 90);
-    NSString *why = nil;
-    NSDictionary *spec = nil;
-    NSString *command = reply ? MKWorkCommand([[NSString alloc] initWithData:reply encoding:NSUTF8StringEncoding] ?: @"", hosts, &why, &spec) : nil;
-    if (!reply) why = @"o claude não respondeu (claude -p)";
-    if (!command) {
-        fprintf(stderr, "[agent-belt] comando de voz recusado: %s\n", why.UTF8String);
-        mk_hud_show([@"Não criei: " stringByAppendingString:why].UTF8String, text.UTF8String, 3);
-        return -1;
-    }
-    if (dryRun) { printf("%s\n", command.UTF8String); return 0; }
-    NSString *host = MKString(spec[@"host"]).length ? spec[@"host"] : @"este Mac";
-    NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", spec[@"task"], spec[@"agent"] ?: @"claude", host];
-    fprintf(stderr, "[agent-belt] novo agente: %s\n", command.UTF8String);
-    mk_hud_show(title.UTF8String, (MKString(spec[@"prompt"]) ?: text).UTF8String, 1);
-    MKOpenTerminal(command, MKString(spec[@"task"]));
-    return 0;
-}
-
 // The create-agent panel (src/create_panel.m) opens its `agb new` the same way.
 void mk_open_terminal(NSString *command, NSString *title) { MKOpenTerminal(command, title); }
 
-void mk_agents_voice_command(const char *text) {
-    NSString *copy = @(text);
-    MKAgentsAsync(^{ MKVoiceCommand(copy, NO); });
-}
-
-// `agb new [--dry-run] <pedido>`: the same path from a terminal or another agent.
-int mk_agents_new(const char *text, int dry_run) {
-    @autoreleasepool { return MKVoiceCommand(@(text), dry_run != 0); }
-}
+// Push-to-talk with the agent menu open: the words go to the create panel.
+void mk_agents_voice_command(const char *text) { mk_create_panel_show(text); }

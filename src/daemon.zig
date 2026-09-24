@@ -30,7 +30,7 @@ const Daemon = struct {
         if (action == .none) return;
         daemon.handlePushToTalk(.{ .key = 6, .pressed = action == .start }) catch |err| {
             macos.setStatus(.failed);
-            std.debug.print("[agent-belt] erro: {s}\n", .{@errorName(err)});
+            std.debug.print("[agent-belt] error: {s}\n", .{@errorName(err)});
         };
     }
 
@@ -48,7 +48,7 @@ const Daemon = struct {
         const daemon: *Daemon = @ptrCast(@alignCast(context));
         daemon.handleEvent(event) catch |err| {
             macos.setStatus(.failed);
-            std.debug.print("[agent-belt] erro: {s}\n", .{@errorName(err)});
+            std.debug.print("[agent-belt] error: {s}\n", .{@errorName(err)});
         };
     }
 
@@ -83,7 +83,7 @@ const Daemon = struct {
             if (self.command) macos.agentsMenuClose();
             macos.setStatus(if (self.command) .command else .recording);
             if (self.config.sounds) macos.playCue(.start);
-            std.debug.print("[agent-belt] GRAVANDO — solte a tecla para transcrever\n", .{});
+            std.debug.print("[agent-belt] RECORDING, release the key to transcribe\n", .{});
             return;
         }
 
@@ -114,28 +114,28 @@ const Daemon = struct {
             .smart_format = self.config.deepgram_smart_format,
             .mip_opt_out = self.config.deepgram_mip_opt_out,
         };
-        std.debug.print("[agent-belt] TRANSCRIVENDO...\n", .{});
+        std.debug.print("[agent-belt] TRANSCRIBING...\n", .{});
         const text = try dg.transcribe(wav);
         defer self.allocator.free(text);
         if (text.len == 0) {
-            std.debug.print("[agent-belt] nenhuma fala detectada\n", .{});
+            std.debug.print("[agent-belt] no speech detected\n", .{});
             return;
         }
         try macos.dismissOverlay();
         if (self.command) {
-            std.debug.print("[agent-belt] COMANDO: {s}\n", .{text});
+            std.debug.print("[agent-belt] VOICE COMMAND: {s}\n", .{text});
             try macos.voiceCommand(self.allocator, text);
             return;
         }
         try macos.insertText(text);
-        std.debug.print("[agent-belt] INSERIDO ({d} caracteres)\n", .{text.len});
+        std.debug.print("[agent-belt] INSERTED ({d} characters)\n", .{text.len});
     }
 };
 
 pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     macos.trimLog();
     macos.singleInstance() catch |err| {
-        std.debug.print("[agent-belt] outro daemon já está rodando (launchctl print gui/$UID/com.frb.agentbelt)\n", .{});
+        std.debug.print("[agent-belt] another daemon is already running (launchctl print gui/$UID/com.frb.agentbelt)\n", .{});
         return err;
     };
     macos.checkPermissions() catch |err| {
@@ -146,7 +146,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     macos.agentsMonitor();
     macos.updaterStart(@import("build_options").version);
     if (config.led) macos.ledStart(config.vendor_id, config.product_id);
-    std.debug.print("[agent-belt] pronto: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
+    std.debug.print("[agent-belt] ready: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
     daemon.create = .{ .io = io, .gpa = allocator, .config = &daemon.config };
     // "system" leaves the knob as the device's volume control.

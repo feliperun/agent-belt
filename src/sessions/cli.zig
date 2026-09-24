@@ -102,7 +102,7 @@ fn cmdIntent(env: Env, args: []const []const u8) !u8 {
     return print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(plan, .{})}));
 }
 
-fn reposOf(ctx: sys.Ctx, h: hosts.Host) ?[]const u8 {
+pub fn reposOf(ctx: sys.Ctx, h: hosts.Host) ?[]const u8 {
     const reg = loadRegistry(ctx) catch return null;
     if (reg.isSelf(h)) {
         const names = local.listRepos(ctx) catch return null;
@@ -275,7 +275,15 @@ fn repoExists(ctx: sys.Ctx, host: ?hosts.Host, name: []const u8) bool {
 fn cmdNew(env: Env, args: []const []const u8) !u8 {
     const ctx = env.ctx;
     const reg = try loadRegistry(ctx);
-    if (args.len > 0 and isNaturalLanguage(args[0])) return newFromWords(env, reg, try std.mem.join(ctx.gpa, " ", args));
+    if (args.len > 0 and isNaturalLanguage(args[0])) {
+        // Flags are not words of the request.
+        var words: std.ArrayList([]const u8) = .empty;
+        var flags = Plan{};
+        for (args) |a| {
+            if (std.mem.eql(u8, a, "--dry-run")) flags.dry_run = true else if (std.mem.eql(u8, a, "--detach") or std.mem.eql(u8, a, "--no-attach")) flags.no_attach = true else if (std.mem.eql(u8, a, "-d")) flags.detach_others = true else try words.append(ctx.gpa, a);
+        }
+        return newFromWords(env, reg, try std.mem.join(ctx.gpa, " ", words.items), flags);
+    }
     const plan = parseNew(ctx, reg, args, repoExists) catch |err| {
         say("agb new: {s}", .{switch (err) {
             error.UnknownHost => "unknown machine (see: agb hosts)",
@@ -379,71 +387,38 @@ fn parseRun(args: []const []const u8) !Plan {
 
 /// Sentences like "create an agent on windows with codex in coreum to …":
 /// a small model turns them into a plan, checked like any other input.
-fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8) !u8 {
+/// `agb new crie um agente no windows com codex …`: the same detection as the
+/// create-agent panel (agb _intent, backed by Jev).
+fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8, flags: Plan) !u8 {
     const ctx = env.ctx;
-    const claude = sys.which(ctx, "claude") orelse {
-        say("agb: understanding a sentence needs claude (claude -p); use: agb new <agent> <machine> <repo> <what to do>", .{});
+    const detected = intent.detect(ctx, reg, text, .{}) catch |err| {
+        say("agb: could not read that request ({s}); use: agb new <agent> <machine> <repo> <what to do>", .{@errorName(err)});
         return 1;
     };
-    var names: std.ArrayList(u8) = .empty;
-    for (reg.hosts) |h| try names.appendSlice(ctx.gpa, try ctx.fmt("{s}, ", .{h.name}));
-    const repos = try std.mem.join(ctx.gpa, ", ", local.listRepos(ctx) catch &.{});
-    const instructions = try ctx.fmt(
-        \\Turn the request below into the arguments of a tool that starts a coding agent session.
-        \\Answer ONLY a JSON object with the keys:
-        \\host: one of these machines, or null for this machine ({s}). "windows" is usually the one with windows in its name; "mac"/"here"/"local" is null.
-        \\agent: "claude", "codex" or "shell" (claude if not said).
-        \\repo: the repository name; prefer one of these when it looks the same ({s}); null if not said.
-        \\task: a short lowercase slug with hyphens (up to 30 characters) summarizing the task.
-        \\prompt: the instruction for the agent, in the request's language, rewritten clearly, without mentioning machine/agent/repository.
-        \\
-        \\Request: {s}
-    , .{ names.items, repos, text });
-    const out = sys.run(ctx, &.{ claude, "-p", "--model", "haiku", "--output-format", "text", instructions }, null);
-    if (!out.ok) {
-        say("agb: claude -p did not answer", .{});
-        return 1;
-    }
-    const plan = planFromJson(ctx, reg, out.stdout) catch |err| {
+    var plan = planFromIntent(reg, detected) catch |err| {
         say("agb: could not turn that into a session ({s})", .{@errorName(err)});
         return 1;
     };
+    plan.dry_run = flags.dry_run;
+    plan.no_attach = flags.no_attach;
+    plan.detach_others = flags.detach_others;
     say("agb: {s} on {s} in {s}: {s}", .{ @tagName(plan.agent), if (plan.host) |h| h.name else "this machine", plan.repo orelse "-", plan.task.? });
     return execute(env, plan);
 }
 
-pub fn planFromJson(ctx: sys.Ctx, reg: hosts.Registry, reply: []const u8) !Plan {
-    const open = std.mem.indexOfScalar(u8, reply, '{') orelse return error.NoJson;
-    const close = std.mem.lastIndexOfScalar(u8, reply, '}') orelse return error.NoJson;
-    if (close < open) return error.NoJson;
-    const parsed = try std.json.parseFromSlice(std.json.Value, ctx.gpa, reply[open .. close + 1], .{});
-    if (parsed.value != .object) return error.NoJson;
-    const o = parsed.value.object;
-    var plan = Plan{};
-    if (str(o.get("host"))) |h| {
-        if (!isHereWord(h)) {
-            const host = reg.find(h) orelse return error.UnknownHost;
-            plan.host = if (reg.isSelf(host)) null else host;
-        }
-    }
-    if (str(o.get("agent"))) |a| plan.agent = local.parseAgent(a) orelse .claude;
-    if (str(o.get("repo"))) |r| {
-        if (!sys.validRepo(r)) return error.UnsafeRepo;
-        plan.repo = r;
-    }
-    const task = str(o.get("task")) orelse return error.NoTask;
-    if (!sys.validSlug(task)) return error.UnsafeTask;
-    plan.task = task;
-    plan.prompt = str(o.get("prompt"));
+/// A detected request as a session plan, checked like typed arguments: a known
+/// machine, a repo and task that are safe as names.
+pub fn planFromIntent(reg: hosts.Registry, detected: intent.Plan) !Plan {
+    var plan = Plan{ .agent = local.parseAgent(detected.agent) orelse .claude };
+    const host = reg.find(detected.host) orelse return error.UnknownHost;
+    plan.host = if (reg.isSelf(host)) null else host;
+    const repo = detected.repo orelse return error.NoRepo;
+    if (!sys.validRepo(repo)) return error.UnsafeRepo;
+    plan.repo = repo;
+    if (!sys.validSlug(detected.task)) return error.UnsafeTask;
+    plan.task = detected.task;
+    plan.prompt = if (detected.prompt.len > 0) detected.prompt else null;
     return plan;
-}
-
-fn str(v: ?std.json.Value) ?[]const u8 {
-    const value = v orelse return null;
-    return switch (value) {
-        .string => |s| if (s.len > 0) s else null,
-        else => null,
-    };
 }
 
 // ---------------------------------------------------------------- listing
@@ -1020,9 +995,18 @@ test "humane agb new" {
     try std.testing.expect(isNaturalLanguage("crie"));
     try std.testing.expect(!isNaturalLanguage("codex"));
 
-    const plan = try planFromJson(ctx, reg, "ok {\"host\":\"felipe-windows\",\"agent\":\"codex\",\"repo\":\"coreum\",\"task\":\"login-bug\",\"prompt\":\"Look into it\"}");
+    const detected = intent.Plan{ .agent = "codex", .agent_confidence = 1, .host = "felipe-windows", .host_confidence = 1, .repo = "coreum", .repo_confidence = 1, .task = "login-bug", .prompt = "Look into it", .hosts = &.{}, .repos = &.{} };
+    const plan = try planFromIntent(reg, detected);
     try std.testing.expectEqualStrings("felipe-windows", plan.host.?.name);
+    try std.testing.expectEqual(local.Agent.codex, plan.agent);
     try std.testing.expectEqualStrings("login-bug", plan.task.?);
-    try std.testing.expectError(error.UnsafeRepo, planFromJson(ctx, reg, "{\"repo\":\"x; rm -rf ~\",\"task\":\"t\"}"));
-    try std.testing.expectError(error.UnknownHost, planFromJson(ctx, reg, "{\"host\":\"mars\",\"task\":\"t\"}"));
+    var unsafe = detected;
+    unsafe.repo = "x; rm -rf ~";
+    try std.testing.expectError(error.UnsafeRepo, planFromIntent(reg, unsafe));
+    var mars = detected;
+    mars.host = "mars";
+    try std.testing.expectError(error.UnknownHost, planFromIntent(reg, mars));
+    var here = detected;
+    here.host = "macbook-pro";
+    try std.testing.expect((try planFromIntent(reg, here)).host == null);
 }

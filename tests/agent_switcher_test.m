@@ -7,6 +7,7 @@ void mk_led_agents(int attention) { (void)attention; } // led.m
 void mk_menu_show(const char *const *l, const char *const *d, const int *t, int c, int s, const char *f, int k) { (void)l; (void)d; (void)t; (void)c; (void)s; (void)f; (void)k; }
 void mk_status_attention(int a) { (void)a; }
 void mk_menu_hide(void) {}
+void mk_create_panel_show(const char *t) { (void)t; } // create_panel.m
 const char *mk_update_line(void) { return NULL; }
 
 static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
@@ -92,17 +93,6 @@ int main(void) {
         assert(MKSessionTabGroup(@"Chat tabs"));
         assert(!MKSessionTabGroup(@"Período"));
         assert(!MKSessionTabGroup(@"Visualização de estatísticas"));
-
-        NSString *why = nil;
-        NSArray *hosts = @[@"macbook-pro", @"felipe-windows"];
-        assert([MKWorkCommand(@"ok: {\"host\":\"felipe-windows\",\"agent\":\"codex\",\"repo\":\"coreum\",\"task\":\"login-bug\",\"prompt\":\"Investigue o login d'hoje\"}", hosts, &why, NULL)
-                 isEqual:@"agb new --task login-bug --repo coreum --host felipe-windows --agent codex --prompt 'Investigue o login d'\\''hoje'"]);
-        assert([MKWorkCommand(@"{\"host\":null,\"agent\":\"CLAUDE\",\"repo\":\"x\",\"task\":\"t\",\"prompt\":\"\"}", hosts, &why, NULL) isEqual:@"agb new --task t --repo x --agent claude"]);
-        assert(!MKWorkCommand(@"{\"host\":\"marte\",\"repo\":\"x\",\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"marte"]);
-        assert(!MKWorkCommand(@"{\"repo\":null,\"task\":\"t\"}", hosts, &why, NULL) && [why containsString:@"repositório"]);
-        assert(!MKWorkCommand(@"{\"repo\":\"x\",\"task\":\"tem espaço\"}", hosts, &why, NULL));
-        assert(!MKWorkCommand(@"desculpe, não sei", hosts, &why, NULL));
-        assert(!MKWorkCommand(@"{\"repo\":\"x; rm -rf ~\",\"task\":\"t\"}", hosts, &why, NULL)); // no shell injection via repo
 
         assert(MKMenuDecide(NO, INFINITY) == MKMenuShow);
         assert(MKMenuDecide(NO, 0.1) == MKMenuShow);   // hidden: any press shows

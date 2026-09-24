@@ -79,7 +79,7 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
     if (std.mem.eql(u8, argv[1], "init")) {
         const cfg = config.Config{};
         try store.save(cfg);
-        std.debug.print("configuração criada em {s}\n", .{store.path});
+        std.debug.print("configuration written to {s}\n", .{store.path});
         return;
     }
 
@@ -149,13 +149,13 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
 
     if (std.mem.eql(u8, argv[1], "devices")) {
         const defaults = config.Config{};
-        std.debug.print("HID configurado: VID=0x{x}, PID=0x{x}\n", .{ defaults.vendor_id, defaults.product_id });
-        std.debug.print("(o suporte a descoberta de todos os HID será adicionado junto com o knob)\n", .{});
+        std.debug.print("HID device: VID=0x{x}, PID=0x{x}\n", .{ defaults.vendor_id, defaults.product_id });
+        std.debug.print("(listing every HID device is not supported)\n", .{});
         return;
     }
 
     if (std.mem.eql(u8, argv[1], "install")) {
-        std.debug.print("use ./install.sh na raiz do repositório (app assinado + LaunchAgent)\n", .{});
+        std.debug.print("run ./install.sh at the root of the repository (signed app + LaunchAgent)\n", .{});
         return;
     }
 
@@ -197,7 +197,7 @@ fn bindCommand(allocator: std.mem.Allocator, store: config.ConfigStore, args: []
         .text => .{ .action = "text", .value = value },
     };
     try store.save(cfg);
-    std.debug.print("tecla {s} configurada como {s}{s}\n", .{ args[0], args[1], if (args.len > 2) "" else "" });
+    std.debug.print("key {s} is now {s}\n", .{ args[0], args[1] });
 }
 
 fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 {
@@ -206,27 +206,28 @@ fn joinArgs(allocator: std.mem.Allocator, args: []const []const u8) ![]const u8 
 }
 
 fn usage() !void {
-    std.debug.print("agb (Agent Belt) — daemon de teclas HID configuráveis\n" ++
+    std.debug.print("agb (Agent Belt): a 6-key keypad, dictation and coding agents\n" ++
         "\n" ++
-        "uso:\n" ++
+        "usage:\n" ++
         "  agb init\n" ++
         "  agb bind <a-f> ptt\n" ++
         "  agb bind <0-5|a-f> agents [desktop]\n" ++
         "  agb bind <0-5|a-f> menu\n" ++
         "  agb bind <0-5|a-f> new_agent [tap-key]      hold: speak a new agent; tap: the key (return)\n" ++
         "  agb bind <0-5|a-f> key <[cmd+|shift+|alt+|ctrl+]escape|delete|return|tab|a-z|0-9|...>\n" ++
-        "  agb bind <a-f> command <comando>\n" ++
-        "  agb bind <a-f> script <comando-ou-script>\n" ++
-        "  agb bind <a-f> text <texto>\n" ++
+        "  agb bind <a-f> command <command>\n" ++
+        "  agb bind <a-f> script <command-or-script>\n" ++
+        "  agb bind <a-f> text <text>\n" ++
         "  agb bind <a-f> disabled\n" ++
         "  agb devices\n" ++
         "  agb status\n" ++
         "  agb version\n" ++
         "  agb update [tag]\n" ++
         "  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]\n" ++
+        "  agb panel [words] | --close              the create-agent panel\n" ++
         "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt | tm [name] | deploy <m…|--all>\n" ++
-        "  agb permissions   (abre Monitoramento de Entrada, Acessibilidade e Microfone)\n" ++
-        "  agb led <cor 0-7> <modo 0-5>   (1 vermelho … 7 roxo; 0 apagado, 1 fixo, 2 reativo, 5 branco)\n" ++
+        "  agb permissions   (opens Input Monitoring, Accessibility and Microphone)\n" ++
+        "  agb led <color 0-7> <mode 0-5>   (1 red … 7 purple; 0 off, 1 solid, 2 reactive, 5 white)\n" ++
         "  agb daemon\n" ++
         "  agb preview\n" ++
         "  agb agents <list|next|bottom> [desktop]\n" ++

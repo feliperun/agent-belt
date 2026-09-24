@@ -42,7 +42,7 @@
 └──────┴──────┴──────┘
 ```
 
-- **3, hold:** dictation (with the agent menu open, a voice command).
+- **3, hold:** dictation (with the agent menu open, the words go to the new-agent panel).
 - **4:** next agent, those waiting for you first.
 - **1:** agent menu. A tap moves, a double tap opens.
 - **5, hold:** a new agent by voice (below); a tap is Return, or creates the agent while its
@@ -97,7 +97,7 @@ agb uninstall    # remove the login item
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal window |
 
 The tray icon's menu lists the agent sessions of every machine (click one to attach in
-a terminal), **Novo agente…** (type the same words `agb new` takes), the log
+a terminal), **New agent…** (type the request; agent, machine, repo and the highlighted intent are detected as you type), the log
 (`%LOCALAPPDATA%\agent-belt\agent-belt.log`) and quit. The macropad and its lights are
 macOS-only for now.
 
@@ -111,7 +111,7 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 | Shortcut | Action |
 |---|---|
 | hold `Ctrl+Alt+D` | dictation: `pw-record` while held, Deepgram, typed with `wtype`, with the Mac's overlay (drawn by Quickshell; notifications without it) |
-| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **Novo agente…** in walker (or fuzzel, wofi, rofi) |
+| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **New agent…** in walker (or fuzzel, wofi, rofi) |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal |
 
 `agb waybar` feeds a Waybar custom module (`agb install` prints the snippet): 🦇 and the
@@ -165,7 +165,7 @@ All of it, including the `--detach` mode for scripts and other agents, is in
 
 ### New agent by voice
 
-Hold key 5 and say it: *"codex no windows no coreum para investigar o erro de login"*. A panel,
+Hold key 5 and say it: *"codex on windows in coreum to look into the login error"*. A panel,
 the dictation overlay's sibling, opens at the center of the screen with the words streaming in
 as you speak and what they mean: **agent**, **machine**, **repo** and the **intent** the agent
 will get as its first prompt. Release to review. Hold again to add or correct, type to fix a

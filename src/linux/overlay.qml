@@ -89,7 +89,7 @@ ShellRoot {
                 drawCore(ctx, t, morph)
                 ctx.fillStyle = root.ink(0.92)
                 ctx.font = "500 12px sans-serif"
-                ctx.fillText(root.mode === 1 ? "Ouvindo" : "Transcrevendo", 65, 30)
+                ctx.fillText(root.mode === 1 ? "Listening" : "Transcribing", 65, 30)
                 drawSignal(ctx, t, morph)
             }
 
@@ -154,7 +154,7 @@ ShellRoot {
 
             // Letters settle left to right, hold, then scramble again.
             function drawCipher(ctx, t, opacity) {
-                const phrase = "decifrando sua voz"
+                const phrase = "deciphering your voice"
                 const pool = "abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/\\|?!"
                 const cycle = 2.8, local = (t % cycle) / cycle
                 const count = phrase.length

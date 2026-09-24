@@ -50,7 +50,7 @@ pub const Client = struct {
         const parsed = std.json.parseFromSlice(Response, self.allocator, body, .{
             .ignore_unknown_fields = true,
         }) catch |err| {
-            std.log.err("resposta inválida do Deepgram (HTTP {d}, {d} bytes): {s}", .{
+            std.log.err("unexpected response from Deepgram (HTTP {d}, {d} bytes): {s}", .{
                 @intFromEnum(status), body.len, body[0..@min(body.len, 1024)],
             });
             return err;
