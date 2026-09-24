@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/feliperun/agent-belt/compare/v0.2.0...v0.3.0) (2026-09-24)
+
+
+### Features
+
+* push-to-talk to create an agent (key 5) ([dac0cf4](https://github.com/feliperun/agent-belt/commit/dac0cf43ec2e01a661bfb8a4627646e5cb4bf5ef))
+* **sessions:** real-time transcription and create-agent detection ([b563afd](https://github.com/feliperun/agent-belt/commit/b563afd4f7d2e636cb0089abe64879a59c634800))
+* Windows new-agent dialog detects the intent; the whole UI in English ([45a052e](https://github.com/feliperun/agent-belt/commit/45a052e1ae5ed8fb52f1f1048037d3be8377c986))
+
+
+### Bug Fixes
+
+* menu bar icon hidden behind the notch after a restart ([198c88e](https://github.com/feliperun/agent-belt/commit/198c88e02bd06de5b4d1a98745eaf248d53120fe))
+* mesh-keys.sh syntax (an apostrophe inside single quotes) ([fa4ac64](https://github.com/feliperun/agent-belt/commit/fa4ac64e76a2cc4cb332640a2f58295c6ecdb1f5))
+* **sessions:** new sessions renamed before attaching, 'can't find session' ([9480400](https://github.com/feliperun/agent-belt/commit/9480400d26a6c4f5bd7101b00c7aaad8ee361453))
+
 ## [0.2.0](https://github.com/feliperun/agent-belt/compare/v0.1.0...v0.2.0) (2026-09-24)
 
 
