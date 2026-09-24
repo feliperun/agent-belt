@@ -43,7 +43,9 @@ fn notify(ctx: sys.Ctx, title: []const u8, body: []const u8, timeout_ms: u32) vo
 /// Opens a terminal running agb with these arguments, detached from us.
 fn openTerminal(ctx: sys.Ctx, args: []const []const u8) void {
     const launcher: []const []const u8 = if (sys.which(ctx, "xdg-terminal-exec")) |t| &.{t} else if (ctx.getenv("TERMINAL")) |t| &.{ t, "-e" } else &.{ "foot", "-e" };
-    const argv = std.mem.concat(ctx.gpa, []const u8, &.{ launcher, &.{selfExe(ctx)}, args }) catch return;
+    // A failure keeps the window open long enough to read why.
+    const script = "\"$0\" \"$@\" || { printf '\\nagb ended with an error; Enter closes this window. '; read -r _; }";
+    const argv = std.mem.concat(ctx.gpa, []const u8, &.{ launcher, &.{ "sh", "-c", script, selfExe(ctx) }, args }) catch return;
     _ = std.process.spawn(ctx.io, .{ .argv = argv, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch |err|
         notify(ctx, "Agent Belt", ctx.fmt("could not open a terminal: {s}", .{@errorName(err)}) catch "", 5000);
 }
@@ -151,7 +153,14 @@ fn runtimeFile(ctx: sys.Ctx, name: []const u8) ![]const u8 {
 fn recorderPid(ctx: sys.Ctx) ?std.posix.pid_t {
     const text = sys.readFile(ctx, runtimeFile(ctx, "agb-ptt.pid") catch return null) orelse return null;
     const pid = std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, text, " \n"), 10) catch return null;
-    return if (sys.exists(ctx, ctx.fmt("/proc/{d}", .{pid}) catch return null)) pid else null;
+    // A recorder that exited but was not reaped yet is a zombie: gone for us.
+    // /proc files report size 0, so a sized read returns nothing; read what is there.
+    const file = std.Io.Dir.cwd().openFile(ctx.io, ctx.fmt("/proc/{d}/stat", .{pid}) catch return null, .{}) catch return null;
+    defer file.close(ctx.io);
+    var buf: [512]u8 = undefined;
+    const stat = buf[0 .. file.readStreaming(ctx.io, &.{&buf}) catch return null];
+    const state_at = (std.mem.lastIndexOfScalar(u8, stat, ')') orelse return null) + 2;
+    return if (state_at < stat.len and stat[state_at] != 'Z') pid else null;
 }
 
 fn pttStart(ctx: sys.Ctx) !u8 {

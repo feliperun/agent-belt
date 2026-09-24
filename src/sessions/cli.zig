@@ -107,9 +107,18 @@ fn remote(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) sys.Output {
 
 /// Hands this terminal to agb on another machine (attach, create).
 fn remoteHandOver(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) !u8 {
+    // Newer terminals name themselves (xterm-ghostty, xterm-kitty…) with terminfo
+    // the other machine lacks, and its tmux then refuses to open.
+    if (ctx.getenv("TERM")) |term| if (!knownTerm(term)) try ctx.env.put("TERM", "xterm-256color");
     const code = sys.interactive(ctx, try remoteArgv(ctx, host, true, args), null);
     if (code != 0) say("agb: {s} on {s} ended with code {d}", .{ args[0], host.name, code });
     return code;
+}
+
+fn knownTerm(term: []const u8) bool {
+    for ([_][]const u8{ "xterm", "xterm-256color", "screen", "screen-256color", "tmux", "tmux-256color", "vt100", "linux", "dumb" }) |t|
+        if (std.mem.eql(u8, term, t)) return true;
+    return false;
 }
 
 fn loadRegistry(ctx: sys.Ctx) !hosts.Registry {
