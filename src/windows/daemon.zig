@@ -410,6 +410,7 @@ const TIMER_DETECT = 7;
 
 const Detected = struct {
     arena: std.heap.ArenaAllocator,
+    text: []const u8 = "", // what was detected (and what the agent gets)
     plan: ?intent.Plan = null,
     failure: ?[]const u8 = null,
     summary: ?intent.Summary = null,
@@ -476,6 +477,7 @@ fn detectThread(dialog: w.HWND, serial: usize, text: []const u8) void {
     d.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
     var ctx = g_ctx;
     ctx.gpa = d.arena.allocator();
+    d.text = ctx.gpa.dupe(u8, text) catch "";
     if (hosts.load(ctx)) |reg| {
         d.plan = intent.detect(ctx, reg, text, .{}) catch |err| blk: {
             d.failure = @errorName(err);
@@ -525,11 +527,26 @@ fn showPlan() void {
     setText(g_hint, if (g_create_pending) "Naming the session…" else if (plan.repo == null) (g_ctx.fmt("{s}No repo: works in ~/agents · Enter creates · Esc cancels", .{session}) catch "") else (g_ctx.fmt("{s}Enter creates the agent · Esc cancels", .{session}) catch ""));
 }
 
+fn editText() []const u8 {
+    var buf: [2048]u16 = undefined;
+    const n = if (g_edit) |e| w.GetWindowTextW(e, &buf, buf.len) else 0;
+    const text = std.unicode.utf16LeToUtf8Alloc(g_ctx.gpa, buf[0..@intCast(n)]) catch return "";
+    return std.mem.trim(u8, text, " \r\n");
+}
+
 fn createFromPlan(dialog: w.HWND) void {
-    const d = g_detected orelse {
-        setText(g_hint, "Still reading the request…");
+    // The fields must come from the text in the box now; if it changed since
+    // the last detection, detect it and create when that arrives.
+    const current = editText();
+    const fresh = if (g_detected) |d| std.mem.eql(u8, std.mem.trim(u8, d.text, " \r\n"), current) else false;
+    if (!fresh) {
+        if (current.len == 0) return;
+        g_create_pending = true;
+        _ = w.SetTimer(dialog, TIMER_DETECT, 1, null);
+        setText(g_hint, "Reading…");
         return;
-    };
+    }
+    const d = g_detected.?;
     const plan = d.plan orelse return;
     const summary = (if (g_summary) |s| s.summary else null) orelse {
         g_create_pending = true; // created when the name arrives
@@ -541,7 +558,7 @@ fn createFromPlan(dialog: w.HWND) void {
     const title = g_ctx.fmt("{s} · {s} @ {s}", .{ task, plan.agent, plan.host }) catch "Agent Belt";
     // Without a repo the agent works in ~/agents/<task> (research).
     const repo_args: []const []const u8 = if (plan.repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
-    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", plan.prompt } }) catch return;
+    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", current } }) catch return;
     openTerminal(title, args);
     _ = w.DestroyWindow(dialog);
 }
@@ -587,6 +604,7 @@ fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) cal
             }
             g_summary = null;
             showPlan();
+            if (g_create_pending and d.plan != null) createFromPlan(hwnd); // waits for the name next
             return 0;
         },
         WM_SUMMARY => {

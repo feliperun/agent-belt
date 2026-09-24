@@ -32,6 +32,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout);
 @property(nonatomic, copy) NSString *base, *live;
 @property(nonatomic) BOOL recording, detecting;
 @property(nonatomic, strong) NSDictionary *plan;
+@property(nonatomic, copy) NSString *planned; // the text `plan` was detected from
 // The session name and one-line summary (agb _summary), for `summarized` text.
 @property(nonatomic, strong) NSDictionary *summary;
 @property(nonatomic, copy) NSString *summarized, *summarizing;
@@ -236,7 +237,9 @@ static NSRunningApplication *mk_previous_app;
             self.detecting = NO;
             if ([plan isKindOfClass:NSDictionary.class] && plan[@"agent"]) {
                 self.plan = plan;
+                self.planned = text;
                 [self scheduleSummary];
+                if (self.createWhenNamed) { [self confirm]; return; }
             }
             else if ([plan isKindOfClass:NSDictionary.class] && plan[@"error"])
                 self.hint.stringValue = [NSString stringWithFormat:@"could not understand: %@", plan[@"error"]];
@@ -354,8 +357,16 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSDictionary *plan = self.plan;
     NSString *agent = self.fixed[@"agent"] ?: plan[@"agent"], *host = self.fixed[@"host"] ?: plan[@"host"];
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
-    if (!plan) return; // still reading the request
     NSString *text = [self.fullText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!text.length) return;
+    // The fields must come from this very text: the last words may still be on
+    // their way through detection (and a prompt from older text is cut short).
+    if (!plan || ![self.planned isEqual:text]) {
+        self.createWhenNamed = YES;
+        [self detect];
+        [self refresh];
+        return;
+    }
     if (![self.summarized isEqual:text]) { // the name is on its way: create when it arrives
         self.createWhenNamed = YES;
         [self summarize];
@@ -371,8 +382,8 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     const BOOL hasRepo = [repo isKindOfClass:NSString.class] && [repo length];
     NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ %@ --task %@",
         q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(task)];
-    NSString *prompt = plan[@"prompt"];
-    if (prompt.length) [command appendFormat:@" --prompt %@", q(prompt)];
+    // The agent gets everything that is in the panel now, as said and typed.
+    [command appendFormat:@" --prompt %@", q(text)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];
     fprintf(stderr, "[agent-belt] new agent: %s\n", command.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus
@@ -421,6 +432,7 @@ void mk_create_panel_show(const char *text) {
             mk_view.base = seed;
             mk_view.live = @"";
             mk_view.plan = nil;
+            mk_view.planned = nil;
             mk_view.summary = nil;
             mk_view.summarized = nil;
             mk_view.createWhenNamed = NO;

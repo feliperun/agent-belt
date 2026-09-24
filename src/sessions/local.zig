@@ -151,7 +151,10 @@ pub fn resolveRepo(ctx: sys.Ctx, arg: []const u8) !?[]const u8 {
 /// Worktrees are new directories, and agents stop at a trust dialog waiting for
 /// Enter — which defeats an autonomous session. The repo was chosen by the
 /// user, so its worktree starts trusted. WORK_NO_AUTOTRUST=1 turns this off.
-fn trustClaude(ctx: sys.Ctx, project: []const u8) void {
+fn trustClaude(ctx: sys.Ctx, dir: []const u8) void {
+    // Claude Code keys projects by path with forward slashes, on Windows too
+    // ("C:/Users/…"): a backslash key is never matched and the trust dialog waits.
+    const project = if (sys.platform == .windows) (std.mem.replaceOwned(u8, ctx.gpa, dir, "\\", "/") catch return) else dir;
     const file = ctx.join(&.{ ctx.home(), ".claude.json" }) catch return;
     const bytes = sys.readFile(ctx, file) orelse return;
     var parsed = std.json.parseFromSlice(std.json.Value, ctx.gpa, bytes, .{}) catch return;
@@ -245,10 +248,16 @@ fn agentCommand(ctx: sys.Ctx, opts: CreateOptions, worktree: []const u8) ![]cons
             } else {
                 try cmd.appendSlice(ctx.gpa, " --dangerously-bypass-approvals-and-sandbox");
             }
-            // The first instruction becomes the agent's first prompt.
+            // The first instruction becomes the agent's first prompt. It goes
+            // through a file: tmux caps a command at 16 KB, and a long spoken
+            // request is longer.
             if (opts.prompt) |p| if (p.len > 0) {
-                try cmd.append(ctx.gpa, ' ');
-                try cmd.appendSlice(ctx.gpa, try sys.shQuote(ctx, p));
+                const dir = try ctx.join(&.{ ctx.home(), ".cache", "agent-belt", "prompts" });
+                std.Io.Dir.cwd().createDirPath(ctx.io, dir) catch {};
+                const file = try ctx.join(&.{ dir, try ctx.fmt("{s}.txt", .{opts.task}) });
+                sys.writeFileAtomic(ctx, file, p) catch return error.WorktreeFailed;
+                const shown = if (sys.platform == .windows) try sys.toMsys(ctx, file) else file;
+                try cmd.appendSlice(ctx.gpa, try ctx.fmt(" \"$(cat {s})\"", .{try sys.shQuote(ctx, shown)}));
             };
         },
         .shell => try cmd.appendSlice(ctx.gpa, if (sys.platform == .windows) "bash -l" else ctx.getenv("SHELL") orelse "/bin/sh"),
@@ -460,6 +469,11 @@ fn syncName(ctx: sys.Ctx, session: []const u8, agent: []const u8, task: []const 
     if (ctx.getenv("WORK_NO_RENAME")) |v| if (std.mem.eql(u8, v, "1")) return null;
     if (!(std.mem.startsWith(u8, agent, "claude") or std.mem.startsWith(u8, agent, "codex"))) return null;
     var slug = sessionSlug(ctx, title) catch return null;
+    // A title that names the program, not the work ("claude" before the
+    // conversation has a name, a shell): nothing to rename to.
+    for ([_][]const u8{ "claude", "codex", "Claude-Code", "claude-code", "bash", "zsh", "sh", "fish", "pwsh", "winpty", "tmux" }) |generic| {
+        if (std.ascii.eqlIgnoreCase(slug, generic)) return null;
+    }
     if (slug.len > 40) slug = slug[0..40];
     if (slug.len == 0 or std.mem.eql(u8, slug, task) or std.mem.eql(u8, slug, session)) return null;
     var next: []const u8 = slug;
