@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) void {
         gui.subsystem = .windows;
         for ([_]*std.Build.Step.Compile{ exe, gui }) |artifact| {
             artifact.root_module.addWin32ResourceFile(.{ .file = b.path("src/windows/agb.rc") });
-            for ([_][]const u8{ "user32", "gdi32", "shell32", "winmm", "advapi32" }) |lib| artifact.root_module.linkSystemLibrary(lib, .{});
+            for ([_][]const u8{ "user32", "gdi32", "gdiplus", "shell32", "winmm", "advapi32" }) |lib| artifact.root_module.linkSystemLibrary(lib, .{});
         }
         b.installArtifact(gui);
     }
@@ -99,7 +99,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const test_step = b.step("test", "Test the CLI, bindings, agent switching and overlay (GUI parts on macOS)");
-    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/audio_level.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(path), .target = target, .optimize = optimize,

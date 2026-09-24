@@ -48,6 +48,7 @@ fn windowsMain(init: std.process.Init, argv: []const []const u8) !void {
     if (std.mem.eql(u8, command, "daemon")) std.process.exit(try win.run(ctx, build_options.version));
     if (std.mem.eql(u8, command, "install")) std.process.exit(try win.install(ctx));
     if (std.mem.eql(u8, command, "uninstall")) std.process.exit(try win.uninstall(ctx));
+    if (std.mem.eql(u8, command, "preview")) std.process.exit(win.preview());
     return usageSessions();
 }
 

@@ -9,12 +9,15 @@ const cli = @import("../sessions/cli.zig");
 const hosts = @import("../sessions/hosts.zig");
 const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
+const audio_level = @import("../audio_level.zig");
+const overlay = @import("overlay.zig");
 
 const WM_TRAY = w.WM_APP + 1;
 const WM_PTT = w.WM_APP + 2; // wparam 1 start, 0 stop
 const WM_MENU = w.WM_APP + 3;
 const WM_SESSIONS = w.WM_APP + 4;
 const WM_OVERLAY = w.WM_APP + 5; // wparam: 0 hide, 1 recording, 2 transcribing
+const WM_PREVIEW = w.WM_APP + 6;
 
 const CMD_NEW = 1;
 const CMD_SESSIONS = 2;
@@ -27,7 +30,6 @@ var g_ctx: sys.Ctx = undefined;
 var g_version: []const u8 = "";
 var g_instance: ?w.HINSTANCE = null;
 var g_hwnd: ?w.HWND = null;
-var g_overlay: ?w.HWND = null;
 var g_dialog: ?w.HWND = null;
 var g_edit: ?w.HWND = null;
 var g_hook: ?w.HHOOK = null;
@@ -37,8 +39,6 @@ var g_ptt_down = false;
 var g_state = std.atomic.Value(u8).init(0); // overlay: 0 hidden, 1 recording, 2 transcribing
 var g_level = std.atomic.Value(u32).init(0); // microphone level, permille
 var g_recording = std.atomic.Value(bool).init(false);
-var g_phase: f64 = 0;
-var g_shown_at: u64 = 0;
 
 var g_rows_lock: std.Io.Mutex = .init;
 var g_rows: []cli.Row = &.{};
@@ -172,7 +172,7 @@ const Recorder = struct {
             if (hdr.dwFlags & w.WHDR_DONE == 0) continue;
             const data = hdr.lpData[0..hdr.dwBytesRecorded];
             self.pcm.appendSlice(g_ctx.gpa, data) catch {};
-            g_level.store(levelPermille(data), .release);
+            g_level.store(audio_level.permille(data), .release);
             hdr.dwFlags &= ~@as(w.DWORD, w.WHDR_DONE);
             hdr.dwBytesRecorded = 0;
             if (requeue) _ = w.waveInAddBuffer(h, hdr, @sizeOf(w.WAVEHDR));
@@ -189,22 +189,6 @@ const Recorder = struct {
         return wav(self.pcm.items);
     }
 };
-
-/// RMS of 16-bit samples on a voice-friendly dB scale, 0..1000.
-fn levelPermille(data: []const u8) u32 {
-    const samples = data.len / 2;
-    if (samples == 0) return 0;
-    var sum: f64 = 0;
-    var i: usize = 0;
-    while (i + 1 < data.len) : (i += 2) {
-        const s: f64 = @floatFromInt(std.mem.readInt(i16, data[i..][0..2], .little));
-        sum += s * s;
-    }
-    const rms = @sqrt(sum / @as(f64, @floatFromInt(samples))) / 32768.0;
-    const db = 20 * std.math.log10(@max(rms, 1e-6));
-    const level = std.math.clamp((db + 55) / 45, 0, 1);
-    return @intFromFloat(level * 1000);
-}
 
 fn wav(pcm: []const u8) []const u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -457,114 +441,40 @@ fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) cal
 
 // ---------------------------------------------------------------- overlay
 
-const overlay_w = 300;
-const overlay_h = 72;
+var g_preview_started: f64 = 0; // agb preview: a synthetic voice drives the overlay
 
 fn showOverlay(state: u8) void {
     g_state.store(state, .release);
-    const ov = g_overlay orelse return;
-    if (state == 0) {
-        _ = w.KillTimer(ov, 1);
-        _ = w.ShowWindow(ov, w.SW_HIDE);
-        return;
-    }
-    var area = w.RECT{};
-    _ = w.SystemParametersInfoW(w.SPI_GETWORKAREA, 0, &area, 0);
-    _ = w.SetWindowPos(ov, w.HWND_TOPMOST, area.right - overlay_w - 18, area.top + 18, overlay_w, overlay_h, w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
-    g_shown_at = w.GetTickCount64();
-    _ = w.SetTimer(ov, 1, 33, null);
-    _ = w.InvalidateRect(ov, null, 0);
-}
-
-fn paintOverlay(hwnd: w.HWND) void {
-    var ps: w.PAINTSTRUCT = undefined;
-    const screen = w.BeginPaint(hwnd, &ps) orelse return;
-    defer _ = w.EndPaint(hwnd, &ps);
-    const dc = w.CreateCompatibleDC(screen) orelse return;
-    defer _ = w.DeleteDC(dc);
-    const bmp = w.CreateCompatibleBitmap(screen, overlay_w, overlay_h) orelse return;
-    defer _ = w.DeleteObject(@ptrCast(bmp));
-    _ = w.SelectObject(dc, @ptrCast(bmp));
-
-    const bg = w.CreateSolidBrush(w.rgb(24, 27, 36)) orelse return;
-    defer _ = w.DeleteObject(@ptrCast(bg));
-    var all = w.RECT{ .right = overlay_w, .bottom = overlay_h };
-    _ = w.FillRect(dc, &all, bg);
-
-    const state = g_state.load(.acquire);
-    const level: f64 = @as(f64, @floatFromInt(g_level.load(.acquire))) / 1000.0;
-    const ink = w.rgb(150, 188, 245);
-
-    // Core: a ring that breathes with the voice.
-    const pen = w.CreatePen(w.PS_SOLID, 2, ink) orelse return;
-    defer _ = w.DeleteObject(@ptrCast(pen));
-    const old_pen = w.SelectObject(dc, @ptrCast(pen));
-    const r: c_int = @intFromFloat(11 + (if (state == 1) level * 5 else 2 * @sin(g_phase * 3)));
-    const hollow = w.CreateSolidBrush(w.rgb(24, 27, 36)) orelse return;
-    defer _ = w.DeleteObject(@ptrCast(hollow));
-    const old_brush = w.SelectObject(dc, @ptrCast(hollow));
-    _ = w.Ellipse(dc, 34 - r, 36 - r, 34 + r, 36 + r);
-    _ = w.SelectObject(dc, old_brush orelse @ptrCast(hollow));
-
-    _ = w.SetBkMode(dc, w.TRANSPARENT);
-    const title_font = w.CreateFontW(-17, 0, 0, 0, w.FW_SEMIBOLD, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
-    if (title_font) |f| _ = w.SelectObject(dc, @ptrCast(f));
-    _ = w.SetTextColor(dc, w.rgb(222, 229, 245));
-    var title_rect = w.RECT{ .left = 64, .top = 10, .right = overlay_w - 12, .bottom = 32 };
-    const title = if (state == 1) w.L("Ouvindo") else w.L("Transcrevendo");
-    _ = w.DrawTextW(dc, title.ptr, @intCast(title.len), &title_rect, w.DT_LEFT | w.DT_SINGLELINE | w.DT_VCENTER);
-    if (title_font) |f| _ = w.DeleteObject(@ptrCast(f));
-
-    if (state == 1) {
-        // The waveform follows the microphone: louder is taller and faster.
-        var pts: [64]w.POINT = undefined;
-        for (&pts, 0..) |*p, i| {
-            const u: f64 = @as(f64, @floatFromInt(i)) / 63.0;
-            const envelope = std.math.pow(f64, @sin(u * std.math.pi), 1.5);
-            const amp = (1.0 + level * 14.0) * envelope;
-            const y = 50.0 + amp * (@sin(u * 5.0 * std.math.pi - g_phase * (3 + level * 10)) * 0.75 + @sin(u * 11.0 * std.math.pi + g_phase * 2) * 0.25);
-            p.* = .{ .x = @intFromFloat(64 + u * 222), .y = @intFromFloat(y) };
-        }
-        _ = w.Polyline(dc, &pts, pts.len);
-    } else {
-        // While the text is on its way, glyphs keep deciphering into a phrase.
-        const phrase = "decifrando sua voz";
-        const pool = "abcdefghijklmnopqrstuvwxyz0123456789#$%&*+=<>/?!";
-        const cycle = 2.8;
-        const local = @mod(g_phase, cycle) / cycle;
-        const settled: f64 = if (local < 0.45) local / 0.45 * phrase.len else if (local < 0.75) phrase.len else (1 - (local - 0.75) / 0.25) * phrase.len;
-        const tick: u64 = @intFromFloat(g_phase * 18);
-        var line: [phrase.len]u16 = undefined;
-        for (phrase, 0..) |c, i| {
-            const fixed = @as(f64, @floatFromInt(i)) < settled or c == ' ';
-            line[i] = if (fixed) c else pool[(i *% 2654435761 ^ tick *% 40503) % pool.len];
-        }
-        const mono = w.CreateFontW(-15, 0, 0, 0, w.FW_NORMAL, 0, 0, 0, 1, 0, 0, 5, 1, w.L("Consolas"));
-        if (mono) |f| _ = w.SelectObject(dc, @ptrCast(f));
-        _ = w.SetTextColor(dc, w.rgb(180, 196, 230));
-        var rect = w.RECT{ .left = 64, .top = 38, .right = overlay_w - 12, .bottom = 62 };
-        _ = w.DrawTextW(dc, &line, line.len, &rect, w.DT_LEFT | w.DT_SINGLELINE | w.DT_VCENTER);
-        if (mono) |f| _ = w.DeleteObject(@ptrCast(f));
-    }
-    _ = w.SelectObject(dc, old_pen orelse @ptrCast(pen));
-    _ = w.BitBlt(screen, 0, 0, overlay_w, overlay_h, dc, 0, 0, w.SRCCOPY);
+    overlay.show(state);
 }
 
 fn overlayProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
-    switch (msg) {
-        w.WM_PAINT => {
-            paintOverlay(hwnd);
-            return 0;
-        },
-        w.WM_ERASEBKGND => return 1,
-        w.WM_TIMER => {
-            g_phase += 0.033;
-            _ = w.InvalidateRect(hwnd, null, 0);
-            return 0;
-        },
-        else => {},
+    if (msg == w.WM_TIMER) {
+        var level: f64 = @as(f64, @floatFromInt(g_level.load(.acquire))) / 1000.0;
+        if (g_preview_started > 0) {
+            const elapsed = @as(f64, @floatFromInt(w.GetTickCount64())) / 1000.0 - g_preview_started;
+            if (elapsed > 6.5) {
+                g_preview_started = 0;
+                showOverlay(0);
+                return 0;
+            }
+            if (elapsed > 3.5 and g_state.load(.acquire) == 1) showOverlay(2);
+            level = 0.04 + (0.25 + 0.6 * @min(1, elapsed / 3)) * std.math.pow(f64, @max(0, @sin(elapsed * 16)), 0.6);
+        }
+        overlay.tick(level);
+        return 0;
     }
     return w.DefWindowProcW(hwnd, msg, wparam, lparam);
+}
+
+/// `agb preview`: asks the running tray daemon to play the overlay.
+pub fn preview() u8 {
+    const h = w.FindWindowW(w.L("AgentBelt"), null) orelse {
+        std.debug.print("agent-belt.exe is not running (agb install starts it)\n", .{});
+        return 1;
+    };
+    _ = w.PostMessageW(h, WM_PREVIEW, 0, 0);
+    return 0;
 }
 
 // ---------------------------------------------------------------- hotkeys
@@ -638,6 +548,13 @@ fn mainProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callc
             showOverlay(@intCast(wparam));
             return 0;
         },
+        WM_PREVIEW => {
+            if (g_state.load(.acquire) == 0) {
+                g_preview_started = @as(f64, @floatFromInt(w.GetTickCount64())) / 1000.0;
+                showOverlay(1);
+            }
+            return 0;
+        },
         w.WM_DESTROY => {
             w.PostQuitMessage(0);
             return 0;
@@ -660,15 +577,10 @@ pub fn run(ctx: sys.Ctx, version: []const u8) !u8 {
     g_instance = w.GetModuleHandleW(null);
     const icon: ?w.HICON = @ptrCast(w.LoadImageW(g_instance, 1, w.IMAGE_ICON, 0, 0, w.LR_DEFAULTSIZE));
     _ = w.RegisterClassExW(&.{ .lpfnWndProc = mainProc, .hInstance = g_instance, .lpszClassName = w.L("AgentBelt"), .hIcon = icon });
-    _ = w.RegisterClassExW(&.{ .lpfnWndProc = overlayProc, .hInstance = g_instance, .lpszClassName = w.L("AgentBeltOverlay") });
     _ = w.RegisterClassExW(&.{ .lpfnWndProc = dialogProc, .hInstance = g_instance, .lpszClassName = w.L("AgentBeltNew"), .hIcon = icon, .hbrBackground = @ptrFromInt(16) }); // COLOR_BTNFACE + 1
 
     g_hwnd = w.CreateWindowExW(0, w.L("AgentBelt"), w.L("Agent Belt"), w.WS_OVERLAPPED, 0, 0, 0, 0, null, null, g_instance, null) orelse return error.NoWindow;
-    g_overlay = w.CreateWindowExW(w.WS_EX_TOPMOST | w.WS_EX_TOOLWINDOW | w.WS_EX_NOACTIVATE | w.WS_EX_LAYERED | w.WS_EX_TRANSPARENT, w.L("AgentBeltOverlay"), w.L("Agent Belt overlay"), w.WS_POPUP, 0, 0, overlay_w, overlay_h, null, null, g_instance, null);
-    if (g_overlay) |ov| {
-        _ = w.SetLayeredWindowAttributes(ov, 0, 240, w.LWA_ALPHA);
-        _ = w.SetWindowRgn(ov, w.CreateRoundRectRgn(0, 0, overlay_w + 1, overlay_h + 1, 36, 36), 0);
-    }
+    overlay.create(g_instance, overlayProc);
 
     g_tray = .{ .hWnd = g_hwnd, .uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP, .uCallbackMessage = WM_TRAY, .hIcon = icon };
     const tip = w.L("Agent Belt · Ctrl+Alt+D dita · Ctrl+Alt+Espaço menu");

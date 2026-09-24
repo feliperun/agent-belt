@@ -274,6 +274,7 @@ pub extern "user32" fn GetWindowTextW(hwnd: HWND, text: [*]WCHAR, max: c_int) ca
 pub extern "user32" fn SendMessageW(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) callconv(.winapi) LRESULT;
 pub extern "user32" fn SetFocus(hwnd: ?HWND) callconv(.winapi) ?HWND;
 pub extern "user32" fn IsDialogMessageW(hwnd: HWND, msg: *MSG) callconv(.winapi) BOOL;
+pub extern "user32" fn FindWindowW(class: ?LPCWSTR, name: ?LPCWSTR) callconv(.winapi) ?HWND;
 pub extern "user32" fn GetSystemMetrics(index: c_int) callconv(.winapi) c_int;
 
 pub extern "shell32" fn Shell_NotifyIconW(message: DWORD, data: *NOTIFYICONDATAW) callconv(.winapi) BOOL;

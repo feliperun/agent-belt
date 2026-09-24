@@ -90,7 +90,7 @@ agb uninstall    # remove the login item
 
 | Shortcut | Action |
 |---|---|
-| hold `Ctrl+Alt+D` | dictation, with the same overlay; the text is typed where the cursor is |
+| hold `Ctrl+Alt+D` | dictation, with the same overlay as on the Mac; the text is typed where the cursor is |
 | `Ctrl+Alt+Space` | the agent menu |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal window |
 
@@ -108,7 +108,7 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 
 | Shortcut | Action |
 |---|---|
-| hold `Ctrl+Alt+D` | dictation: `pw-record` while held, Deepgram, typed with `wtype`; mako shows the state |
+| hold `Ctrl+Alt+D` | dictation: `pw-record` while held, Deepgram, typed with `wtype`, with the Mac's overlay (drawn by Quickshell; notifications without it) |
 | `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **Novo agente…** in walker (or fuzzel, wofi, rofi) |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal |
 
@@ -226,7 +226,7 @@ agb doctor|adopt|deploy|tm        session engine housekeeping
 agb led <color 0-7> <mode 0-5>    lights by hand
 agb permissions                   open the macOS privacy lists
 agb version · agb update [tag]    version · update now
-agb preview                       show the dictation animation without a microphone
+agb preview                       show the dictation animation without a microphone (macOS, Windows, Linux)
 ```
 
 ## Updates

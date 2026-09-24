@@ -7,9 +7,10 @@ const cli = @import("../sessions/cli.zig");
 const hosts = @import("../sessions/hosts.zig");
 const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
+const audio_level = @import("../audio_level.zig");
 
 pub fn isCommand(name: []const u8) bool {
-    for ([_][]const u8{ "menu", "waybar", "ptt", "install", "uninstall" }) |c| if (std.mem.eql(u8, name, c)) return true;
+    for ([_][]const u8{ "menu", "waybar", "ptt", "install", "uninstall", "preview", "_overlay" }) |c| if (std.mem.eql(u8, name, c)) return true;
     return false;
 }
 
@@ -19,6 +20,8 @@ pub fn main(ctx: sys.Ctx, argv: []const []const u8) !u8 {
     if (std.mem.eql(u8, cmd, "waybar")) return waybar(ctx);
     if (std.mem.eql(u8, cmd, "install")) return install(ctx);
     if (std.mem.eql(u8, cmd, "uninstall")) return uninstall(ctx);
+    if (std.mem.eql(u8, cmd, "preview")) return overlayHost(ctx, true);
+    if (std.mem.eql(u8, cmd, "_overlay")) return overlayHost(ctx, false);
     const action = if (argv.len > 1) argv[1] else "toggle";
     if (std.mem.eql(u8, action, "start")) return pttStart(ctx);
     if (std.mem.eql(u8, action, "stop")) return pttStop(ctx);
@@ -73,7 +76,16 @@ fn pick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
 /// Omarchy's menu in dmenu mode: a JSON payload names a selection file and a
 /// done file, like omarchy-menu-input.
 fn omarchyPick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 {
-    const base = runtimeFile(ctx, "agb-menu") catch return null;
+    // Summoning the menu again replaces the request without answering the
+    // previous one, which would wait forever: a new agb menu ends the old one.
+    const pid_path = runtimeFile(ctx, "agb-menu.pid") catch return null;
+    if (sys.readFile(ctx, pid_path)) |old| {
+        const old_pid = std.fmt.parseInt(std.posix.pid_t, std.mem.trim(u8, old, " \n"), 10) catch 0;
+        if (old_pid > 0 and old_pid != std.os.linux.getpid()) std.posix.kill(old_pid, std.posix.SIG.TERM) catch {};
+    }
+    const me = std.os.linux.getpid();
+    sys.writeFileAtomic(ctx, pid_path, ctx.fmt("{d}", .{me}) catch return null) catch {};
+    const base = runtimeFile(ctx, ctx.fmt("agb-menu-{d}", .{me}) catch return null) catch return null;
     const selection = ctx.fmt("{s}.selection", .{base}) catch return null;
     const done = ctx.fmt("{s}.done", .{base}) catch return null;
     const cwd = std.Io.Dir.cwd();
@@ -172,7 +184,12 @@ fn pttStart(ctx: sys.Ctx) !u8 {
     const wav = try runtimeFile(ctx, "agb-ptt.wav");
     const child = try std.process.spawn(ctx.io, .{ .argv = &.{ "pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", wav }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
     try sys.writeFileAtomic(ctx, try runtimeFile(ctx, "agb-ptt.pid"), try ctx.fmt("{d}", .{child.id.?}));
-    notify(ctx, "🎙️ Ouvindo", "solte o atalho para transcrever", 60_000);
+    setMode(ctx, 1);
+    if (sys.which(ctx, "quickshell") != null) {
+        _ = std.process.spawn(ctx.io, .{ .argv = &.{ selfExe(ctx), "_overlay" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
+    } else {
+        notify(ctx, "🎙️ Ouvindo", "solte o atalho para transcrever", 60_000);
+    }
     return 0;
 }
 
@@ -199,14 +216,18 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     const wav = sys.readFile(ctx, wav_path) orelse "";
     defer std.Io.Dir.cwd().deleteFile(ctx.io, wav_path) catch {};
     if (wav.len < 44 + 16000 / 5) { // under ~100 ms: an accidental tap
+        setMode(ctx, 0);
         notify(ctx, "Agent Belt", "gravação curta demais", 1500);
         return 0;
     }
     const key = deepgramKey(ctx) orelse {
+        setMode(ctx, 0);
         notify(ctx, "Agent Belt", "sem chave do Deepgram: DEEPGRAM_API_KEY=… agb install", 6000);
         return 1;
     };
-    notify(ctx, "🔐 Transcrevendo", "decifrando sua voz…", 30_000);
+    setMode(ctx, 2);
+    defer setMode(ctx, 0);
+    if (sys.which(ctx, "quickshell") == null) notify(ctx, "🔐 Transcrevendo", "decifrando sua voz…", 30_000);
     const defaults = config.Config{};
     const client = deepgram.Client{ .io = ctx.io, .allocator = ctx.gpa, .api_key = key, .model = defaults.deepgram_model, .language = defaults.deepgram_language, .smart_format = defaults.deepgram_smart_format, .mip_opt_out = defaults.deepgram_mip_opt_out };
     const text = client.transcribe(wav) catch |err| {
@@ -217,6 +238,9 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         notify(ctx, "Agent Belt", "nenhuma fala detectada", 1500);
         return 0;
     }
+    // Like on the Mac, the overlay leaves before the text is typed.
+    setMode(ctx, 0);
+    std.Io.sleep(ctx.io, .fromMilliseconds(120), .awake) catch {};
     notify(ctx, "Agent Belt", text, 1);
     // wtype waits for the compositor to take its keymap, or the first key is lost.
     const typed = if (sys.which(ctx, "wtype") != null) sys.run(ctx, &.{ "wtype", "-s", "120", "--", text }, null) else sys.run(ctx, &.{ "ydotool", "type", "--", text }, null);
@@ -227,6 +251,65 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy >/dev/null 2>&1" }, null).ok;
         notify(ctx, "Agent Belt", if (copied) "texto copiado: cole com Ctrl+V" else "instale wtype para digitar o texto", 5000);
     }
+    return 0;
+}
+
+// ---------------------------------------------------------------- overlay
+
+/// ptt start/stop tell the overlay what is happening: 1 listening,
+/// 2 transcribing, 0 done.
+fn setMode(ctx: sys.Ctx, mode: u8) void {
+    sys.writeFileAtomic(ctx, runtimeFile(ctx, "agb-ptt.mode") catch return, &.{'0' + mode}) catch {};
+}
+
+fn readMode(ctx: sys.Ctx) u8 {
+    const text = sys.readFile(ctx, runtimeFile(ctx, "agb-ptt.mode") catch return 0) orelse return 0;
+    return if (text.len > 0 and text[0] >= '0' and text[0] <= '2') text[0] - '0' else 0;
+}
+
+/// The level of the last 100 ms pw-record wrote.
+fn recordingLevel(ctx: sys.Ctx) f64 {
+    const file = std.Io.Dir.cwd().openFile(ctx.io, runtimeFile(ctx, "agb-ptt.wav") catch return 0, .{}) catch return 0;
+    defer file.close(ctx.io);
+    const len = file.length(ctx.io) catch return 0;
+    var buf: [3200]u8 = undefined;
+    if (len < 44 + buf.len) return 0;
+    const n = file.readPositionalAll(ctx.io, &buf, (len - buf.len) & ~@as(u64, 1)) catch return 0;
+    return @as(f64, @floatFromInt(audio_level.permille(buf[0..n]))) / 1000.0;
+}
+
+/// Hosts the QML overlay (src/linux/overlay.qml) in Quickshell and feeds it
+/// the mode and microphone level about 30 times a second until dictation ends.
+/// `agb preview` plays it with a synthetic voice, as on the Mac.
+fn overlayHost(ctx: sys.Ctx, demo: bool) !u8 {
+    if (sys.which(ctx, "quickshell") == null) {
+        std.debug.print("the dictation overlay needs Quickshell (Omarchy ships it)\n", .{});
+        return 1;
+    }
+    const qml = try runtimeFile(ctx, "agb-overlay.qml");
+    const state = try runtimeFile(ctx, "agb-overlay.state");
+    try sys.writeFileAtomic(ctx, qml, @embedFile("overlay.qml"));
+    try sys.writeFileAtomic(ctx, state, "0 0");
+    try ctx.env.put("AGB_OVERLAY_STATE", state);
+    var shell = try std.process.spawn(ctx.io, .{ .argv = &.{ "quickshell", "-p", qml }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
+    const started = std.Io.Clock.real.now(ctx.io).toNanoseconds();
+    while (true) {
+        const elapsed: f64 = @as(f64, @floatFromInt(std.Io.Clock.real.now(ctx.io).toNanoseconds() - started)) / 1e9;
+        const mode: u8 = if (demo) (if (elapsed < 3.5) 1 else if (elapsed < 6.5) 2 else 0) else readMode(ctx);
+        if (mode == 0 or elapsed > 180) break;
+        // The preview voice: syllables that grow louder, like the macOS preview.
+        const level = if (mode != 1) 0 else if (demo)
+            0.04 + (0.25 + 0.6 * @min(1, elapsed / 3)) * std.math.pow(f64, @max(0, @sin(elapsed * 16)), 0.6)
+        else
+            recordingLevel(ctx);
+        try sys.writeFileAtomic(ctx, state, try ctx.fmt("{d} {d:.3}", .{ mode, level }));
+        try std.Io.sleep(ctx.io, .fromMilliseconds(33), .awake);
+    }
+    try sys.writeFileAtomic(ctx, state, "0 0");
+    try std.Io.sleep(ctx.io, .fromMilliseconds(220), .awake); // the fade out
+    try sys.writeFileAtomic(ctx, state, "-1 0");
+    try std.Io.sleep(ctx.io, .fromMilliseconds(150), .awake);
+    shell.kill(ctx.io);
     return 0;
 }
 
