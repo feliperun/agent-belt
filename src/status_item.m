@@ -68,6 +68,7 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 @property(nonatomic) BOOL reducedMotion;
 @property(nonatomic) BOOL command; // listening to a voice command, not dictation
 @property(nonatomic, copy) NSString *live; // the words streaming in while listening
+@property(nonatomic) double recordingStarted, recordingEnded; // the discreet timer
 @property(nonatomic, strong) NSTimer *animationTimer;
 - (void)showMode:(NSInteger)mode;
 - (void)stopAnimation;
@@ -77,7 +78,12 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
 @implementation MKOverlayView
 - (BOOL)isOpaque { return NO; }
 - (void)showMode:(NSInteger)mode {
-    if (mode == 1 && self.mode != 1) self.live = nil; // a new recording
+    if (mode == 1 && self.mode != 1) { // a new recording
+        self.live = nil;
+        self.recordingStarted = mk_now();
+        self.recordingEnded = 0;
+    }
+    if (mode == 2 && !self.recordingEnded) self.recordingEnded = mk_now();
     self.releaseLevel = self.level;
     self.mode = mode;
     self.started = self.lastTick = mk_now();
@@ -142,8 +148,12 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
     // With live words the pill grows downwards: its usual content stays on top.
     const CGFloat lift = self.bounds.size.height - mk_overlay_height;
     if (lift > 0) {
-        [self.liveText drawWithRect:NSMakeRect(22, 12, self.bounds.size.width - 44, lift - 4)
-                            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+        // Top-aligned under the waveform, filling downwards.
+        NSAttributedString *words = self.liveText;
+        const CGFloat h = ceil([words boundingRectWithSize:NSMakeSize(self.bounds.size.width - 44, CGFLOAT_MAX)
+                                                   options:NSStringDrawingUsesLineFragmentOrigin].size.height);
+        [words drawWithRect:NSMakeRect(22, fmax(12, lift - 4 - h), self.bounds.size.width - 44, fmin(h, lift - 16))
+                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
         NSAffineTransform *up = [NSAffineTransform transform];
         [up translateXBy:0 yBy:lift];
         [up concat];
@@ -156,6 +166,15 @@ void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fas
     }
     mk_label(self.mode == 1 ? (self.command ? @"Voice command" : @"Listening") : (self.command ? @"Understanding" : @"Transcribing"),
              NSMakePoint(65, 44), 12, mk_ink(0.92));
+    // How long the recording is: small, quiet, on the label's line at the right.
+    if (self.recordingStarted > 0 && (self.mode == 1 || self.mode == 2)) {
+        const double seconds = (self.recordingEnded ?: mk_now()) - self.recordingStarted;
+        NSString *elapsed = [NSString stringWithFormat:@"%d:%02d", (int)seconds / 60, (int)seconds % 60];
+        NSDictionary *attributes = @{NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:10.5 weight:NSFontWeightRegular],
+                                     NSForegroundColorAttributeName: mk_ink(0.42)};
+        const CGFloat w = [elapsed sizeWithAttributes:attributes].width;
+        [elapsed drawAtPoint:NSMakePoint(self.bounds.size.width - 26 - w, 45.5) withAttributes:attributes];
+    }
     [self drawSignal:t morph:morph];
 }
 - (void)drawCore:(double)t morph:(double)morph {
@@ -231,13 +250,19 @@ static CFRunLoopRef mk_status_runloop;
 
 // Live words widen the pill and add up to five lines below it.
 static const CGFloat mk_live_width = 380;
-static const NSUInteger mk_live_lines = 5;
+static const NSUInteger mk_live_lines = 7;
 
+static NSFont *mk_live_font(void) { return [NSFont systemFontOfSize:12.5 weight:NSFontWeightRegular]; }
+static CGFloat mk_live_line(void) { NSFont *f = mk_live_font(); return ceil(f.ascender - f.descender + f.leading) + 1; }
+
+// Dictating, the pill is born at its full size (words have room to arrive
+// without it growing); the error card keeps the small one.
 static NSSize mk_overlay_size(void) {
-    NSString *live = mk_overlay_view.live;
-    if (!live.length || mk_overlay_view.mode != 1) return NSMakeSize(mk_overlay_width, mk_overlay_height);
-    NSFont *font = [NSFont systemFontOfSize:12.5 weight:NSFontWeightRegular];
-    const CGFloat width = mk_live_width - 44, line = ceil(font.ascender - font.descender + font.leading) + 1;
+    const NSInteger mode = mk_overlay_view.mode;
+    if (mode != 1 && mode != 2) return NSMakeSize(mk_overlay_width, mk_overlay_height);
+    NSString *live = mk_overlay_view.live ?: @"";
+    NSFont *font = mk_live_font();
+    const CGFloat width = mk_live_width - 44, line = mk_live_line();
     // Keep only the tail that fits: the latest words are what matter while speaking.
     NSString *shown = live;
     while (shown.length > 1 && [shown boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX)
@@ -245,10 +270,8 @@ static NSSize mk_overlay_size(void) {
         NSRange space = [shown rangeOfString:@" " options:0 range:NSMakeRange(1, shown.length - 1)];
         shown = space.location == NSNotFound ? [shown substringFromIndex:shown.length / 2] : [@"…" stringByAppendingString:[shown substringFromIndex:space.location + 1]];
     }
-    if (![shown isEqual:live]) mk_overlay_view.live = shown;
-    const CGFloat height = [shown boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin
-                                            attributes:@{NSFontAttributeName: font}].size.height;
-    return NSMakeSize(mk_live_width, mk_overlay_height + ceil(height) + 12);
+    if (live.length && ![shown isEqual:live]) mk_overlay_view.live = shown;
+    return NSMakeSize(mk_live_width, mk_overlay_height + line * mk_live_lines + 12);
 }
 
 static void mk_position_overlay(void) {
@@ -271,6 +294,8 @@ static void mk_order_out(void) {
     mk_hide_timer = nil;
     [mk_overlay_panel orderOut:nil];
     [mk_overlay_view stopAnimation];
+    mk_overlay_view.live = nil; // the next recording starts clean
+    mk_overlay_view.mode = 0;
     mk_status_ready();
 }
 
