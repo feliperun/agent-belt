@@ -491,7 +491,7 @@ fn showPlan() void {
     };
     const unsure = struct {
         fn mark(c: f64) []const u8 {
-            return if (c < 0.6) " ?" else "";
+            return if (c > 0 and c < 0.6) " ?" else ""; // 0 is a default, not a doubt
         }
     };
     setText(g_fields, g_ctx.fmt("Agent  {s}{s}        Machine  {s}{s}        Repo  {s}{s}", .{

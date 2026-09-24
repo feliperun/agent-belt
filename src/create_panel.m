@@ -175,10 +175,13 @@ static NSRunningApplication *mk_previous_app;
         id value = self.fixed[key] ?: plan[key];
         const double confidence = self.fixed[key] ? 1 : [plan[[key stringByAppendingString:@"_confidence"]] doubleValue];
         const BOOL missing = ![value isKindOfClass:NSString.class] || ![value length];
-        const BOOL unsure = !missing && confidence < 0.6;
+        // 0 is a default (not said: claude, this machine), shown dimmer; a low
+        // non-zero confidence is Jev unsure, marked with "?".
+        const BOOL unsure = !missing && confidence > 0 && confidence < 0.6;
+        const BOOL fallback = !missing && confidence == 0;
         // No repo is fine: the agent works in ~/agents/<task> (research).
         NSString *shown = missing ? ([key isEqual:@"repo"] ? @"none" : @"?") : unsure ? [value stringByAppendingString:@" ?"] : value;
-        NSColor *color = MKInk(missing ? 0.55 : unsure ? 0.6 : 0.95);
+        NSColor *color = MKInk(missing || fallback ? 0.55 : unsure ? 0.6 : 0.95);
         NSMutableAttributedString *title = [[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@  ", labels[i]]
             attributes:@{NSFontAttributeName: MKFont(11, NSFontWeightRegular), NSForegroundColorAttributeName: MKInk(0.5)}];
         [title appendAttributedString:[[NSAttributedString alloc] initWithString:[shown stringByAppendingString:@" ▾"]
@@ -191,7 +194,7 @@ static NSRunningApplication *mk_previous_app;
     const BOOL noRepo = plan && (![repo isKindOfClass:NSString.class] || ![repo length]);
     self.hint.stringValue = self.recording ? @"release 5 to review"
         : self.detecting ? @"understanding…"
-        : noRepo ? [NSString stringWithFormat:@"no repo: works in ~/agents/%@   ·   5 or Return creates   ·   Esc cancels", plan[@"task"]]
+        : noRepo ? [NSString stringWithFormat:@"no repo: in ~/agents/%@   ·   5 creates   ·   Esc cancels", plan[@"task"]]
         : @"5 or Return creates   ·   hold 5 to say more   ·   Esc cancels";
     [self relayout];
 }
