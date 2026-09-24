@@ -55,11 +55,9 @@ pub fn tmuxHandOver(ctx: sys.Ctx, args: []const []const u8) noreturn {
 /// land here directly) and lets the wheel scroll copy-mode instead of sending
 /// arrow keys to the agent's prompt.
 pub fn tmuxSetup(ctx: sys.Ctx) void {
-    if (!tmux(ctx, &.{ "set-option", "-g", "set-clipboard", "on" }).ok) return;
-    _ = tmux(ctx, &.{ "set-option", "-g", "allow-passthrough", "on" });
-    _ = tmux(ctx, &.{ "set-option", "-g", "mouse", "on" });
-    const features = tmux(ctx, &.{ "show-options", "-gqv", "terminal-features" });
-    if (std.mem.indexOf(u8, features.stdout, "*:clipboard") == null)
+    // One tmux call (";" chains commands): on Windows each call is a login shell.
+    const features = tmux(ctx, &.{ "set-option", "-g", "set-clipboard", "on", ";", "set-option", "-g", "allow-passthrough", "on", ";", "set-option", "-g", "mouse", "on", ";", "show-options", "-gqv", "terminal-features" });
+    if (features.ok and std.mem.indexOf(u8, features.stdout, "*:clipboard") == null)
         _ = tmux(ctx, &.{ "set-option", "-as", "terminal-features", ",*:clipboard" });
 }
 
@@ -310,16 +308,20 @@ pub fn create(ctx: sys.Ctx, opts: CreateOptions) CreateError![]const u8 {
     // Start the server first, detached from this process's descriptors: on
     // Windows it would otherwise die with the console that created it.
     _ = tmux(ctx, &.{"start-server"});
-    const made = tmux(ctx, &.{ "new-session", "-d", "-s", session, "-c", cwd, command });
-    if (!made.ok and !hasSession(ctx, session)) {
+    // The session and its marks in one tmux call: a listing in between (another
+    // machine's `agb ls`) would otherwise rename it from the agent's title
+    // before it knows its task. Printed back: the session id, which survives
+    // renames, so attaching cannot miss it.
+    const target = try paneTarget(ctx, session); // set-option takes a pane target on tmux 3.5+
+    const made = tmux(ctx, &.{ "new-session", "-d", "-P", "-F", "#{session_id}", "-s", session, "-c", cwd, command, ";", "set-option", "-t", target, "@work_agent", @tagName(opts.agent), ";", "set-option", "-t", target, "@work_task", opts.task });
+    const id = std.mem.trim(u8, made.stdout, " \r\n");
+    if (!made.ok or id.len == 0 or id[0] != '$') {
         std.debug.print("{s}", .{made.stderr});
         return error.TmuxFailed;
     }
     tmuxSetup(ctx);
-    _ = tmux(ctx, &.{ "set-option", "-t", session, "@work_agent", @tagName(opts.agent) });
-    _ = tmux(ctx, &.{ "set-option", "-t", session, "@work_task", opts.task });
     if (opts.no_attach) return session;
-    attach(ctx, session, opts.detach_others);
+    attachTarget(ctx, id, opts.detach_others);
 }
 
 /// A pane target for a session: "=name:" (its current window). Plain "=name"
@@ -352,11 +354,15 @@ pub fn stop(ctx: sys.Ctx, name: []const u8) bool {
 /// Attaches this terminal to a local session (switching client inside tmux).
 pub fn attach(ctx: sys.Ctx, name: []const u8, detach_others: bool) noreturn {
     if (!hasSession(ctx, name)) {
-        std.debug.print("agb: não achei a sessão '{s}' nesta máquina\n", .{name});
+        std.debug.print("agb: no session '{s}' on this machine\n", .{name});
         std.process.exit(1);
     }
     tmuxSetup(ctx);
-    const target = ctx.fmt("={s}", .{name}) catch unreachable;
+    attachTarget(ctx, ctx.fmt("={s}", .{name}) catch unreachable, detach_others);
+}
+
+/// Attaches to a tmux target: "=name" or a session id ("$3").
+fn attachTarget(ctx: sys.Ctx, target: []const u8, detach_others: bool) noreturn {
     if (ctx.getenv("TMUX") != null) tmuxHandOver(ctx, &.{ "switch-client", "-t", target });
     // -d detaches other clients: with two, tmux shrinks the window to the smaller one.
     if (detach_others) tmuxHandOver(ctx, &.{ "attach", "-d", "-t", target });
@@ -397,15 +403,45 @@ fn hasWord(text: []const u8, word: []const u8) bool {
 /// Renaming the conversation in the agent renames the tmux session: the agent
 /// publishes its name as the terminal title, which tmux keeps as pane_title.
 /// The repo prefix stays ("coreum-xpto" renamed to "bug" becomes "coreum-bug").
+/// A session name from an agent's terminal title: without the console's
+/// prefix (an elevated Windows console shows "Administrador: …") and the
+/// agent's status glyph, accents folded ("custódia" is "custodia"), words
+/// joined by dashes.
+pub fn sessionSlug(ctx: sys.Ctx, raw: []const u8) ![]const u8 {
+    var title = std.mem.trim(u8, raw, " ");
+    for ([_][]const u8{ "Administrador: ", "Administrator: ", "Administrador:", "Administrator:" }) |prefix| {
+        if (std.mem.startsWith(u8, title, prefix)) title = title[prefix.len..];
+    }
+    const folds = [_]struct { []const u8, u8 }{
+        .{ "á", 'a' }, .{ "à", 'a' }, .{ "â", 'a' }, .{ "ã", 'a' }, .{ "ä", 'a' }, .{ "é", 'e' }, .{ "ê", 'e' }, .{ "è", 'e' },
+        .{ "í", 'i' }, .{ "ó", 'o' }, .{ "ô", 'o' }, .{ "õ", 'o' }, .{ "ö", 'o' }, .{ "ú", 'u' }, .{ "ü", 'u' }, .{ "ç", 'c' },
+        .{ "ñ", 'n' }, .{ "Á", 'A' }, .{ "À", 'A' }, .{ "Â", 'A' }, .{ "Ã", 'A' }, .{ "É", 'E' }, .{ "Ê", 'E' }, .{ "Í", 'I' },
+        .{ "Ó", 'O' }, .{ "Ô", 'O' }, .{ "Õ", 'O' }, .{ "Ú", 'U' }, .{ "Ç", 'C' },
+    };
+    var name: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    outer: while (i < title.len) {
+        for (folds) |f| if (std.mem.startsWith(u8, title[i..], f[0])) {
+            try name.append(ctx.gpa, f[1]);
+            i += f[0].len;
+            continue :outer;
+        };
+        const c = title[i];
+        i += 1;
+        if (std.ascii.isAlphanumeric(c)) {
+            try name.append(ctx.gpa, c);
+        } else if ((c == ' ' or c == '-' or c == '_') and name.items.len > 0 and name.items[name.items.len - 1] != '-') {
+            try name.append(ctx.gpa, '-');
+        }
+        // Anything else (status glyphs, punctuation) is dropped.
+    }
+    return std.mem.trim(u8, name.items, "-");
+}
+
 fn syncName(ctx: sys.Ctx, session: []const u8, agent: []const u8, task: []const u8, title: []const u8) ?[]const u8 {
     if (ctx.getenv("WORK_NO_RENAME")) |v| if (std.mem.eql(u8, v, "1")) return null;
     if (!(std.mem.startsWith(u8, agent, "claude") or std.mem.startsWith(u8, agent, "codex"))) return null;
-    var name: std.ArrayList(u8) = .empty;
-    for (title) |c| {
-        const ch: u8 = if (c == ' ') '-' else c;
-        if (std.ascii.isAlphanumeric(ch) or ch == '_' or ch == '-') name.append(ctx.gpa, ch) catch return null;
-    }
-    var slug = std.mem.trim(u8, name.items, "-");
+    var slug = sessionSlug(ctx, title) catch return null;
     if (slug.len > 40) slug = slug[0..40];
     if (slug.len == 0 or std.mem.eql(u8, slug, task) or std.mem.eql(u8, slug, session)) return null;
     var next: []const u8 = slug;
@@ -603,6 +639,16 @@ pub fn probe(ctx: sys.Ctx, version: []const u8) ![]const u8 {
         if (sys.which(ctx, "codex") != null) "yes" else "NO",
         try reposDir(ctx),
     });
+}
+
+test "session names from titles" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    try std.testing.expectEqualStrings("criar-1-novo-agente", try sessionSlug(ctx, "Administrador: ✳ criar 1 novo agente"));
+    try std.testing.expectEqualStrings("leave", try sessionSlug(ctx, "✳ leave"));
+    try std.testing.expectEqualStrings("Resposta-ao-Odelio-sobre-custodia", try sessionSlug(ctx, "⠂ Resposta ao Odelio sobre custódia"));
 }
 
 test "word match, conversation ids and tty normalization" {
