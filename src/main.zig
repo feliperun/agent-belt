@@ -20,6 +20,10 @@ pub fn main(init: std.process.Init) !void {
         const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
         std.process.exit(try sessions.main(.{ .ctx = ctx, .version = build_options.version, .source_root = build_options.source_root }, argv[1..argc]));
     }
+    // agb history: every platform.
+    if (argc >= 2 and std.mem.eql(u8, argv[1], "history")) {
+        std.process.exit(try @import("history.zig").command(init.arena.allocator(), init.io, init.environ_map, argv[2..argc]));
+    }
     if (argc >= 2 and std.mem.eql(u8, argv[1], "version")) {
         std.debug.print("agb (Agent Belt) {s}\n", .{build_options.version});
         return;
@@ -60,6 +64,7 @@ fn usageSessions() !void {
         \\  agb sessions | ls | repos [machine] | attach [-d] <session> [machine]
         \\  agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
+        \\  agb history [days] [--json]
         \\  agb version
         \\  Windows: agb install | uninstall | daemon (tray icon, Ctrl+Alt+D dictation, Ctrl+Alt+Space menu)
         \\  Linux desktop: agb install | uninstall | menu | waybar | ptt start|stop|toggle
@@ -86,7 +91,7 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
     if (std.mem.eql(u8, argv[1], "daemon")) {
         var parsed = try store.load();
         defer parsed.deinit();
-        try daemon.run(init.io, allocator, parsed.value);
+        try daemon.run(init.io, allocator, parsed.value, try @import("history.zig").dir(allocator, init.environ_map));
         return;
     }
 
@@ -225,6 +230,7 @@ fn usage() !void {
         "  agb update [tag]\n" ++
         "  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]\n" ++
         "  agb panel [words] | --close              the create-agent panel\n" ++
+        "  agb history [days] [--json]              recordings and transcripts (60 days)\n" ++
         "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt | tm [name] | deploy <m…|--all>\n" ++
         "  agb permissions   (opens Input Monitoring, Accessibility and Microphone)\n" ++
         "  agb led <color 0-7> <mode 0-5>   (1 red … 7 purple; 0 off, 1 solid, 2 reactive, 5 white)\n" ++

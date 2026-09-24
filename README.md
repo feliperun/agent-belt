@@ -177,6 +177,9 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
   `agent-belt`, account `jev`) or `TYPESAFE_API_KEY`. The repo settles the machine when only
   one machine has it.
 - With a single machine, the machine is always this one.
+- The session gets a short, meaningful name and the panel a one-line summary of the intent,
+  written by whichever agent the machine has (`claude -p` with Haiku, else `codex exec`);
+  the agent itself gets everything that was said.
 - No repo is fine: research ("pesquise alternativas ao tmux") runs in `~/agents/<task>`,
   and the repo field offers **none (research)** to choose it.
 - Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).
@@ -185,6 +188,14 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
 
 Without the keypad, **New agent…** in the menu bar menu opens the same panel to type into,
 and `agb panel [words]` opens it from a terminal.
+
+### History
+
+Every recording is kept for 60 days, the audio and its transcript, from dictation and from
+the new-agent panel: long requests are never lost. `agb history [days] [--json]` lists them;
+the files are in `~/Library/Application Support/agent-belt/history` (Linux:
+`~/.local/share/agent-belt/history`, Windows: `%LOCALAPPDATA%\agent-belt\history`). They are
+written in the background, after the text is typed.
 
 ## Lights
 
@@ -246,6 +257,7 @@ agb permissions                   open the macOS privacy lists
 agb version · agb update [tag]    version · update now
 agb preview                       show the dictation animation without a microphone (macOS, Windows, Linux)
 agb panel [words] | --close       the create-agent panel
+agb history [days] [--json]       recordings and transcripts of the last 60 days
 ```
 
 ## Updates

@@ -13,6 +13,24 @@ overlay while the key is held and is inserted whole on release, which then waits
 Deepgram's last words (~350 ms). Typing into the focused field as words arrive was ruled out:
 interim corrections would become delete-and-retype in terminals and agents.
 
+### Quota and reset watch
+
+A periodic check, per harness installed on the machine (Claude Code, Codex, DeepSeek, GLM),
+of usage and quotas: the 5-hour and weekly windows and when each resets. The menu shows it
+at any time, as a small usage panel. When a weekly quota comes back, or a vendor grants an
+extra reset, a happy, animated pop-up says so: the dictation overlay's sibling with a little
+more color, and a cheerful sound. The 5-hour window resetting is not announced.
+
+### Adopt the agent on screen
+
+An agent started in a hurry, outside Agent Belt, lives only in that terminal and cannot be
+followed from another machine. A shortcut (and a menu item, and a double press on the
+switch key) takes the agent in the focused window into tmux: it finds that terminal's agent
+process and its conversation id, stops it and reopens the same conversation in a tmux
+session (`claude --resume <id>`, `codex resume <id>`), attached where it was. `agb adopt`
+already does this from the command line; the turn in progress is lost, the conversation is
+not. The agent menu also lists the sessions of the other machines, to open them from here.
+
 ## Later
 
 ### Agent state on every platform

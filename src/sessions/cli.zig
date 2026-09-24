@@ -19,7 +19,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_repos-cache" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -58,6 +58,10 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
     }
     if (std.mem.eql(u8, verb, "_run")) return runLocal(env, try parseRun(rest));
     if (std.mem.eql(u8, verb, "_intent")) return cmdIntent(env, rest);
+    if (std.mem.eql(u8, verb, "_summary")) {
+        const summary = try intent.summarize(ctx, try std.mem.join(ctx.gpa, " ", rest));
+        return print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(summary, .{})}));
+    }
     if (std.mem.eql(u8, verb, "_repos-cache")) {
         try intent.refreshCache(ctx, try loadRegistry(ctx), reposOf);
         return 0;

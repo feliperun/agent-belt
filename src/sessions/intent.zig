@@ -114,6 +114,57 @@ pub fn taskOf(ctx: sys.Ctx, intent: []const u8) ![]const u8 {
     return if (slug.len > 0) slug else "agent";
 }
 
+// ---------------------------------------------------------------- name and summary
+
+pub const Summary = struct { name: []const u8, summary: []const u8, by: []const u8 };
+
+/// A short, meaningful session name and a one-line summary of the request,
+/// written by whichever agent this machine has (Jev decides, it does not
+/// write): claude -p (Haiku), else codex exec, else the request's first
+/// words. Cached by text, so asking again is free.
+pub fn summarize(ctx: sys.Ctx, text: []const u8) !Summary {
+    const request = std.mem.trim(u8, text, " \r\n");
+    const fallback = Summary{ .name = try taskOf(ctx, intentOf(request)), .summary = intentOf(request), .by = "words" };
+    if (request.len == 0) return fallback;
+    const cache = try ctx.join(&.{ try cacheDir(ctx), "..", "summaries", try ctx.fmt("{x}", .{std.hash.Wyhash.hash(0, request)}) });
+    if (sys.readFile(ctx, cache)) |bytes| {
+        if (std.json.parseFromSliceLeaky(Summary, ctx.gpa, bytes, .{ .ignore_unknown_fields = true })) |cached| return cached else |_| {}
+    }
+    const instructions = try ctx.fmt(
+        \\A person asked for a new coding agent session with the request below.
+        \\Reply with ONLY a JSON object, no other text:
+        \\{{"name": "<2 to 4 lowercase English words joined by hyphens, at most 32 characters, naming the work, e.g. login-timeout-fix>", "summary": "<one short sentence, in the request's language, saying what the agent will do; no machine, agent or repository names>"}}
+        \\
+        \\Request: {s}
+    , .{request});
+    const workdir = std.fs.path.dirname(cache).?;
+    std.Io.Dir.cwd().createDirPath(ctx.io, workdir) catch {};
+    const reply = blk: {
+        if (sys.which(ctx, "claude")) |claude| {
+            // No settings, MCP servers or slash commands: ~5 s instead of ~12 s,
+            // run outside any repo so no project context is loaded.
+            const out = sys.run(ctx, &.{ claude, "-p", "--model", "haiku", "--output-format", "text", "--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands", instructions }, workdir);
+            if (out.ok) break :blk .{ out.stdout, "claude" };
+        }
+        if (sys.which(ctx, "codex")) |codex| {
+            const out = sys.run(ctx, &.{ codex, "exec", "--skip-git-repo-check", instructions }, workdir);
+            if (out.ok) break :blk .{ out.stdout, "codex" };
+        }
+        return fallback;
+    };
+    // Usually fenced (```json … ```): the outermost braces.
+    const open = std.mem.indexOfScalar(u8, reply[0], '{') orelse return fallback;
+    const close = std.mem.lastIndexOfScalar(u8, reply[0], '}') orelse return fallback;
+    if (close < open) return fallback;
+    const Parsed = struct { name: []const u8 = "", summary: []const u8 = "" };
+    const parsed = std.json.parseFromSliceLeaky(Parsed, ctx.gpa, reply[0][open .. close + 1], .{ .ignore_unknown_fields = true }) catch return fallback;
+    const name = try sys.slugFromWords(ctx, try std.mem.replaceOwned(u8, ctx.gpa, parsed.name, "-", " "), 4);
+    if (name.len == 0 or name.len > 32 or !sys.validSlug(name)) return fallback;
+    const result = Summary{ .name = name, .summary = if (parsed.summary.len > 0) parsed.summary else fallback.summary, .by = reply[1] };
+    sys.writeFileAtomic(ctx, cache, try ctx.fmt("{f}", .{std.json.fmt(result, .{})})) catch {};
+    return result;
+}
+
 // ---------------------------------------------------------------- detection
 
 /// Harness, machine and repo for a request. Exact names are matched in code;
@@ -132,7 +183,8 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
         .repo = fixed.repo,
         .repo_confidence = if (fixed.repo != null) 1 else 0,
         .task = try taskOf(ctx, intent),
-        .prompt = intent,
+        // The agent gets everything that was said; the summary is for people.
+        .prompt = std.mem.trim(u8, text, " \r\n"),
         .hosts = host_names.items,
         .repos = &.{},
     };

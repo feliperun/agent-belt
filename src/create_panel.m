@@ -32,6 +32,11 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout);
 @property(nonatomic, copy) NSString *base, *live;
 @property(nonatomic) BOOL recording, detecting;
 @property(nonatomic, strong) NSDictionary *plan;
+// The session name and one-line summary (agb _summary), for `summarized` text.
+@property(nonatomic, strong) NSDictionary *summary;
+@property(nonatomic, copy) NSString *summarized, *summarizing;
+@property(nonatomic) BOOL createWhenNamed;
+@property(nonatomic, strong) NSTimer *summaryDebounce;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *fixed;
 @property(nonatomic) NSUInteger serial;
 @property(nonatomic, strong) NSTimer *debounce, *animation;
@@ -188,14 +193,18 @@ static NSRunningApplication *mk_previous_app;
             attributes:@{NSFontAttributeName: MKFont(12, NSFontWeightMedium), NSForegroundColorAttributeName: color}]];
         self.chips[i].attributedTitle = title;
     }
-    NSString *prompt = plan[@"prompt"];
-    self.intent.stringValue = prompt.length ? [NSString stringWithFormat:@"→ %@", prompt] : @"";
+    NSString *text = [self.fullText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSDictionary *summary = [self.summarized isEqual:text] ? self.summary : nil;
+    self.intent.stringValue = summary ? [NSString stringWithFormat:@"→ %@", summary[@"summary"]]
+        : text.length && !self.recording ? @"→ summarizing…" : @"";
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
     const BOOL noRepo = plan && (![repo isKindOfClass:NSString.class] || ![repo length]);
-    self.hint.stringValue = self.recording ? @"release 5 to review"
+    NSString *session = summary ? [NSString stringWithFormat:@"session %@   ·   ", summary[@"name"]] : @"";
+    self.hint.stringValue = self.createWhenNamed ? @"naming the session…"
+        : self.recording ? @"release 5 to review"
         : self.detecting ? @"understanding…"
-        : noRepo ? [NSString stringWithFormat:@"no repo: in ~/agents/%@   ·   5 creates   ·   Esc cancels", plan[@"task"]]
-        : @"5 or Return creates   ·   hold 5 to say more   ·   Esc cancels";
+        : noRepo ? [NSString stringWithFormat:@"%@no repo: in ~/agents   ·   5 creates   ·   Esc cancels", session]
+        : [NSString stringWithFormat:@"%@5 or Return creates   ·   hold 5 to say more   ·   Esc cancels", session];
     [self relayout];
 }
 
@@ -225,7 +234,10 @@ static NSRunningApplication *mk_previous_app;
         dispatch_async(dispatch_get_main_queue(), ^{
             if (serial != self.serial) return; // a newer request is on its way
             self.detecting = NO;
-            if ([plan isKindOfClass:NSDictionary.class] && plan[@"agent"]) self.plan = plan;
+            if ([plan isKindOfClass:NSDictionary.class] && plan[@"agent"]) {
+                self.plan = plan;
+                [self scheduleSummary];
+            }
             else if ([plan isKindOfClass:NSDictionary.class] && plan[@"error"])
                 self.hint.stringValue = [NSString stringWithFormat:@"could not understand: %@", plan[@"error"]];
             [self refresh];
@@ -257,6 +269,32 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     }
     [task waitUntilExit];
     return output;
+}
+
+// ---------------------------------------------------------------- name and summary
+
+// Written by a generative agent (seconds), so only once the text is still.
+- (void)scheduleSummary {
+    [self.summaryDebounce invalidate];
+    self.summaryDebounce = [NSTimer scheduledTimerWithTimeInterval:1.0 target:self selector:@selector(summarize) userInfo:nil repeats:NO];
+}
+
+- (void)summarize {
+    NSString *text = [self.fullText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!text.length || self.recording || [text isEqual:self.summarized] || [text isEqual:self.summarizing]) return;
+    self.summarizing = text;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSData *output = MKRunAgb(@[@"_summary", text], 40);
+        NSDictionary *summary = output ? [NSJSONSerialization JSONObjectWithData:output options:0 error:nil] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([self.summarizing isEqual:text]) self.summarizing = nil;
+            if (![summary isKindOfClass:NSDictionary.class] || !summary[@"name"]) return;
+            self.summary = summary;
+            self.summarized = text;
+            [self refresh];
+            if (self.createWhenNamed) [self confirm];
+        });
+    });
 }
 
 // ---------------------------------------------------------------- editing
@@ -317,16 +355,25 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSString *agent = self.fixed[@"agent"] ?: plan[@"agent"], *host = self.fixed[@"host"] ?: plan[@"host"];
     id repo = self.fixed[@"repo"] ?: plan[@"repo"];
     if (!plan) return; // still reading the request
+    NSString *text = [self.fullText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (![self.summarized isEqual:text]) { // the name is on its way: create when it arrives
+        self.createWhenNamed = YES;
+        [self summarize];
+        [self refresh];
+        return;
+    }
+    self.createWhenNamed = NO;
+    NSString *task = self.summary[@"name"];
     NSString *agb = NSBundle.mainBundle.executablePath;
     NSString *(^q)(NSString *) = ^(NSString *s) {
         return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
     };
     const BOOL hasRepo = [repo isKindOfClass:NSString.class] && [repo length];
     NSMutableString *command = [NSMutableString stringWithFormat:@"%@ new --agent %@ --host %@ %@ --task %@",
-        q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(plan[@"task"])];
+        q(agb), q(agent), q(host), hasRepo ? [@"--repo " stringByAppendingString:q(repo)] : @"--no-repo", q(task)];
     NSString *prompt = plan[@"prompt"];
     if (prompt.length) [command appendFormat:@" --prompt %@", q(prompt)];
-    NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", plan[@"task"], agent, host];
+    NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];
     fprintf(stderr, "[agent-belt] new agent: %s\n", command.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus
     mk_create_panel_show(NULL);
@@ -374,6 +421,9 @@ void mk_create_panel_show(const char *text) {
             mk_view.base = seed;
             mk_view.live = @"";
             mk_view.plan = nil;
+            mk_view.summary = nil;
+            mk_view.summarized = nil;
+            mk_view.createWhenNamed = NO;
             [mk_view.fixed removeAllObjects];
             NSRect screen = (NSScreen.mainScreen ?: NSScreen.screens.firstObject).visibleFrame;
             [mk_panel setFrame:NSMakeRect(NSMidX(screen) - mk_panel_width / 2, NSMinY(screen) + screen.size.height * 0.62, mk_panel_width, 180) display:NO];

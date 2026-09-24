@@ -8,6 +8,7 @@ const hosts = @import("../sessions/hosts.zig");
 const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
+const history = @import("../history.zig");
 
 pub fn isCommand(name: []const u8) bool {
     for ([_][]const u8{ "menu", "waybar", "ptt", "install", "uninstall", "preview", "_overlay" }) |c| if (std.mem.eql(u8, name, c)) return true;
@@ -251,6 +252,8 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         const copied = sys.run(ctx, &.{ "sh", "-c", "printf '%s' \"$AGB_TEXT\" | wl-copy >/dev/null 2>&1" }, null).ok;
         notify(ctx, "Agent Belt", if (copied) "copied: paste with Ctrl+V" else "install wtype to type the text", 5000);
     }
+    // After typing, so the text is not delayed; this process exits right after.
+    history.save(ctx.io, history.dir(ctx.gpa, ctx.env) catch return 0, .dictation, wav, text);
     return 0;
 }
 

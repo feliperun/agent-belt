@@ -3,6 +3,7 @@ const Config = @import("config.zig").Config;
 const Binding = @import("config.zig").Binding;
 const macos = @import("macos.zig");
 const deepgram = @import("deepgram.zig");
+const history = @import("history.zig");
 
 const Daemon = struct {
     io: std.Io,
@@ -18,6 +19,8 @@ const Daemon = struct {
     keys: @import("key_edges.zig").KeyEdges = .{},
     knob: @import("knob.zig").Knob = .{},
     talk: @import("f5.zig").Talk = .{},
+    /// Where recordings and transcripts are kept (history.zig).
+    history_dir: []const u8 = "",
     /// Key 5: speak a new agent into the create panel.
     create: @import("create_agent.zig").Controller = undefined,
 
@@ -117,6 +120,7 @@ const Daemon = struct {
         std.debug.print("[agent-belt] TRANSCRIBING...\n", .{});
         const text = try dg.transcribe(wav);
         defer self.allocator.free(text);
+        history.saveAsync(self.io, self.history_dir, .dictation, wav, text);
         if (text.len == 0) {
             std.debug.print("[agent-belt] no speech detected\n", .{});
             return;
@@ -132,7 +136,7 @@ const Daemon = struct {
     }
 };
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
+pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config, history_dir: []const u8) !void {
     macos.trimLog();
     macos.singleInstance() catch |err| {
         std.debug.print("[agent-belt] another daemon is already running (launchctl print gui/$UID/com.frb.agentbelt)\n", .{});
@@ -148,7 +152,8 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config) !void {
     if (config.led) macos.ledStart(config.vendor_id, config.product_id);
     std.debug.print("[agent-belt] ready: VID=0x{x} PID=0x{x}\n", .{ config.vendor_id, config.product_id });
     var daemon = Daemon{ .io = io, .allocator = allocator, .config = config };
-    daemon.create = .{ .io = io, .gpa = allocator, .config = &daemon.config };
+    daemon.history_dir = history_dir;
+    daemon.create = .{ .io = io, .gpa = allocator, .config = &daemon.config, .history_dir = history_dir };
     // "system" leaves the knob as the device's volume control.
     macos.setKnobIntercept(!std.mem.eql(u8, config.knob, "system"));
     var listener = macos.HidListener{

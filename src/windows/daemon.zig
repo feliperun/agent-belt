@@ -10,6 +10,7 @@ const hosts = @import("../sessions/hosts.zig");
 const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
+const history = @import("../history.zig");
 const overlay = @import("overlay.zig");
 const intent = @import("../sessions/intent.zig");
 
@@ -252,8 +253,10 @@ fn recordAndTranscribe() void {
     const client = deepgram.Client{ .io = g_ctx.io, .allocator = g_ctx.gpa, .api_key = key, .model = defaults.deepgram_model, .language = defaults.deepgram_language, .smart_format = defaults.deepgram_smart_format, .mip_opt_out = defaults.deepgram_mip_opt_out };
     const text = client.transcribe(audio) catch |err| {
         log("transcription failed: {s}", .{@errorName(err)});
+        history.saveAsync(g_ctx.io, history.dir(g_ctx.gpa, g_ctx.env) catch return, .dictation, audio, "");
         return;
     };
+    history.saveAsync(g_ctx.io, history.dir(g_ctx.gpa, g_ctx.env) catch "", .dictation, audio, text);
     if (text.len == 0) {
         log("no speech detected", .{});
         return;
@@ -399,6 +402,7 @@ fn showMenu() void {
 // detected, the intent highlighted. Create runs agb new with exactly that.
 
 const WM_PLAN = w.WM_APP + 7; // wparam: request serial, lparam: *Detected
+const WM_SUMMARY = w.WM_APP + 8; // wparam: request serial, lparam: *Detected (with its summary)
 const ID_CREATE = 1;
 const ID_CANCEL = 2;
 const ID_EDIT = 3;
@@ -408,7 +412,10 @@ const Detected = struct {
     arena: std.heap.ArenaAllocator,
     plan: ?intent.Plan = null,
     failure: ?[]const u8 = null,
+    summary: ?intent.Summary = null,
 };
+
+var g_create_pending = false; // Create was pressed before the session had a name
 
 var g_fields: ?w.HWND = null;
 var g_intent: ?w.HWND = null;
@@ -478,8 +485,21 @@ fn detectThread(dialog: w.HWND, serial: usize, text: []const u8) void {
     if (w.PostMessageW(dialog, WM_PLAN, serial, @bitCast(@intFromPtr(d))) == 0) {
         d.arena.deinit();
         std.heap.page_allocator.destroy(d);
+        return;
+    }
+    // Then the session name and summary, written by an agent (seconds).
+    const s = std.heap.page_allocator.create(Detected) catch return;
+    s.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
+    var sctx = g_ctx;
+    sctx.gpa = s.arena.allocator();
+    s.summary = intent.summarize(sctx, text) catch null;
+    if (w.PostMessageW(dialog, WM_SUMMARY, serial, @bitCast(@intFromPtr(s))) == 0) {
+        s.arena.deinit();
+        std.heap.page_allocator.destroy(s);
     }
 }
+
+var g_summary: ?*Detected = null;
 
 fn showPlan() void {
     const d = g_detected orelse return;
@@ -499,8 +519,10 @@ fn showPlan() void {
         plan.host,               unsure.mark(plan.host_confidence),
         plan.repo orelse "none", if (plan.repo != null) unsure.mark(plan.repo_confidence) else "",
     }) catch "");
-    setText(g_intent, g_ctx.fmt("→ {s}", .{plan.prompt}) catch "");
-    setText(g_hint, if (plan.repo == null) (g_ctx.fmt("No repo: the agent works in ~/agents/{s} · Enter creates · Esc cancels", .{plan.task}) catch "") else "Enter creates the agent · Esc cancels");
+    const summary: ?intent.Summary = if (g_summary) |s| s.summary else null;
+    setText(g_intent, if (summary) |s| (g_ctx.fmt("→ {s}", .{s.summary}) catch "") else "→ summarizing…");
+    const session: []const u8 = if (summary) |s| (g_ctx.fmt("Session {s} · ", .{s.name}) catch "") else "";
+    setText(g_hint, if (g_create_pending) "Naming the session…" else if (plan.repo == null) (g_ctx.fmt("{s}No repo: works in ~/agents · Enter creates · Esc cancels", .{session}) catch "") else (g_ctx.fmt("{s}Enter creates the agent · Esc cancels", .{session}) catch ""));
 }
 
 fn createFromPlan(dialog: w.HWND) void {
@@ -509,10 +531,17 @@ fn createFromPlan(dialog: w.HWND) void {
         return;
     };
     const plan = d.plan orelse return;
-    const title = g_ctx.fmt("{s} · {s} @ {s}", .{ plan.task, plan.agent, plan.host }) catch "Agent Belt";
+    const summary = (if (g_summary) |s| s.summary else null) orelse {
+        g_create_pending = true; // created when the name arrives
+        setText(g_hint, "Naming the session…");
+        return;
+    };
+    g_create_pending = false;
+    const task = summary.name;
+    const title = g_ctx.fmt("{s} · {s} @ {s}", .{ task, plan.agent, plan.host }) catch "Agent Belt";
     // Without a repo the agent works in ~/agents/<task> (research).
     const repo_args: []const []const u8 = if (plan.repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
-    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", plan.task, "--prompt", plan.prompt } }) catch return;
+    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", plan.prompt } }) catch return;
     openTerminal(title, args);
     _ = w.DestroyWindow(dialog);
 }
@@ -552,7 +581,28 @@ fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) cal
                 std.heap.page_allocator.destroy(old);
             }
             g_detected = d;
+            if (g_summary) |old| { // a new request: its name comes with its own summary
+                old.arena.deinit();
+                std.heap.page_allocator.destroy(old);
+            }
+            g_summary = null;
             showPlan();
+            return 0;
+        },
+        WM_SUMMARY => {
+            const s: *Detected = @ptrFromInt(@as(usize, @bitCast(lparam)));
+            if (wparam != g_serial) {
+                s.arena.deinit();
+                std.heap.page_allocator.destroy(s);
+                return 0;
+            }
+            if (g_summary) |old| {
+                old.arena.deinit();
+                std.heap.page_allocator.destroy(old);
+            }
+            g_summary = s;
+            showPlan();
+            if (g_create_pending) createFromPlan(hwnd);
             return 0;
         },
         0x0138 => if (g_intent != null and lparam == @as(isize, @bitCast(@intFromPtr(g_intent.?)))) { // WM_CTLCOLORSTATIC: the intent in the accent color
@@ -568,6 +618,12 @@ fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) cal
                 std.heap.page_allocator.destroy(old);
             }
             g_detected = null;
+            if (g_summary) |old| {
+                old.arena.deinit();
+                std.heap.page_allocator.destroy(old);
+            }
+            g_summary = null;
+            g_create_pending = false;
             return 0;
         },
         else => {},

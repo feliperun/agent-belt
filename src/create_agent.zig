@@ -15,6 +15,7 @@ pub const Controller = struct {
     io: std.Io,
     gpa: std.mem.Allocator,
     config: *const Config,
+    history_dir: []const u8,
     lock: std.Io.Mutex = .init,
     /// Bumped on every press, so a late hold timer knows it is stale.
     press: u32 = 0,
@@ -145,6 +146,7 @@ const Recording = struct {
         std.debug.print("[agent-belt] NEW AGENT: recording stopped\n", .{});
         // The stream never opened (no network, no key): transcribe the recording.
         const text = self.final orelse batch(self.owner, wav);
+        @import("history.zig").saveAsync(self.owner.io, self.owner.history_dir, .@"new-agent", wav, text orelse "");
         macos.createPanelCommit(gpa, text orelse "");
         macos.createPanelRecording(false);
         if (self.final) |f| gpa.free(f);

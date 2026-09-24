@@ -32,6 +32,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/updater.m` | release checks, notifications, source updates |
 | `src/system.m` | permissions, Keychain, single instance, `agb status` |
 | `src/create_panel.m`, `src/create_agent.zig` | the create-agent panel (key 5): streamed transcript, detected fields, confirmation |
+| `src/history.zig` | every recording (audio + transcript) kept 60 days; `agb history` |
 | `src/transcribe_stream.zig` | real-time transcription: Deepgram's live API over a std-only WebSocket client |
 | `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms); `intent.zig` + `jev.zig` turn a spoken request into agent, machine, repo and intent |
 | `src/linux/` | the Linux desktop commands run by compositor binds: `menu` (Omarchy's menu or walker), `waybar`, `ptt` (pw-record, wtype), Hyprland `install`; `overlay.qml` is the dictation overlay, hosted in Quickshell |
