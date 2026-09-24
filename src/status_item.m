@@ -296,7 +296,12 @@ int mk_status_init(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        // A new item lands left of all the others, which on a full menu bar is behind the
+        // notch. With an autosave name macOS keeps where it was (or where it was ⌘-dragged);
+        // the first time, it starts near the right edge, where there is room.
+        [NSUserDefaults.standardUserDefaults registerDefaults:@{@"NSStatusItem Preferred Position agent-belt": @220}];
         mk_status_item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+        mk_status_item.autosaveName = @"agent-belt";
         if (!mk_status_item) return -1;
         mk_status_ready();
         mk_install_status_menu();
