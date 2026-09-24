@@ -95,7 +95,7 @@ printf '\n== distributing\n'
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
   name="${NAMES[$i]}"; target="${TARGETS[$i]}"
   if [ "${KINDS[$i]}" = msys ]; then
-    printf '   %-18s skipped (Windows: see this script\'s header)\n' "$name"
+    printf '   %-18s skipped (Windows: see the header of this script)\n' "$name"
     continue
   fi
   # What each source offers *to this machine*, the comment saying whose key it is.
