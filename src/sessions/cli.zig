@@ -303,7 +303,7 @@ fn cmdNew(env: Env, args: []const []const u8) !u8 {
     const plan = parseNew(ctx, reg, args, repoExists) catch |err| {
         say("agb new: {s}", .{switch (err) {
             error.UnknownHost => "unknown machine (see: agb hosts)",
-            error.UnknownAgent => "agent must be claude, codex or shell",
+            error.UnknownAgent => "agent must be one of claude, codex, deepseek, zcode, fx or shell",
             else => @errorName(err),
         }});
         usageNew();
@@ -314,7 +314,7 @@ fn cmdNew(env: Env, args: []const []const u8) !u8 {
 
 fn usageNew() void {
     say(
-        \\usage: agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
+        \\usage: agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
         \\  agb new                                   claude here, in this repo
         \\  agb new codex windows web-app fix the login
         \\  agb new claude linux2 agent-belt review the README
@@ -364,7 +364,8 @@ fn runLocal(env: Env, plan: Plan) !u8 {
         switch (err) {
             error.NotARepo => say("agb: '{s}' is not a git repository here", .{plan.repo orelse ""}),
             error.WorktreeClash => say("agb: the worktree path exists and is not a worktree of this repo; pick another task name", .{}),
-            error.AgentNotFound => say("agb: {s} is not installed on this machine", .{@tagName(plan.agent)}),
+            error.AgentNotFound => say("agb: {s} ({s}) is not installed on this machine", .{ @tagName(plan.agent), plan.agent.program() }),
+            error.PromptRequired => say("agb: {s} answers one task: say what to do", .{@tagName(plan.agent)}),
             error.InvalidTask => say("agb: task names are letters, digits, . _ - ({s})", .{plan.task.?}),
             error.InvalidTarget => say("agb: a session name tmux cannot address (no ':'); pick another task name", .{}),
             else => say("agb: {s}", .{@errorName(err)}),

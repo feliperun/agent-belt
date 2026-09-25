@@ -12,7 +12,7 @@ tmux marks it wrote are still read.
 ## Commands
 
 ```
-agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
+agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
 agb sessions                      interactive picker across all machines
 agb ls                            the same list, as text
 agb repos [machine]               the repository names agb new accepts there
@@ -31,7 +31,7 @@ agb tm [name]                     a plain tmux session, no worktree or agent
 
 | Word | Meaning | Default |
 |---|---|---|
-| agent | `claude`, `codex` or `shell` | `claude` |
+| agent | `claude`, `codex`, `deepseek`, `zcode`, `fx` or `shell` | `claude` |
 | machine | a registry name, a unique prefix, a dash-separated part (`windows` for `windows-pc`), or `here` | this machine |
 | repo | a repository name on that machine (checked by asking it) or a path | the repo this terminal is in; none elsewhere |
 | what to do | the agent's first prompt; its first words also name the task | none |
@@ -86,6 +86,9 @@ agent publishes its name as the terminal title), keeping the repo prefix.
 |---|---|
 | claude | `claude --dangerously-skip-permissions --name <task>` (or `--continue`) |
 | codex | `codex --dangerously-bypass-approvals-and-sandbox` |
+| deepseek | `dsh --profile headless "<prompt>"`, then a shell in the same pane (DeepSeek Harness has no terminal UI; a prompt is required) |
+| zcode | `zcode`; tmux types the first prompt once its screen is drawn |
+| fx | `fx`; tmux types the first prompt once its screen is drawn |
 | shell | `$SHELL` (on Windows, MSYS2's `bash -l`) |
 
 ## Machines

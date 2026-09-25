@@ -23,6 +23,8 @@ pub const Plan = struct {
     prompt: []const u8,
     hosts: []const []const u8,
     repos: []const []const u8,
+    /// Every harness, for the pickers.
+    agents: []const []const u8 = local.agent_names,
 };
 
 // ---------------------------------------------------------------- repo index
@@ -48,7 +50,7 @@ pub fn cachedRepos(ctx: sys.Ctx, host: []const u8) ![]const []const u8 {
 /// harnesses, the machines and every repo in the index.
 pub fn keyterms(ctx: sys.Ctx, reg: hosts.Registry) ![]const []const u8 {
     var terms: std.ArrayList([]const u8) = .empty;
-    try terms.appendSlice(ctx.gpa, &.{ "claude", "codex", "shell" });
+    try terms.appendSlice(ctx.gpa, local.agent_names);
     for (reg.hosts) |h| {
         try terms.append(ctx.gpa, h.name);
         for (try cachedRepos(ctx, h.name)) |r| {
@@ -94,7 +96,7 @@ fn apiKey(ctx: sys.Ctx, env_name: []const u8, account: []const u8) ?[]const u8 {
 // ---------------------------------------------------------------- intent text
 
 /// Words that make an opening clause a request for a session, not the work.
-const session_words = [_][]const u8{ "agente", "agent", "sessão", "sessao", "session", "shell", "terminal", "claude", "codex", "codecs" };
+const session_words = [_][]const u8{ "agente", "agent", "sessão", "sessao", "session", "shell", "terminal", "claude", "codex", "codecs", "deepseek", "deep seek", "zcode", "z code" };
 
 /// The work, in the person's own words: what follows "para"/"pra" when the
 /// short opening clause before it asks for a session ("crie um agente no linux
@@ -139,7 +141,7 @@ pub const Summary = struct { name: []const u8, summary: []const u8, prompt: []co
 
 /// The whole instruction for the cleaning model (kept identical, first).
 const cleaning =
-    \\You clean a voice-dictated request to start a coding agent. The speech-to-text may misspell names ("cloud" or "clode" = Claude, "codecs" = Codex).
+    \\You clean a voice-dictated request to start a coding agent. The speech-to-text may misspell names ("cloud" or "clode" = Claude, "codecs" = Codex, "deep sick" = DeepSeek, "z code" = ZCode).
     \\The request mixes routing (asking to create or open an agent or session, which agent, which machine, which repository or folder) with the work. Routing is decided elsewhere: drop it entirely.
     \\Reply with only JSON:
     \\{"prompt": "<the work, in the request's language and the person's own words: routing removed, obvious transcription errors fixed; add nothing, no headings, no lists, no rephrasing beyond that>", "summary": "<one short sentence, in the request's language, of what the agent will do>", "name": "<2 to 4 lowercase English words joined by hyphens naming the work>"}
@@ -286,7 +288,7 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
     }
     var said_agent = fixed.agent != null;
     var said_host = fixed.host != null or reg.hosts.len <= 1;
-    if (!said_agent) if (exactAgent(text)) |a| {
+    if (!said_agent) if (try exactAgent(ctx, text)) |a| {
         plan.agent = a;
         plan.agent_confidence = 1;
         said_agent = true;
@@ -310,10 +312,13 @@ pub fn detect(ctx: sys.Ctx, reg: hosts.Registry, text: []const u8, fixed: Fixed)
     var questions: std.ArrayList(jev.Question) = .empty;
     if (!said_agent) try questions.append(ctx.gpa, .{
         .key = "harness",
-        .instructions = "Which coding agent does the spoken request ask to start? It was transcribed from speech, so names may be misspelled: \"codecs\" means codex, \"cloud\" means claude.",
+        .instructions = "Which coding agent does the spoken request ask to start? It was transcribed from speech, so names may be misspelled: \"codecs\" means codex, \"cloud\" means claude, \"deep sick\" means deepseek, \"zee code\" means zcode, \"efe xis\" means fx.",
         .options = &.{
             .{ .name = "claude", .description = "Claude Code" },
             .{ .name = "codex", .description = "OpenAI Codex" },
+            .{ .name = "deepseek", .description = "DeepSeek Harness (dsh)" },
+            .{ .name = "zcode", .description = "ZCode, Z.ai's coding agent" },
+            .{ .name = "fx", .description = "fx, a native coding agent for the terminal" },
             .{ .name = "shell", .description = "a plain shell or terminal, no agent" },
             .{ .name = "unspecified", .description = "the request names no agent" },
         },
@@ -503,12 +508,17 @@ fn hasPhrase(list: []const []const u8, phrase: []const u8) bool {
     return false;
 }
 
-fn exactAgent(text: []const u8) ?[]const u8 {
+/// A harness named outright, as written or as said ("deep seek", "z code").
+fn exactAgent(ctx: sys.Ctx, text: []const u8) !?[]const u8 {
+    const said = [_]struct { []const u8, []const u8 }{
+        .{ "claude", "claude" }, .{ "codex", "codex" }, .{ "shell", "shell" },   .{ "deepseek", "deepseek" }, .{ "deep seek", "deepseek" },
+        .{ "dsh", "deepseek" },  .{ "zcode", "zcode" }, .{ "z code", "zcode" }, .{ "z-code", "zcode" },      .{ "fx", "fx" },
+    };
+    const list = try wordsOf(ctx, text);
     var found: ?[]const u8 = null;
-    var it = std.mem.tokenizeAny(u8, text, " ,.;:!?\t");
-    while (it.next()) |w| for ([_][]const u8{ "claude", "codex", "shell" }) |a| if (std.ascii.eqlIgnoreCase(w, a)) {
-        if (found != null and !std.mem.eql(u8, found.?, a)) return null; // two named: let Jev decide
-        found = a;
+    for (said) |s| if (hasPhrase(list, s[0])) {
+        if (found != null and !std.mem.eql(u8, found.?, s[1])) return null; // two named: let Jev decide
+        found = s[1];
     };
     return found;
 }
@@ -633,13 +643,16 @@ test "intent drops the routing words" {
 }
 
 test "exact names are whole words" {
-    try std.testing.expectEqualStrings("codex", exactAgent("abre um codex no api").?);
-    try std.testing.expect(exactAgent("abre um agente no api") == null);
-    try std.testing.expect(exactAgent("claude ou codex?") == null);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var env_map = std.process.Environ.Map.init(arena.allocator());
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    try std.testing.expectEqualStrings("codex", (try exactAgent(ctx, "abre um codex no api")).?);
+    try std.testing.expect((try exactAgent(ctx, "abre um agente no api")) == null);
+    try std.testing.expect((try exactAgent(ctx, "claude ou codex?")) == null);
+    try std.testing.expectEqualStrings("deepseek", (try exactAgent(ctx, "um agente com Deep Seek no api")).?);
+    try std.testing.expectEqualStrings("zcode", (try exactAgent(ctx, "abre o Z Code no linux")).?);
+    try std.testing.expectEqualStrings("fx", (try exactAgent(ctx, "FX no web-app")).?);
     const list = try wordsOf(ctx, "Shell no mac-tools, no Linux 2.");
     try std.testing.expect(hasPhrase(list, "mac-tools"));
     try std.testing.expect(!hasPhrase(list, "mac"));

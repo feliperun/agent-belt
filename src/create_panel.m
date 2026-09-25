@@ -331,7 +331,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
 // A field's menu: every option Jev chose among, the current one checked.
 - (void)pick:(NSButton *)chip {
     NSString *key = chip.identifier;
-    NSArray *options = [key isEqual:@"agent"] ? @[@"claude", @"codex", @"shell"]
+    NSArray *options = [key isEqual:@"agent"] ? self.plan[@"agents"]
         : [key isEqual:@"host"] ? self.plan[@"hosts"] : self.plan[@"repos"];
     if (![options isKindOfClass:NSArray.class] || !options.count) return;
     NSString *current = self.fixed[key] ?: self.plan[key];
@@ -396,7 +396,7 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     // claude in repo xyz that…") removed by `agb _summary`; the panel's text otherwise.
     NSString *agentPrompt = [self.summary[@"prompt"] length] ? self.summary[@"prompt"] : text;
     [command appendFormat:@" --prompt %@", q(agentPrompt)];
-    NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];
+    NSString *title = [NSString stringWithFormat:@"%@ · %@ @ %@", task, agent, host];
     // The session, not the request: the prompt is what was dictated, and the
     // log lives as long as the install does (`agb history` keeps the words).
     fprintf(stderr, "[agent-belt] new agent: %s\n", title.UTF8String);

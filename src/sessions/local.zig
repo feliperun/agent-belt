@@ -6,11 +6,33 @@ const sys = @import("sys.zig");
 
 pub const sep = "|";
 
-pub const Agent = enum { claude, codex, shell };
+/// The harnesses a session can run. DeepSeek Harness installs as `dsh`, the
+/// others under their own name.
+pub const Agent = enum {
+    claude,
+    codex,
+    deepseek,
+    zcode,
+    fx,
+    shell,
+
+    pub fn program(agent: Agent) []const u8 {
+        return if (agent == .deepseek) "dsh" else @tagName(agent);
+    }
+};
+
+/// Every harness by name, in the order the pickers show them.
+pub const agent_names = std.meta.fieldNames(Agent);
 
 pub fn parseAgent(name: []const u8) ?Agent {
     return std.meta.stringToEnum(Agent, name);
 }
+
+/// Programs that are a harness when they run in a pane, and the agent each
+/// one is listed as (inferred: agb did not start it).
+const agent_programs = [_]struct { []const u8, []const u8 }{
+    .{ "claude", "claude~" }, .{ "codex", "codex~" }, .{ "zcode", "zcode~" }, .{ "fx", "fx~" }, .{ "dsh", "deepseek~" },
+};
 
 // ---------------------------------------------------------------- tmux
 
@@ -264,46 +286,75 @@ fn claudeConversationExists(ctx: sys.Ctx, path: []const u8) bool {
     return false;
 }
 
-fn agentCommand(ctx: sys.Ctx, opts: CreateOptions, worktree: []const u8) ![]const u8 {
-    var cmd: std.ArrayList(u8) = .empty;
-    switch (opts.agent) {
-        .claude, .codex => {
-            const bin = sys.which(ctx, @tagName(opts.agent)) orelse return error.AgentNotFound;
-            if (sys.platform == .windows) try cmd.appendSlice(ctx.gpa, "winpty ");
-            try cmd.appendSlice(ctx.gpa, try sys.shQuote(ctx, if (sys.platform == .windows) try sys.toMsys(ctx, bin) else bin));
-            if (opts.agent == .claude) {
-                try cmd.appendSlice(ctx.gpa, " --dangerously-skip-permissions");
-                // A worktree that had a conversation continues it: a dead tmux
-                // session should not mean starting over. WORK_NEW=1 forces a new one.
-                const fresh = if (ctx.getenv("WORK_NEW")) |v| std.mem.eql(u8, v, "1") else false;
-                if (!fresh and claudeConversationExists(ctx, worktree))
-                    try cmd.appendSlice(ctx.gpa, " --continue")
-                else
-                    try cmd.appendSlice(ctx.gpa, try ctx.fmt(" --name {s}", .{try sys.shQuote(ctx, opts.task)}));
-            } else {
-                try cmd.appendSlice(ctx.gpa, " --dangerously-bypass-approvals-and-sandbox");
-            }
-            // The first instruction becomes the agent's first prompt. It goes
-            // through a file: tmux caps a command at 16 KB, and a long spoken
-            // request is longer.
-            if (opts.prompt) |p| if (p.len > 0) {
-                // A spoken request is private: the file is the owner's, and so
-                // is the directory, whose entries are the task names.
-                const dir = try ctx.join(&.{ ctx.home(), ".cache", "agent-belt", "prompts" });
-                sys.createPrivateDir(ctx.io, dir) catch {};
-                const file = try ctx.join(&.{ dir, try ctx.fmt("{s}.txt", .{opts.task}) });
-                sys.writeFileAtomic(ctx, file, p) catch return error.WorktreeFailed;
-                const shown = if (sys.platform == .windows) try sys.toMsys(ctx, file) else file;
-                try cmd.appendSlice(ctx.gpa, try ctx.fmt(" \"$(cat {s})\"", .{try sys.shQuote(ctx, shown)}));
-            };
-        },
-        // tmux hands this line to /bin/sh: $SHELL is a path, not a command.
-        .shell => try cmd.appendSlice(ctx.gpa, if (sys.platform == .windows) "bash -l" else try sys.shQuote(ctx, ctx.getenv("SHELL") orelse "/bin/sh")),
-    }
-    return cmd.items;
+/// What starts the agent, and the file with a first prompt tmux must type
+/// into it (a harness that takes none on its command line).
+const Launch = struct { command: []const u8, typed_prompt: ?[]const u8 = null };
+
+/// This machine's shell, as tmux hands a line to /bin/sh: $SHELL is a path.
+fn loginShell(ctx: sys.Ctx) ![]const u8 {
+    return if (sys.platform == .windows) "bash -l" else sys.shQuote(ctx, ctx.getenv("SHELL") orelse "/bin/sh");
 }
 
-pub const CreateError = error{ NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, InvalidTask, InvalidTarget } || std.mem.Allocator.Error;
+fn agentCommand(ctx: sys.Ctx, opts: CreateOptions, worktree: []const u8) !Launch {
+    if (opts.agent == .shell) return .{ .command = try loginShell(ctx) };
+    const bin = sys.which(ctx, opts.agent.program()) orelse return error.AgentNotFound;
+    // The first instruction becomes the agent's first prompt. It goes through a
+    // file: tmux caps a command at 16 KB, and a long spoken request is longer.
+    const prompt_file: ?[]const u8 = if (opts.prompt) |p| (if (p.len > 0) try promptFile(ctx, opts.task, p) else null) else null;
+    var cmd: std.ArrayList(u8) = .empty;
+    if (sys.platform == .windows) try cmd.appendSlice(ctx.gpa, "winpty ");
+    try cmd.appendSlice(ctx.gpa, try sys.shQuote(ctx, if (sys.platform == .windows) try sys.toMsys(ctx, bin) else bin));
+    switch (opts.agent) {
+        .claude => {
+            try cmd.appendSlice(ctx.gpa, " --dangerously-skip-permissions");
+            // A worktree that had a conversation continues it: a dead tmux
+            // session should not mean starting over. WORK_NEW=1 forces a new one.
+            const fresh = if (ctx.getenv("WORK_NEW")) |v| std.mem.eql(u8, v, "1") else false;
+            if (!fresh and claudeConversationExists(ctx, worktree))
+                try cmd.appendSlice(ctx.gpa, " --continue")
+            else
+                try cmd.appendSlice(ctx.gpa, try ctx.fmt(" --name {s}", .{try sys.shQuote(ctx, opts.task)}));
+        },
+        .codex => try cmd.appendSlice(ctx.gpa, " --dangerously-bypass-approvals-and-sandbox"),
+        // DeepSeek Harness has no terminal UI: it answers one task headless, and
+        // the pane keeps a shell to go on from there.
+        .deepseek => try cmd.appendSlice(ctx.gpa, " --profile headless"),
+        .zcode, .fx => return .{ .command = cmd.items, .typed_prompt = prompt_file },
+        .shell => unreachable,
+    }
+    if (prompt_file) |file| {
+        const shown = if (sys.platform == .windows) try sys.toMsys(ctx, file) else file;
+        try cmd.appendSlice(ctx.gpa, try ctx.fmt(" \"$(cat {s})\"", .{try sys.shQuote(ctx, shown)}));
+    } else if (opts.agent == .deepseek) return error.PromptRequired;
+    if (opts.agent == .deepseek) try cmd.appendSlice(ctx.gpa, try ctx.fmt("; exec {s}", .{try loginShell(ctx)}));
+    return .{ .command = cmd.items };
+}
+
+/// A spoken request is private: the file is the owner's, and so is the
+/// directory, whose entries are the task names.
+fn promptFile(ctx: sys.Ctx, task: []const u8, prompt: []const u8) ![]const u8 {
+    const dir = try ctx.join(&.{ ctx.home(), ".cache", "agent-belt", "prompts" });
+    sys.createPrivateDir(ctx.io, dir) catch {};
+    const file = try ctx.join(&.{ dir, try ctx.fmt("{s}.txt", .{task}) });
+    sys.writeFileAtomic(ctx, file, prompt) catch return error.WorktreeFailed;
+    return file;
+}
+
+/// zcode and fx take no first prompt on their command line: tmux types it
+/// once the program has drawn its screen (the same screen twice, half a second
+/// apart; at most 20 s). In tmux's background, so attaching does not wait.
+fn typePrompt(ctx: sys.Ctx, session_id: []const u8, task: []const u8, file: []const u8) void {
+    const t = sys.shQuote(ctx, ctx.fmt("{s}:", .{session_id}) catch return) catch return;
+    const tm = sys.shQuote(ctx, if (sys.platform == .windows) "tmux" else tmuxBin(ctx)) catch return;
+    const f = sys.shQuote(ctx, if (sys.platform == .windows) (sys.toMsys(ctx, file) catch return) else file) catch return;
+    const buffer = sys.shQuote(ctx, ctx.fmt("agb-prompt-{s}", .{task}) catch return) catch return;
+    const script = ctx.fmt("i=0; last=; while [ $i -lt 40 ]; do sleep 0.5; now=$({0s} capture-pane -p -t {1s}); " ++
+        "[ -n \"$now\" ] && [ \"$now\" = \"$last\" ] && [ $i -ge 3 ] && break; last=$now; i=$((i+1)); done; " ++
+        "{0s} load-buffer -b {3s} {2s} && {0s} paste-buffer -p -d -b {3s} -t {1s} && sleep 0.3 && {0s} send-keys -t {1s} Enter", .{ tm, t, f, buffer }) catch return;
+    _ = tmux(ctx, &.{ "run-shell", "-b", script });
+}
+
+pub const CreateError = error{ NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, PromptRequired, InvalidTask, InvalidTarget } || std.mem.Allocator.Error;
 
 /// Creates (or reuses) the task's session and attaches this terminal to it, or,
 /// with no_attach, returns its name.
@@ -365,10 +416,10 @@ fn startAgent(ctx: sys.Ctx, opts: CreateOptions, session: []const u8, dir: []con
     if (!no_trust) switch (opts.agent) {
         .claude => trustClaude(ctx, worktree),
         .codex => trustCodex(ctx, worktree),
-        .shell => {},
+        .deepseek, .zcode, .fx, .shell => {},
     };
 
-    const command = try agentCommand(ctx, opts, worktree);
+    const launch = try agentCommand(ctx, opts, worktree);
     const cwd = if (sys.platform == .windows) try sys.toMsys(ctx, worktree) else worktree;
     // Start the server first, detached from this process's descriptors: on
     // Windows it would otherwise die with the console that created it.
@@ -378,12 +429,13 @@ fn startAgent(ctx: sys.Ctx, opts: CreateOptions, session: []const u8, dir: []con
     // before it knows its task. Printed back: the session id, which survives
     // renames, so attaching cannot miss it.
     const target = try paneTarget(ctx, session); // set-option takes a pane target on tmux 3.5+
-    const made = tmux(ctx, &.{ "new-session", "-d", "-P", "-F", "#{session_id}", "-s", session, "-c", cwd, command, ";", "set-option", "-t", target, "@work_agent", @tagName(opts.agent), ";", "set-option", "-t", target, "@work_task", opts.task });
+    const made = tmux(ctx, &.{ "new-session", "-d", "-P", "-F", "#{session_id}", "-s", session, "-c", cwd, launch.command, ";", "set-option", "-t", target, "@work_agent", @tagName(opts.agent), ";", "set-option", "-t", target, "@work_task", opts.task });
     const id = std.mem.trim(u8, made.stdout, " \r\n");
     if (!made.ok or id.len == 0 or id[0] != '$') {
         std.debug.print("{s}", .{made.stderr});
         return error.TmuxFailed;
     }
+    if (launch.typed_prompt) |file| typePrompt(ctx, id, opts.task, file);
     tmuxSetup(ctx);
     if (opts.no_attach) return session;
     attachTarget(ctx, id, opts.detach_others);
@@ -445,13 +497,12 @@ fn inferAgent(ctx: sys.Ctx, tty: []const u8, command: []const u8) []const u8 {
     if (sys.platform != .windows and tty.len > 0) {
         const t = if (std.mem.startsWith(u8, tty, "/dev/")) tty[5..] else tty;
         const out = sys.run(ctx, &.{ "ps", "-t", t, "-o", "args=" }, null);
-        if (hasWord(out.stdout, "claude")) return "claude~";
-        if (hasWord(out.stdout, "codex")) return "codex~";
+        for (agent_programs) |a| if (hasWord(out.stdout, a[0])) return a[1];
     }
     const shells = [_][]const u8{ "bash", "zsh", "sh", "fish", "pwsh", "powershell" };
     for (shells) |s| if (std.mem.eql(u8, command, s)) return "shell";
-    if (std.mem.eql(u8, command, "claude") or std.mem.eql(u8, command, "winpty")) return "claude~";
-    if (std.mem.eql(u8, command, "codex")) return "codex~";
+    if (std.mem.eql(u8, command, "winpty")) return "claude~";
+    for (agent_programs) |a| if (std.mem.eql(u8, command, a[0])) return a[1];
     return if (command.len == 0) "-" else command;
 }
 
@@ -537,7 +588,7 @@ fn agentsOutside(ctx: sys.Ctx) usize {
         var it = std.mem.splitScalar(u8, panes.stdout, '\n');
         while (it.next()) |c| {
             const cmd = std.mem.trimEnd(u8, c, "\r");
-            if (std.mem.eql(u8, cmd, "winpty") or std.mem.eql(u8, cmd, "claude") or std.mem.eql(u8, cmd, "codex")) inside += 1;
+            if (std.mem.eql(u8, cmd, "winpty") or isAgentCommand(cmd)) inside += 1;
         }
         const total = windowsAgentPids(ctx).len;
         return if (total > inside) total - inside else 0;
@@ -561,8 +612,9 @@ fn normTty(t: []const u8) []const u8 {
 fn isAgentCommand(args: []const u8) bool {
     var words = std.mem.tokenizeScalar(u8, args, ' ');
     const exe = std.fs.path.basename(words.next() orelse return false);
-    if (std.mem.eql(u8, exe, "claude") or std.mem.eql(u8, exe, "codex")) return true;
-    return std.mem.eql(u8, exe, "node") and (hasWord(args, "claude") or hasWord(args, "codex"));
+    const node = std.mem.eql(u8, exe, "node");
+    for (agent_programs) |a| if (std.mem.eql(u8, exe, a[0]) or (node and hasWord(args, a[0]))) return true;
+    return false;
 }
 
 fn posixOutside(ctx: sys.Ctx) []Loose {
@@ -599,7 +651,7 @@ fn posixOutside(ctx: sys.Ctx) []Loose {
 
 fn windowsAgentPids(ctx: sys.Ctx) [][]const u8 {
     var pids: std.ArrayList([]const u8) = .empty;
-    for ([_][]const u8{ "claude.exe", "codex.exe" }) |image| {
+    for ([_][]const u8{ "claude.exe", "codex.exe", "zcode.exe", "fx.exe" }) |image| {
         const out = sys.run(ctx, &.{ "tasklist", "/FO", "CSV", "/NH", "/FI", ctx.fmt("IMAGENAME eq {s}", .{image}) catch continue }, null);
         var lines = std.mem.splitScalar(u8, out.stdout, '\n');
         while (lines.next()) |line| {
@@ -729,6 +781,8 @@ pub fn adoptList(ctx: sys.Ctx) ![]Adoptable {
     var list: std.ArrayList(Adoptable) = .empty;
     if (sys.platform == .windows) return list.items; // native processes expose no cwd to agb
     for (posixOutside(ctx)) |loose| {
+        // Only Claude Code and Codex keep a conversation agb can reopen.
+        if (!hasWord(loose.args, "claude") and !hasWord(loose.args, "codex")) continue;
         const agent: []const u8 = if (hasWord(loose.args, "codex")) "codex" else "claude";
         try list.append(ctx.gpa, .{ .pid = loose.pid, .agent = agent, .dir = processCwd(ctx, loose.pid) orelse "?", .conversation = runningConversation(ctx, loose.pid, agent, loose.args) });
     }
@@ -775,12 +829,14 @@ pub fn adoptDo(ctx: sys.Ctx, pid: []const u8) ![]const u8 {
 /// `agb _probe`: what this machine can do, in one line.
 pub fn probe(ctx: sys.Ctx, version: []const u8) ![]const u8 {
     const tmux_version = std.mem.trim(u8, tmux(ctx, &.{"-V"}).text(), " ");
-    return ctx.fmt("agb={s} tmux={s} git={s} claude={s} codex={s} repos={s}", .{
+    var agents: std.ArrayList(u8) = .empty;
+    inline for (std.meta.fields(Agent)) |f| if (@field(Agent, f.name) != .shell and sys.which(ctx, @field(Agent, f.name).program()) != null)
+        try agents.appendSlice(ctx.gpa, if (agents.items.len > 0) "," ++ f.name else f.name);
+    return ctx.fmt("agb={s} tmux={s} git={s} agents={s} repos={s}", .{
         version,
         if (tmux_version.len > 0) tmux_version else "NO",
         if (sys.which(ctx, "git") != null) "yes" else "NO",
-        if (sys.which(ctx, "claude") != null) "yes" else "NO",
-        if (sys.which(ctx, "codex") != null) "yes" else "NO",
+        if (agents.items.len > 0) agents.items else "NONE",
         try reposDir(ctx),
     });
 }
@@ -877,4 +933,13 @@ test "repositories one folder down are found, worktrees are not" {
     try std.testing.expectEqualStrings("api", names[0]);
     try std.testing.expectEqualStrings("web-app", names[1]);
     try std.testing.expect(std.mem.endsWith(u8, (try findRepos(ctx))[1].path, "web-app"));
+}
+
+test "every harness is recognized in a pane" {
+    try std.testing.expect(isAgentCommand("/home/alice/.local/bin/fx"));
+    try std.testing.expect(isAgentCommand("zcode"));
+    try std.testing.expect(isAgentCommand("node /usr/lib/node_modules/@deepseek-ai/dsh/lib/dsh --profile headless job"));
+    try std.testing.expect(!isAgentCommand("fxtop"));
+    try std.testing.expectEqualStrings("dsh", Agent.deepseek.program());
+    try std.testing.expectEqual(Agent.zcode, parseAgent("zcode").?);
 }

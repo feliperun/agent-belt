@@ -65,7 +65,7 @@ fn usageSessions() !void {
     std.debug.print(
         \\agb (Agent Belt) {s}: agent sessions on any machine of your tailnet
         \\
-        \\  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
+        \\  agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
         \\  agb sessions | ls | repos [machine] | attach [-d] <session> [machine]
         \\  agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
@@ -235,7 +235,7 @@ fn usage() !void {
         "  agb status\n" ++
         "  agb version\n" ++
         "  agb update [tag]\n" ++
-        "  agb new [claude|codex|shell] [machine|here] [repo] [what to do…]\n" ++
+        "  agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]\n" ++
         "  agb panel [words] | --close              the create-agent panel\n" ++
         "  agb history [days] [--json]              recordings and transcripts (60 days)\n" ++
         "  agb sessions | ls | attach <s> [m] | hosts | doctor | adopt | tm [name] | deploy <m…|--all>\n" ++

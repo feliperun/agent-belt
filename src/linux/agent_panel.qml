@@ -45,7 +45,7 @@ ShellRoot {
     }
 
     function options(key) {
-        if (key === "agent") return ["claude", "codex", "shell"]
+        if (key === "agent") return root.plan ? root.plan.agents : []
         if (key === "host") return root.plan ? root.plan.hosts : []
         return ["none (research)"].concat(root.plan ? root.plan.repos : [])
     }
