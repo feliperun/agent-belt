@@ -165,6 +165,13 @@ file — keep appending.
 - **Windows: `ssh.exe` never exits when its stdout is a pipe inside an ssh session**
   (it prints the output, then hangs). Remote calls from Windows capture through
   temporary files (`sys.runCaptured`); otherwise `agb ls` over ssh hangs forever.
+- **Adopt only by the exact conversation id.** `claude --continue` and `codex resume
+  --last` reopen the latest conversation in the directory, which can be another agent's:
+  two processes then share one conversation and one of them dies or is replaced (seen as a
+  session "killed at the origin"). The id comes from the arguments,
+  `~/.claude/sessions/<pid>.json` or the Codex rollout file the process keeps open; without
+  one, adopt refuses. Only the agent's own executable counts as an agent, never a command
+  that mentions one (`agb new --agent claude`) (`src/sessions/local.zig`).
 - **Windows: only a scheduled task (`schtasks /it`) reaches the desktop session from
   ssh**, and a running `.exe` can be renamed but not overwritten: `agb deploy` renames
   `agb.exe` aside and swaps `agent-belt.exe` in before restarting it.

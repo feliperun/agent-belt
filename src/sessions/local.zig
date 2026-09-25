@@ -520,6 +520,15 @@ fn normTty(t: []const u8) []const u8 {
 
 /// Agent processes with a terminal that no tmux pane owns. Claude Code's own
 /// background workers (bg-spare, versioned binaries) are nobody's session.
+/// The process is the agent itself, not a program that mentions one
+/// (`agb new --agent claude …`, an ssh carrying it).
+fn isAgentCommand(args: []const u8) bool {
+    var words = std.mem.tokenizeScalar(u8, args, ' ');
+    const exe = std.fs.path.basename(words.next() orelse return false);
+    if (std.mem.eql(u8, exe, "claude") or std.mem.eql(u8, exe, "codex")) return true;
+    return std.mem.eql(u8, exe, "node") and (hasWord(args, "claude") or hasWord(args, "codex"));
+}
+
 fn posixOutside(ctx: sys.Ctx) []Loose {
     var result: std.ArrayList(Loose) = .empty;
     const panes = tmux(ctx, &.{ "list-panes", "-a", "-F", "#{pane_tty}" });
@@ -533,7 +542,7 @@ fn posixOutside(ctx: sys.Ctx) []Loose {
         const args = std.mem.trim(u8, words.rest(), " ");
         if (std.mem.eql(u8, tty, "??") or std.mem.eql(u8, tty, "?")) continue;
         if (std.mem.indexOf(u8, args, "bg-spare") != null or std.mem.indexOf(u8, args, "/versions/") != null) continue;
-        if (!hasWord(args, "claude") and !hasWord(args, "codex")) continue;
+        if (!isAgentCommand(args)) continue;
         const t = normTty(tty);
         var owned = false;
         var p = std.mem.splitScalar(u8, panes.stdout, '\n');
@@ -612,15 +621,60 @@ fn processCwd(ctx: sys.Ctx, pid: []const u8) ?[]const u8 {
     return null;
 }
 
-/// --resume <id> / --session-id <id> in the process arguments names the exact conversation.
+/// --resume <id> / --session-id <id> in the process arguments names the exact
+/// conversation (a name, as in `--resume fx-deepseek`, does not).
 fn conversationId(args: []const u8) []const u8 {
     for ([_][]const u8{ "--resume ", "--resume=", "--session-id ", "--session-id=" }) |flag| {
         if (std.mem.indexOf(u8, args, flag)) |i| {
             const start = i + flag.len;
-            if (start + 36 <= args.len) return args[start .. start + 36];
+            if (start + 36 <= args.len and isUuid(args[start .. start + 36])) return args[start .. start + 36];
         }
     }
     return "";
+}
+
+fn isUuid(s: []const u8) bool {
+    if (s.len != 36) return false;
+    for (s, 0..) |c, i| {
+        const dash = i == 8 or i == 13 or i == 18 or i == 23;
+        if (dash != (c == '-')) return false;
+        if (!dash and !std.ascii.isHex(c)) return false;
+    }
+    return true;
+}
+
+/// The conversation in Claude Code's record of a process
+/// (~/.claude/sessions/<pid>.json).
+fn sessionIdFromJson(bytes: []const u8) ?[]const u8 {
+    const key = "\"sessionId\":\"";
+    const at = std.mem.indexOf(u8, bytes, key) orelse return null;
+    const start = at + key.len;
+    if (start + 36 > bytes.len or !isUuid(bytes[start .. start + 36])) return null;
+    return bytes[start .. start + 36];
+}
+
+/// The conversation of a Codex process: the rollout file it keeps open
+/// (`lsof -Fn` output), rollout-<time>-<id>.jsonl.
+fn rolloutId(lsof: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, lsof, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.endsWith(u8, line, ".jsonl") or std.mem.indexOf(u8, line, "/rollout-") == null) continue;
+        const stem = line[0 .. line.len - ".jsonl".len];
+        if (stem.len >= 36 and isUuid(stem[stem.len - 36 ..])) return stem[stem.len - 36 ..];
+    }
+    return null;
+}
+
+/// The exact conversation of a running agent: its arguments, else what the
+/// agent itself records. Empty when it cannot be known.
+fn runningConversation(ctx: sys.Ctx, pid: []const u8, agent: []const u8, args: []const u8) []const u8 {
+    const said = conversationId(args);
+    if (said.len > 0) return said;
+    if (std.mem.eql(u8, agent, "claude")) {
+        const path = ctx.join(&.{ ctx.home(), ".claude", "sessions", ctx.fmt("{s}.json", .{pid}) catch return "" }) catch return "";
+        return sessionIdFromJson(sys.readFile(ctx, path) orelse return "") orelse "";
+    }
+    return rolloutId(sys.run(ctx, &.{ "lsof", "-p", pid, "-Fn" }, null).stdout) orelse "";
 }
 
 pub fn adoptList(ctx: sys.Ctx) ![]Adoptable {
@@ -628,7 +682,7 @@ pub fn adoptList(ctx: sys.Ctx) ![]Adoptable {
     if (sys.platform == .windows) return list.items; // native processes expose no cwd to agb
     for (posixOutside(ctx)) |loose| {
         const agent: []const u8 = if (hasWord(loose.args, "codex")) "codex" else "claude";
-        try list.append(ctx.gpa, .{ .pid = loose.pid, .agent = agent, .dir = processCwd(ctx, loose.pid) orelse "?", .conversation = conversationId(loose.args) });
+        try list.append(ctx.gpa, .{ .pid = loose.pid, .agent = agent, .dir = processCwd(ctx, loose.pid) orelse "?", .conversation = runningConversation(ctx, loose.pid, agent, loose.args) });
     }
     return list.items;
 }
@@ -639,11 +693,14 @@ pub fn adoptDo(ctx: sys.Ctx, pid: []const u8) ![]const u8 {
     for (try adoptList(ctx)) |a| {
         if (!std.mem.eql(u8, a.pid, pid)) continue;
         if (!sys.isDir(ctx, a.dir)) return error.UnknownDirectory;
+        // Never "the latest conversation here": it can be another agent's, and
+        // two processes on one conversation fight over it. Unknown: not adopted.
+        if (a.conversation.len == 0) return error.ConversationUnknown;
         const bin = sys.which(ctx, a.agent) orelse return error.AgentNotFound;
         const command = if (std.mem.eql(u8, a.agent, "claude"))
-            try ctx.fmt("{s} --dangerously-skip-permissions {s}", .{ try sys.shQuote(ctx, bin), if (a.conversation.len > 0) try ctx.fmt("--resume {s}", .{a.conversation}) else "--continue" })
+            try ctx.fmt("{s} --dangerously-skip-permissions --resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation })
         else
-            try ctx.fmt("{s} --dangerously-bypass-approvals-and-sandbox resume {s}", .{ try sys.shQuote(ctx, bin), if (a.conversation.len > 0) a.conversation else "--last" });
+            try ctx.fmt("{s} --dangerously-bypass-approvals-and-sandbox resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation });
         const base = try ctx.gpa.dupe(u8, std.fs.path.basename(a.dir));
         for (base) |*c| if (!(std.ascii.isAlphanumeric(c.*) or c.* == '.' or c.* == '_' or c.* == '-')) {
             c.* = '-';
@@ -707,4 +764,20 @@ test "a tmux client draws UTF-8 without a locale" {
     const got = try clientArgs(ctx, &.{ "attach", "-t", "$1" });
     try std.testing.expectEqualStrings("-u", got[0]);
     try std.testing.expectEqualStrings("attach", got[1]);
+}
+
+test "the exact conversation of a running agent" {
+    try std.testing.expectEqualStrings("2016788a-06be-43f8-a304-c6845c8be72e", sessionIdFromJson("{\"pid\":36749,\"sessionId\":\"2016788a-06be-43f8-a304-c6845c8be72e\",\"cwd\":\"/Users/x\"}").?);
+    try std.testing.expect(sessionIdFromJson("{\"pid\":1}") == null);
+    try std.testing.expect(sessionIdFromJson("{\"sessionId\":\"../../etc\"}") == null);
+    const lsof = "p123\nn/Users/x/.codex/log/codex-tui.log\nn/Users/x/.codex/sessions/2026/09/22/rollout-2026-09-22T17-23-32-01a0cac9-b973-7250-bbea-5c0287900a45.jsonl\n";
+    try std.testing.expectEqualStrings("01a0cac9-b973-7250-bbea-5c0287900a45", rolloutId(lsof).?);
+    try std.testing.expect(rolloutId("p1\nn/tmp/x\n") == null);
+    try std.testing.expect(isAgentCommand("/Users/x/.local/bin/claude --continue"));
+    try std.testing.expect(isAgentCommand("codex resume --last"));
+    try std.testing.expect(isAgentCommand("node /opt/homebrew/bin/codex"));
+    try std.testing.expect(!isAgentCommand("/Applications/Agent Belt.app/Contents/MacOS/agb new --agent claude --host w"));
+    try std.testing.expect(!isAgentCommand("ssh -t w agb new --agent claude"));
+    // A name after --resume is not an id.
+    try std.testing.expectEqualStrings("", conversationId("claude --resume fx-deepseek"));
 }

@@ -814,7 +814,7 @@ fn cmdAdopt(env: Env, args: []const []const u8) !u8 {
         say("no agent running outside tmux", .{});
         return 0;
     }
-    for (items.items, 0..) |it, i| _ = print(ctx, try ctx.fmt("{d:>3}  {s}  {s:<7}  {s}  {s}\n", .{ i + 1, try pad(ctx, it.host.name, 16), it.agent, if (it.conversation.len > 0) it.conversation[0..8] else "latest  ", it.dir }));
+    for (items.items, 0..) |it, i| _ = print(ctx, try ctx.fmt("{d:>3}  {s}  {s:<7}  {s}  {s}\n", .{ i + 1, try pad(ctx, it.host.name, 16), it.agent, if (it.conversation.len > 0) it.conversation[0..8] else "unknown ", it.dir }));
     _ = print(ctx, "\nadopting STOPS the process and reopens the same conversation inside tmux\n(the turn in progress and the scrollback are lost).\n");
     std.debug.print("\nwhich one? (number, empty to quit): ", .{});
     const choice = readLine(ctx) orelse return 0;
