@@ -23,6 +23,8 @@ pub const Live = struct {
     io: std.Io,
     env: *std.process.Environ.Map,
     key: []const u8,
+    /// Words Deepgram should favor (harness, machine and repo names).
+    keyterms: []const []const u8 = &.{},
     wav_path: []const u8,
     /// "open" or "failed" once the stream is decided.
     status_path: []const u8,
@@ -70,6 +72,7 @@ pub const Live = struct {
             .language = defaults.deepgram_language,
             .smart_format = defaults.deepgram_smart_format,
             .mip_opt_out = defaults.deepgram_mip_opt_out,
+            .keyterms = self.keyterms,
         });
         try sys.writeFileAtomic(self.ctx(), self.status_path, "open");
         var sent: u64 = wav_header;

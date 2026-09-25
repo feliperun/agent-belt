@@ -44,6 +44,21 @@ pub fn cachedRepos(ctx: sys.Ctx, host: []const u8) ![]const []const u8 {
     return names.items;
 }
 
+/// Words the speech model should favor when a new agent is dictated: the
+/// harnesses, the machines and every repo in the index.
+pub fn keyterms(ctx: sys.Ctx, reg: hosts.Registry) ![]const []const u8 {
+    var terms: std.ArrayList([]const u8) = .empty;
+    try terms.appendSlice(ctx.gpa, &.{ "claude", "codex", "shell" });
+    for (reg.hosts) |h| {
+        try terms.append(ctx.gpa, h.name);
+        for (try cachedRepos(ctx, h.name)) |r| {
+            if (terms.items.len >= 90) break;
+            if (r.len <= 40 and !contains(terms.items, r)) try terms.append(ctx.gpa, r);
+        }
+    }
+    return terms.items;
+}
+
 /// `agb _repos-cache`: asks every machine for its repos (in parallel) and
 /// rewrites the index. Run in the background when the panel opens.
 pub fn refreshCache(ctx: sys.Ctx, reg: hosts.Registry, repos_of: *const fn (sys.Ctx, hosts.Host) ?[]const u8) !void {

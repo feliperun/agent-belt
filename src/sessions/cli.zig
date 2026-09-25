@@ -171,7 +171,7 @@ fn knownTerm(term: []const u8) bool {
     return false;
 }
 
-fn loadRegistry(ctx: sys.Ctx) !hosts.Registry {
+pub fn loadRegistry(ctx: sys.Ctx) !hosts.Registry {
     return hosts.load(ctx);
 }
 
@@ -419,6 +419,13 @@ fn newFromWords(env: Env, reg: hosts.Registry, text: []const u8, flags: Plan) !u
     plan.detach_others = flags.detach_others;
     say("agb: {s} on {s} in {s}: {s}", .{ @tagName(plan.agent), if (plan.host) |h| h.name else "this machine", plan.repo orelse "-", plan.task.? });
     return execute(env, plan);
+}
+
+/// `agb new` arguments for a confirmed plan: the panel's choices, the session
+/// name and the cleaned prompt. Without a repo the agent works in ~/agents.
+pub fn newArgs(gpa: std.mem.Allocator, agent: []const u8, host: []const u8, repo: ?[]const u8, task: []const u8, prompt: []const u8) ![]const []const u8 {
+    const repo_args: []const []const u8 = if (repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
+    return std.mem.concat(gpa, []const u8, &.{ &.{ "new", "--agent", agent, "--host", host }, repo_args, &.{ "--task", task, "--prompt", prompt } });
 }
 
 /// A detected request as a session plan, checked like typed arguments: a known
@@ -1025,4 +1032,16 @@ test "humane agb new" {
     var here = detected;
     here.host = "macbook-pro";
     try std.testing.expect((try planFromIntent(reg, here)).host == null);
+}
+
+test "a confirmed plan as agb new arguments" {
+    const gpa = std.testing.allocator;
+    const with_repo = try newArgs(gpa, "codex", "frb-linux", "coreum", "login-bug", "Revise o login.");
+    defer gpa.free(with_repo);
+    try std.testing.expectEqualStrings("--repo", with_repo[5]);
+    try std.testing.expectEqualStrings("Revise o login.", with_repo[10]);
+    const research = try newArgs(gpa, "claude", "macbook-pro", null, "tmux-alternatives", "Pesquise alternativas ao tmux.");
+    defer gpa.free(research);
+    try std.testing.expectEqualStrings("--no-repo", research[5]);
+    try std.testing.expectEqual(@as(usize, 10), research.len);
 }

@@ -111,7 +111,8 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 | Shortcut | Action |
 |---|---|
 | hold `Ctrl+Alt+D` | dictation: `pw-record` while held, the words streaming from Deepgram into the Mac's overlay (drawn by Quickshell; notifications without it), typed with `wtype` on release |
-| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **New agent…** in walker (or fuzzel, wofi, rofi) |
+| hold `Shift+F9` | a new agent by voice: the create-agent panel (Quickshell), with the words streaming in, the agent, machine and repo understood, the session's name and summary; release to review, hold again to add, type to fix, click a field to correct it, Return creates, Esc cancels |
+| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **New agent…** (the panel) in walker (or fuzzel, wofi, rofi) |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal |
 
 `agb waybar` feeds a Waybar custom module (`agb install` prints the snippet): 🦇 and the

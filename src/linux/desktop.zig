@@ -32,13 +32,13 @@ pub fn main(ctx: sys.Ctx, argv: []const []const u8) !u8 {
     return 2;
 }
 
-fn selfExe(ctx: sys.Ctx) []const u8 {
+pub fn selfExe(ctx: sys.Ctx) []const u8 {
     return std.process.executablePathAlloc(ctx.io, ctx.gpa) catch "agb";
 }
 
 /// One Agent Belt bubble that changes state: each notification replaces the
 /// previous one by the id notify-send printed for it.
-fn notify(ctx: sys.Ctx, title: []const u8, body: []const u8, timeout_ms: u32) void {
+pub fn notify(ctx: sys.Ctx, title: []const u8, body: []const u8, timeout_ms: u32) void {
     const id_path = runtimeFile(ctx, "agb-notify.id") catch return;
     const last = std.mem.trim(u8, sys.readFile(ctx, id_path) orelse "0", " \n");
     const out = sys.run(ctx, &.{ "notify-send", "-a", "Agent Belt", "-p", "-r", last, "-t", ctx.fmt("{d}", .{timeout_ms}) catch "3000", title, body }, null);
@@ -46,7 +46,7 @@ fn notify(ctx: sys.Ctx, title: []const u8, body: []const u8, timeout_ms: u32) vo
 }
 
 /// Opens a terminal running agb with these arguments, detached from us.
-fn openTerminal(ctx: sys.Ctx, args: []const []const u8) void {
+pub fn openTerminal(ctx: sys.Ctx, args: []const []const u8) void {
     const launcher: []const []const u8 = if (sys.which(ctx, "xdg-terminal-exec")) |t| &.{t} else if (ctx.getenv("TERMINAL")) |t| &.{ t, "-e" } else &.{ "foot", "-e" };
     // A failure keeps the window open long enough to read why.
     const script = "\"$0\" \"$@\" || { printf '\\nagb ended with an error; Enter closes this window. '; read -r _; }";
@@ -122,6 +122,11 @@ fn menu(ctx: sys.Ctx) !u8 {
     for (c.rows) |r| try lines.print(ctx.gpa, "\n{s} · {s} · {s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name });
     const choice = pick(ctx, "Agent Belt", lines.items) orelse return 0;
     if (std.mem.eql(u8, choice, new_agent)) {
+        // The panel, to type or hold Shift+F9 and say it; else a typed line.
+        if (sys.which(ctx, "quickshell") != null) {
+            _ = std.process.spawn(ctx.io, .{ .argv = &.{ selfExe(ctx), "agent-panel" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
+            return 0;
+        }
         const words = pick(ctx, "agent, machine, repo, what to do", "") orelse return 0;
         var argv: std.ArrayList([]const u8) = .empty;
         try argv.append(ctx.gpa, "new");
@@ -160,7 +165,7 @@ fn waybar(ctx: sys.Ctx) !u8 {
 
 // ---------------------------------------------------------------- push-to-talk
 
-fn runtimeFile(ctx: sys.Ctx, name: []const u8) ![]const u8 {
+pub fn runtimeFile(ctx: sys.Ctx, name: []const u8) ![]const u8 {
     return ctx.join(&.{ ctx.getenv("XDG_RUNTIME_DIR") orelse "/tmp", name });
 }
 
@@ -194,7 +199,7 @@ fn pttStart(ctx: sys.Ctx) !u8 {
     return 0;
 }
 
-fn deepgramKey(ctx: sys.Ctx) ?[]const u8 {
+pub fn deepgramKey(ctx: sys.Ctx) ?[]const u8 {
     if (ctx.getenv("DEEPGRAM_API_KEY")) |k| if (k.len > 0) return k;
     const path = keyPath(ctx) catch return null;
     const key = std.mem.trim(u8, sys.readFile(ctx, path) orelse return null, " \r\n");
@@ -295,7 +300,12 @@ fn readMode(ctx: sys.Ctx) u8 {
 
 /// The level of the last 20 ms pw-record wrote.
 fn recordingLevel(ctx: sys.Ctx) f64 {
-    const file = std.Io.Dir.cwd().openFile(ctx.io, runtimeFile(ctx, "agb-ptt.wav") catch return 0, .{}) catch return 0;
+    return levelOf(ctx, "agb-ptt.wav");
+}
+
+/// The level of the last 20 ms pw-record wrote to this runtime file.
+pub fn levelOf(ctx: sys.Ctx, name: []const u8) f64 {
+    const file = std.Io.Dir.cwd().openFile(ctx.io, runtimeFile(ctx, name) catch return 0, .{}) catch return 0;
     defer file.close(ctx.io);
     const len = file.length(ctx.io) catch return 0;
     var buf: [audio_level.window_bytes]u8 = undefined;
@@ -396,6 +406,8 @@ const hypr_configs = [_]HyprConfig{
         \\-- Agent Belt (written by agb install; agb uninstall removes it)
         \\o.bind("CTRL + ALT + D", "Agent Belt: dictate", "@AGB@ ptt start")
         \\o.bind("CTRL + ALT + D", "Agent Belt: stop dictating", "@AGB@ ptt stop", { release = true })
+        \\o.bind("SHIFT + F9", "Agent Belt: new agent by voice", "@AGB@ agent-ptt start")
+        \\o.bind("SHIFT + F9", "Agent Belt: new agent, stop listening", "@AGB@ agent-ptt stop", { release = true })
         \\o.bind("CTRL + ALT + SPACE", "Agent Belt: agent menu", "@AGB@ menu")
         \\o.bind("CTRL + ALT + UP", "Agent Belt: agent sessions", "xdg-terminal-exec @AGB@ sessions")
         \\
@@ -410,6 +422,8 @@ const hypr_configs = [_]HyprConfig{
         \\# Agent Belt (written by agb install; agb uninstall removes it)
         \\bind = CTRL ALT, D, exec, @AGB@ ptt start
         \\bindr = CTRL ALT, D, exec, @AGB@ ptt stop
+        \\bind = SHIFT, F9, exec, @AGB@ agent-ptt start
+        \\bindr = SHIFT, F9, exec, @AGB@ agent-ptt stop
         \\bind = CTRL ALT, SPACE, exec, @AGB@ menu
         \\bind = CTRL ALT, UP, exec, xdg-terminal-exec @AGB@ sessions
         \\
@@ -447,7 +461,7 @@ fn install(ctx: sys.Ctx) !u8 {
         break true;
     } else false;
     if (bound) {
-        std.debug.print("Hyprland: hold Ctrl+Alt+D to dictate, Ctrl+Alt+Space for the agent menu, Ctrl+Alt+Up for agb sessions\n", .{});
+        std.debug.print("Hyprland: hold Ctrl+Alt+D to dictate, Shift+F9 for a new agent by voice, Ctrl+Alt+Space for the agent menu, Ctrl+Alt+Up for agb sessions\n", .{});
     } else {
         std.debug.print("no Hyprland config: bind `agb ptt start` / `agb ptt stop` (or `agb ptt toggle`) and `agb menu` in your desktop\n", .{});
     }

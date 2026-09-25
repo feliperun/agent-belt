@@ -62,8 +62,8 @@ a machine.
 
 ### Parity
 
-- The create-agent panel on Windows (tray, a hotkey) and Omarchy (a Hyprland bind and a
-  Quickshell panel): `agb _intent` and the streaming client are already portable.
+- The create-agent panel on Windows as a hotkey with live words, like the Mac and Omarchy
+  panels (the tray dialog is typed): `agb _intent` and the streaming client are portable.
 - Repos listed under their project name when the folder differs (`minikeyboard` is
   agent-belt), so it can be said aloud.
 - The keypad and its lights on Linux (evdev, hidraw) if it is used there.

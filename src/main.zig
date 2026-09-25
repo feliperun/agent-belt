@@ -31,6 +31,11 @@ pub fn main(init: std.process.Init) !void {
     if (comptime builtin.os.tag == .windows) return windowsMain(init, argv);
     if (comptime builtin.os.tag == .linux) {
         const desktop = @import("linux/desktop.zig");
+        const agent_panel = @import("linux/agent_panel.zig");
+        if (argc >= 2 and agent_panel.isCommand(argv[1])) {
+            const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
+            std.process.exit(try agent_panel.main(ctx, argv[1..argc]));
+        }
         if (argc >= 2 and desktop.isCommand(argv[1])) {
             const ctx = sys.Ctx{ .io = init.io, .gpa = init.arena.allocator(), .env = init.environ_map };
             std.process.exit(try desktop.main(ctx, argv[1..argc]));
@@ -67,7 +72,7 @@ fn usageSessions() !void {
         \\  agb history [days] [--json]
         \\  agb version
         \\  Windows: agb install | uninstall | daemon (tray icon, Ctrl+Alt+D dictation, Ctrl+Alt+Space menu)
-        \\  Linux desktop: agb install | uninstall | menu | waybar | ptt start|stop|toggle
+        \\  Linux desktop: agb install | uninstall | menu | waybar | ptt start|stop|toggle | agent-ptt start|stop | agent-panel
         \\
     , .{build_options.version});
     return error.InvalidArguments;
