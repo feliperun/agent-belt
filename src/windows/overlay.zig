@@ -9,57 +9,11 @@ const w = @import("win32.zig");
 const width = 252;
 const height = 78;
 
-// ---------------------------------------------------------------- GDI+
-
-const Status = c_int;
-const PointF = extern struct { x: f32, y: f32 };
-const RectF = extern struct { x: f32, y: f32, w: f32, h: f32 };
-const StartupInput = extern struct { version: u32 = 1, callback: ?*anyopaque = null, no_thread: w.BOOL = 0, no_codecs: w.BOOL = 0 };
-const Gp = *opaque {};
-const unit_pixel = 2;
-const smoothing_antialias = 4;
-const text_antialias = 4;
-const pixel_format_32bpp_pargb = 0xE200B;
-
-extern "gdiplus" fn GdiplusStartup(token: *usize, input: *const StartupInput, output: ?*anyopaque) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreateBitmapFromScan0(w: c_int, h: c_int, stride: c_int, format: c_int, scan0: ?*anyopaque, bitmap: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipGetImageGraphicsContext(image: Gp, graphics: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDisposeImage(image: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDeleteGraphics(graphics: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipSetSmoothingMode(graphics: Gp, mode: c_int) callconv(.winapi) Status;
-extern "gdiplus" fn GdipSetTextRenderingHint(graphics: Gp, hint: c_int) callconv(.winapi) Status;
-extern "gdiplus" fn GdipGraphicsClear(graphics: Gp, argb: u32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreatePen1(argb: u32, width: f32, unit: c_int, pen: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDeletePen(pen: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDrawLines(graphics: Gp, pen: Gp, points: [*]const PointF, count: c_int) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreatePath(fill_mode: c_int, path: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipAddPathArc(path: Gp, x: f32, y: f32, w: f32, h: f32, start: f32, sweep: f32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipAddPathEllipse(path: Gp, x: f32, y: f32, w: f32, h: f32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipClosePathFigure(path: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDeletePath(path: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipFillPath(graphics: Gp, brush: Gp, path: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDrawPath(graphics: Gp, pen: Gp, path: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreateLineBrushFromRect(rect: *const RectF, argb1: u32, argb2: u32, mode: c_int, wrap: c_int, brush: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreatePathGradientFromPath(path: Gp, brush: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipSetPathGradientCenterColor(brush: Gp, argb: u32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipSetPathGradientSurroundColorsWithCount(brush: Gp, colors: [*]const u32, count: *c_int) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreateSolidFill(argb: u32, brush: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipSetSolidFillColor(brush: Gp, argb: u32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDeleteBrush(brush: Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipFillEllipse(graphics: Gp, brush: Gp, x: f32, y: f32, w: f32, h: f32) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreateFontFamilyFromName(name: w.LPCWSTR, collection: ?*anyopaque, family: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipCreateFont(family: Gp, size: f32, style: c_int, unit: c_int, font: *?Gp) callconv(.winapi) Status;
-extern "gdiplus" fn GdipDrawString(graphics: Gp, text: [*]const u16, len: c_int, font: Gp, rect: *const RectF, format: ?*anyopaque, brush: Gp) callconv(.winapi) Status;
-
-const BITMAPINFOHEADER = extern struct { size: u32 = @sizeOf(BITMAPINFOHEADER), width: i32, height: i32, planes: u16 = 1, bit_count: u16 = 32, compression: u32 = 0, size_image: u32 = 0, xppm: i32 = 0, yppm: i32 = 0, clr_used: u32 = 0, clr_important: u32 = 0 };
-const SIZE = extern struct { cx: w.LONG, cy: w.LONG };
-const BLENDFUNCTION = extern struct { op: u8 = 0, flags: u8 = 0, alpha: u8 = 255, format: u8 = 1 };
-extern "gdi32" fn CreateDIBSection(hdc: ?w.HDC, info: *const BITMAPINFOHEADER, usage: w.UINT, bits: *?*anyopaque, section: ?w.HANDLE, offset: w.DWORD) callconv(.winapi) ?w.HBITMAP;
-extern "gdi32" fn GetDeviceCaps(hdc: w.HDC, index: c_int) callconv(.winapi) c_int;
-extern "user32" fn GetDC(hwnd: ?w.HWND) callconv(.winapi) ?w.HDC;
-extern "user32" fn ReleaseDC(hwnd: ?w.HWND, hdc: w.HDC) callconv(.winapi) c_int;
-extern "user32" fn UpdateLayeredWindow(hwnd: w.HWND, dst: ?w.HDC, pos: ?*const w.POINT, size: ?*const SIZE, src: w.HDC, src_pos: ?*const w.POINT, key: w.DWORD, blend: *const BLENDFUNCTION, flags: w.DWORD) callconv(.winapi) w.BOOL;
-extern "user32" fn SetProcessDPIAware() callconv(.winapi) w.BOOL;
+const gp = @import("gdiplus.zig");
+const Gp = gp.Gp;
+const PointF = gp.PointF;
+const RectF = gp.RectF;
+const ink = gp.ink;
 
 // ---------------------------------------------------------------- state
 
@@ -92,39 +46,29 @@ fn ease(t: f64) f64 {
     return c * c * (3 - 2 * c);
 }
 
-fn argb(a: f64, r: u8, g: u8, b: u8) u32 {
-    const alpha: u32 = @intFromFloat(std.math.clamp(a, 0, 1) * 255);
-    return (alpha << 24) | (@as(u32, r) << 16) | (@as(u32, g) << 8) | b;
-}
-
-fn ink(a: f64) u32 {
-    return argb(a, 184, 201, 245);
-}
-
 /// Called once from the daemon's UI thread. The window stays hidden until show.
 pub fn create(instance: ?w.HINSTANCE, proc: w.WNDPROC) void {
-    _ = SetProcessDPIAware();
-    var token: usize = 0;
-    if (GdiplusStartup(&token, &.{}, null) != 0) return;
-    const screen = GetDC(null) orelse return;
-    defer _ = ReleaseDC(null, screen);
-    scale = @as(f32, @floatFromInt(GetDeviceCaps(screen, 88))) / 96.0; // LOGPIXELSX
+    _ = w.SetProcessDPIAware();
+    if (!gp.startup()) return;
+    const screen = w.GetDC(null) orelse return;
+    defer _ = w.ReleaseDC(null, screen);
+    scale = @as(f32, @floatFromInt(w.GetDeviceCaps(screen, 88))) / 96.0; // LOGPIXELSX
     const pw: c_int = @intFromFloat(width * scale);
     const ph: c_int = @intFromFloat(height * scale);
     _ = w.RegisterClassExW(&.{ .lpfnWndProc = proc, .hInstance = instance, .lpszClassName = w.L("AgentBeltOverlay") });
     hwnd = w.CreateWindowExW(w.WS_EX_TOPMOST | w.WS_EX_TOOLWINDOW | w.WS_EX_NOACTIVATE | w.WS_EX_LAYERED | w.WS_EX_TRANSPARENT, w.L("AgentBeltOverlay"), w.L("Agent Belt"), w.WS_POPUP, 0, 0, pw, ph, null, null, instance, null);
     dc = w.CreateCompatibleDC(screen);
-    const info = BITMAPINFOHEADER{ .width = pw, .height = -ph }; // top-down
-    const dib = CreateDIBSection(screen, &info, 0, &bits, null, 0) orelse return;
+    const info = w.BITMAPINFOHEADER{ .width = pw, .height = -ph }; // top-down
+    const dib = w.CreateDIBSection(screen, &info, 0, &bits, null, 0) orelse return;
     _ = w.SelectObject(dc.?, @ptrCast(dib));
-    _ = GdipCreateBitmapFromScan0(pw, ph, pw * 4, pixel_format_32bpp_pargb, bits, &bitmap);
+    _ = gp.GdipCreateBitmapFromScan0(pw, ph, pw * 4, gp.pixel_format_32bpp_pargb, bits, &bitmap);
     var family: ?Gp = null;
-    if (GdipCreateFontFamilyFromName(w.L("Segoe UI Semibold"), null, &family) == 0 or GdipCreateFontFamilyFromName(w.L("Segoe UI"), null, &family) == 0)
-        _ = GdipCreateFont(family.?, 12 * scale, 0, unit_pixel, &label_font);
+    if (gp.GdipCreateFontFamilyFromName(w.L("Segoe UI Semibold"), null, &family) == 0 or gp.GdipCreateFontFamilyFromName(w.L("Segoe UI"), null, &family) == 0)
+        _ = gp.GdipCreateFont(family.?, 12 * scale, 0, gp.unit_pixel, &label_font);
     var mono: ?Gp = null;
-    if (GdipCreateFontFamilyFromName(w.L("Consolas"), null, &mono) == 0) {
-        _ = GdipCreateFont(mono.?, 11 * scale, 0, unit_pixel, &mono_font);
-        _ = GdipCreateFont(mono.?, 11 * scale, 1, unit_pixel, &mono_bold);
+    if (gp.GdipCreateFontFamilyFromName(w.L("Consolas"), null, &mono) == 0) {
+        _ = gp.GdipCreateFont(mono.?, 11 * scale, 0, gp.unit_pixel, &mono_font);
+        _ = gp.GdipCreateFont(mono.?, 11 * scale, 1, gp.unit_pixel, &mono_bold);
     }
 }
 
@@ -177,60 +121,35 @@ fn pt(x: f64, y: f64) PointF {
 
 fn stroke(g: Gp, points: []const PointF, color: u32, line_width: f32) void {
     var pen: ?Gp = null;
-    if (GdipCreatePen1(color, line_width * scale, unit_pixel, &pen) != 0) return;
-    defer _ = GdipDeletePen(pen.?);
-    _ = GdipDrawLines(g, pen.?, points.ptr, @intCast(points.len));
+    if (gp.GdipCreatePen1(color, line_width * scale, gp.unit_pixel, &pen) != 0) return;
+    defer _ = gp.GdipDeletePen(pen.?);
+    _ = gp.GdipDrawLines(g, pen.?, points.ptr, @intCast(points.len));
 }
 
 fn text(g: Gp, str: []const u16, font: ?Gp, x: f64, y: f64, color: u32) void {
     var brush: ?Gp = null;
-    if (GdipCreateSolidFill(color, &brush) != 0) return;
-    defer _ = GdipDeleteBrush(brush.?);
+    if (gp.GdipCreateSolidFill(color, &brush) != 0) return;
+    defer _ = gp.GdipDeleteBrush(brush.?);
     const rect = RectF{ .x = @floatCast(x * scale), .y = @floatCast(y * scale), .w = 200 * scale, .h = 24 * scale };
-    _ = GdipDrawString(g, str.ptr, @intCast(str.len), font orelse return, &rect, null, brush.?);
+    _ = gp.GdipDrawString(g, str.ptr, @intCast(str.len), font orelse return, &rect, null, brush.?);
 }
 
 fn render() void {
     const h = hwnd orelse return;
     const bmp = bitmap orelse return;
     var gg: ?Gp = null;
-    if (GdipGetImageGraphicsContext(bmp, &gg) != 0) return;
+    if (gp.GdipGetImageGraphicsContext(bmp, &gg) != 0) return;
     const g = gg.?;
-    defer _ = GdipDeleteGraphics(g);
-    _ = GdipSetSmoothingMode(g, smoothing_antialias);
-    _ = GdipSetTextRenderingHint(g, text_antialias);
-    _ = GdipGraphicsClear(g, 0);
+    defer _ = gp.GdipDeleteGraphics(g);
+    _ = gp.GdipSetSmoothingMode(g, gp.smoothing_antialias);
+    _ = gp.GdipSetTextRenderingHint(g, gp.text_antialias);
+    _ = gp.GdipGraphicsClear(g, 0);
 
     const t_now = now();
     const t = phase;
     const morph = if (mode == 2) ease((t_now - mode_started) / 0.7) else 0;
 
-    // Shell: a rounded surface with a faint edge.
-    var path: ?Gp = null;
-    if (GdipCreatePath(0, &path) == 0) {
-        defer _ = GdipDeletePath(path.?);
-        const x0: f32 = 2 * scale;
-        const y0: f32 = 2 * scale;
-        const x1: f32 = (width - 2) * scale;
-        const y1: f32 = (height - 2) * scale;
-        const d: f32 = 46 * scale;
-        _ = GdipAddPathArc(path.?, x0, y0, d, d, 180, 90);
-        _ = GdipAddPathArc(path.?, x1 - d, y0, d, d, 270, 90);
-        _ = GdipAddPathArc(path.?, x1 - d, y1 - d, d, d, 0, 90);
-        _ = GdipAddPathArc(path.?, x0, y1 - d, d, d, 90, 90);
-        _ = GdipClosePathFigure(path.?);
-        const rect = RectF{ .x = 0, .y = 0, .w = width * scale, .h = height * scale };
-        var surface: ?Gp = null;
-        if (GdipCreateLineBrushFromRect(&rect, argb(0.98, 29, 32, 41), argb(0.98, 17, 19, 26), 1, 0, &surface) == 0) {
-            _ = GdipFillPath(g, surface.?, path.?);
-            _ = GdipDeleteBrush(surface.?);
-        }
-        var edge: ?Gp = null;
-        if (GdipCreatePen1(ink(0.16), 0.75 * scale, unit_pixel, &edge) == 0) {
-            _ = GdipDrawPath(g, edge.?, path.?);
-            _ = GdipDeletePen(edge.?);
-        }
-    }
+    gp.drawShell(g, scale, width, height, 23);
 
     drawCore(g, t, morph);
     text(g, if (mode == 1) w.L("Listening") else w.L("Transcribing"), label_font, 62, 13, ink(0.92));
@@ -241,55 +160,16 @@ fn render() void {
     _ = w.SystemParametersInfoW(w.SPI_GETWORKAREA, 0, &area, 0);
     pos.x = area.right - @as(c_int, @intFromFloat((width + 18) * scale));
     pos.y = area.top + @as(c_int, @intFromFloat(14 * scale));
-    const size = SIZE{ .cx = @intFromFloat(width * scale), .cy = @intFromFloat(height * scale) };
+    const size = w.SIZE{ .cx = @intFromFloat(width * scale), .cy = @intFromFloat(height * scale) };
     var origin = w.POINT{};
     // A short fade in, as on the Mac.
-    const blend = BLENDFUNCTION{ .alpha = @intFromFloat(255 * ease((t_now - shown_at) / 0.18)) };
-    _ = UpdateLayeredWindow(h, null, &pos, &size, dc.?, &origin, 0, &blend, 2); // ULW_ALPHA
+    const blend = w.BLENDFUNCTION{ .alpha = @intFromFloat(255 * ease((t_now - shown_at) / 0.18)) };
+    _ = w.UpdateLayeredWindow(h, null, &pos, &size, dc.?, &origin, 0, &blend, 2); // ULW_ALPHA
     _ = w.ShowWindow(h, 4); // SW_SHOWNOACTIVATE
 }
 
 fn drawCore(g: Gp, t: f64, morph: f64) void {
-    const cx = 34.0;
-    const cy = 39.0;
-    const energy = @sqrt(@max(0, level));
-    const radius = 11 + energy * 2.8;
-    // A low-contrast halo and three drifting contours share the same center.
-    var halo_path: ?Gp = null;
-    if (GdipCreatePath(0, &halo_path) == 0) {
-        defer _ = GdipDeletePath(halo_path.?);
-        _ = GdipAddPathEllipse(halo_path.?, @floatCast((cx - 22) * scale), @floatCast((cy - 22) * scale), 44 * scale, 44 * scale);
-        var halo: ?Gp = null;
-        if (GdipCreatePathGradientFromPath(halo_path.?, &halo) == 0) {
-            _ = GdipSetPathGradientCenterColor(halo.?, ink(0.11 + energy * 0.05));
-            const surround = [_]u32{ink(0)};
-            var count: c_int = 1;
-            _ = GdipSetPathGradientSurroundColorsWithCount(halo.?, &surround, &count);
-            _ = GdipFillPath(g, halo.?, halo_path.?);
-            _ = GdipDeleteBrush(halo.?);
-        }
-    }
-    for (0..3) |layer_i| {
-        const layer: f64 = @floatFromInt(layer_i);
-        var points: [91]PointF = undefined;
-        for (&points, 0..) |*p, i| {
-            const a = @as(f64, @floatFromInt(i)) * 2 * std.math.pi / 90;
-            const ripple = @sin(a * 3 + t * 1.25 + layer * 1.7) * (1.1 + energy * 2) * (1 - morph * 0.6);
-            const r = radius + layer * 1.3 + ripple;
-            const turn = t * (0.12 + morph * 0.25) + layer * 0.25;
-            p.* = pt(cx + @cos(a + turn) * r, cy - @sin(a + turn) * r * 0.88);
-        }
-        const red: u8 = @intFromFloat((0.58 + layer * 0.12) * 255);
-        const green: u8 = @intFromFloat((0.76 - layer * 0.05) * 255);
-        stroke(g, &points, argb(0.58 - layer * 0.12, red, green, 245), 1.05);
-    }
-    const angle = t * (if (mode == 2) @as(f64, 1.5) else 0.5);
-    var light: ?Gp = null;
-    if (GdipCreateSolidFill(ink(0.88), &light) == 0) {
-        const p = pt(cx + @cos(angle) * radius - 1.4, cy - @sin(angle) * radius * 0.88 - 1.4);
-        _ = GdipFillEllipse(g, light.?, p.x, p.y, 2.8 * scale, 2.8 * scale);
-        _ = GdipDeleteBrush(light.?);
-    }
+    gp.drawCore(g, scale, 34, 39, level, t, morph, mode == 2);
 }
 
 fn drawSignal(g: Gp, t: f64, morph: f64) void {

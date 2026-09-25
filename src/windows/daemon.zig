@@ -12,7 +12,8 @@ const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
 const history = @import("../history.zig");
 const overlay = @import("overlay.zig");
-const intent = @import("../sessions/intent.zig");
+const create_panel = @import("create_panel.zig");
+const gp = @import("gdiplus.zig");
 
 const WM_TRAY = w.WM_APP + 1;
 const WM_PTT = w.WM_APP + 2; // wparam 1 start, 0 stop
@@ -20,6 +21,8 @@ const WM_MENU = w.WM_APP + 3;
 const WM_SESSIONS = w.WM_APP + 4;
 const WM_OVERLAY = w.WM_APP + 5; // wparam: 0 hide, 1 recording, 2 transcribing
 const WM_PREVIEW = w.WM_APP + 6;
+const WM_COUNT = w.WM_APP + 9; // the agent count changed: redraw the tray icon
+const WM_PANEL = w.WM_APP + 10; // agb panel
 
 const CMD_NEW = 1;
 const CMD_SESSIONS = 2;
@@ -32,10 +35,9 @@ var g_ctx: sys.Ctx = undefined;
 var g_version: []const u8 = "";
 var g_instance: ?w.HINSTANCE = null;
 var g_hwnd: ?w.HWND = null;
-var g_dialog: ?w.HWND = null;
-var g_edit: ?w.HWND = null;
 var g_hook: ?w.HHOOK = null;
 var g_tray: w.NOTIFYICONDATAW = .{};
+var g_app_icon: ?w.HICON = null; // the executable's icon, the tray's until the belt is drawn
 var g_ptt_down = false;
 
 var g_state = std.atomic.Value(u8).init(0); // overlay: 0 hidden, 1 recording, 2 transcribing
@@ -298,8 +300,56 @@ fn refreshOnce() void {
     const c = cli.collect(g_ctx, reg) catch return;
     g_rows_lock.lockUncancelable(g_ctx.io);
     defer g_rows_lock.unlock(g_ctx.io);
+    const changed = !g_rows_ready or g_rows.len != c.rows.len;
     g_rows = c.rows;
     g_rows_ready = true;
+    if (changed) _ = w.PostMessageW(g_hwnd, WM_COUNT, c.rows.len, 0);
+}
+
+// ---------------------------------------------------------------- tray icon
+
+/// The belt of the macOS menu bar and the Omarchy bar, with the count of agent
+/// sessions in its buckle, drawn for the taskbar's theme.
+fn trayIcon(count: usize) ?w.HICON {
+    if (!gp.startup()) return null;
+    const size = w.GetSystemMetrics(w.SM_CXSMICON);
+    var bmp: ?gp.Gp = null;
+    if (gp.GdipCreateBitmapFromScan0(size, size, 0, gp.pixel_format_32bpp_argb, null, &bmp) != 0) return null;
+    defer _ = gp.GdipDisposeImage(bmp.?);
+    var gg: ?gp.Gp = null;
+    if (gp.GdipGetImageGraphicsContext(bmp.?, &gg) != 0) return null;
+    const g = gg.?;
+    _ = gp.GdipSetSmoothingMode(g, gp.smoothing_antialias);
+    _ = gp.GdipSetTextRenderingHint(g, gp.text_antialias);
+    _ = gp.GdipGraphicsClear(g, 0);
+    const px: f32 = @floatFromInt(size);
+    const color: u32 = if (lightTaskbar()) gp.argb(1, 28, 28, 30) else gp.argb(1, 255, 255, 255);
+    const font = gp.font(&.{ w.L("Segoe UI Semibold"), w.L("Segoe UI") }, px * 0.46, gp.font_bold);
+    gp.drawBelt(g, px, color, count, font);
+    _ = gp.GdipDeleteGraphics(g);
+    var icon: ?w.HICON = null;
+    _ = gp.GdipCreateHICONFromBitmap(bmp.?, &icon);
+    return icon;
+}
+
+fn lightTaskbar() bool {
+    var value: w.DWORD = 0;
+    var size: w.DWORD = @sizeOf(w.DWORD);
+    const rc = w.RegGetValueW(w.HKEY_CURRENT_USER, w.L("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"), w.L("SystemUsesLightTheme"), w.RRF_RT_REG_DWORD, null, &value, &size);
+    return rc == 0 and value == 1;
+}
+
+fn updateTray(count: usize) void {
+    const icon = trayIcon(count) orelse return;
+    const old = g_tray.hIcon;
+    g_tray.hIcon = icon;
+    const tip = w.wide(g_ctx.gpa, g_ctx.fmt("Agent Belt · {d} agent{s} · Ctrl+Alt+Space menu", .{ count, if (count == 1) "" else "s" }) catch "Agent Belt") catch return;
+    @memset(&g_tray.szTip, 0);
+    @memcpy(g_tray.szTip[0..@min(tip.len, g_tray.szTip.len - 1)], tip[0..@min(tip.len, g_tray.szTip.len - 1)]);
+    _ = w.Shell_NotifyIconW(w.NIM_MODIFY, &g_tray);
+    if (old) |o| if (o != g_app_icon) {
+        _ = w.DestroyIcon(o);
+    };
 }
 
 /// Runs agb in a new console window, which Windows 11 hands to the default
@@ -350,13 +400,13 @@ fn showMenu() void {
     const hwnd = g_hwnd orelse return;
     const menu = w.CreatePopupMenu() orelse return;
     defer _ = w.DestroyMenu(menu);
-    const header = w.wide(g_ctx.gpa, g_ctx.fmt("Agent Belt {s}", .{g_version}) catch "Agent Belt") catch return;
-    _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, header);
-    _ = w.AppendMenuW(menu, w.MF_SEPARATOR, 0, null);
     g_rows_lock.lockUncancelable(g_ctx.io);
     const rows = g_rows;
     const ready = g_rows_ready;
     g_rows_lock.unlock(g_ctx.io);
+    const header = w.wide(g_ctx.gpa, g_ctx.fmt("Agent Belt {s} · {d} agent{s}", .{ g_version, rows.len, if (rows.len == 1) "" else "s" }) catch "Agent Belt") catch return;
+    _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, header);
+    _ = w.AppendMenuW(menu, w.MF_SEPARATOR, 0, null);
     if (!ready) {
         _ = w.AppendMenuW(menu, w.MF_STRING | w.MF_GRAYED, 0, w.L("Looking for sessions…"));
     } else if (rows.len == 0) {
@@ -365,7 +415,7 @@ fn showMenu() void {
     for (rows, 0..) |r, i| {
         if (i >= 30) break;
         // Win32 menus draw emoji in monochrome, so the agent is spelled out.
-        const label = g_ctx.fmt("{s}\t{s} · {s}{s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name, if (r.attached) " · attached" else "" }) catch continue;
+        const label = g_ctx.fmt("{s} · {s} · {s}{s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name, if (r.attached) " · attached" else "" }) catch continue;
         _ = w.AppendMenuW(menu, w.MF_STRING, CMD_SESSION + i, w.wide(g_ctx.gpa, label) catch continue);
     }
     _ = w.AppendMenuW(menu, w.MF_SEPARATOR, 0, null);
@@ -383,7 +433,7 @@ fn showMenu() void {
     if (cmd <= 0) return;
     const id: usize = @intCast(cmd);
     switch (id) {
-        CMD_NEW => showNewDialog(),
+        CMD_NEW => create_panel.show(),
         CMD_SESSIONS => openTerminal("Agent Belt", &.{"sessions"}),
         CMD_REFRESH => _ = std.Thread.spawn(.{}, refreshOnce, .{}) catch null,
         CMD_LOG => if (logPath(g_ctx)) |p| {
@@ -395,261 +445,6 @@ fn showMenu() void {
             openTerminal(r.name, &.{ "attach", r.name, r.host.name });
         },
     }
-}
-
-// ---------------------------------------------------------------- new agent dialog
-
-// A request typed into the dialog is read like the Mac's create panel: agent,
-// machine, repo and intent (agb _intent, backed by Jev), shown as they are
-// detected, the intent highlighted. Create runs agb new with exactly that.
-
-const WM_PLAN = w.WM_APP + 7; // wparam: request serial, lparam: *Detected
-const WM_SUMMARY = w.WM_APP + 8; // wparam: request serial, lparam: *Detected (with its summary)
-const ID_CREATE = 1;
-const ID_CANCEL = 2;
-const ID_EDIT = 3;
-const TIMER_DETECT = 7;
-
-const Detected = struct {
-    arena: std.heap.ArenaAllocator,
-    text: []const u8 = "", // what was detected (and what the agent gets)
-    plan: ?intent.Plan = null,
-    failure: ?[]const u8 = null,
-    summary: ?intent.Summary = null,
-};
-
-var g_create_pending = false; // Create was pressed before the session had a name
-
-var g_fields: ?w.HWND = null;
-var g_intent: ?w.HWND = null;
-var g_hint: ?w.HWND = null;
-var g_detected: ?*Detected = null;
-var g_serial: usize = 0;
-
-fn showNewDialog() void {
-    if (g_dialog) |d| {
-        _ = w.SetForegroundWindow(d);
-        return;
-    }
-    const cx = w.GetSystemMetrics(0);
-    const cy = w.GetSystemMetrics(1);
-    const dialog = w.CreateWindowExW(w.WS_EX_TOPMOST, w.L("AgentBeltNew"), w.L("Agent Belt: new agent"), w.WS_CAPTION | w.WS_SYSMENU | w.WS_VISIBLE, @divTrunc(cx - 640, 2), @divTrunc(cy - 250, 3), 640, 250, null, null, g_instance, null) orelse return;
-    g_dialog = dialog;
-    const font = w.CreateFontW(-15, 0, 0, 0, w.FW_NORMAL, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
-    const small = w.CreateFontW(-13, 0, 0, 0, w.FW_NORMAL, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
-    const bold = w.CreateFontW(-18, 0, 0, 0, w.FW_SEMIBOLD, 0, 0, 0, 1, 0, 0, 5, 0, w.L("Segoe UI"));
-    const label = w.CreateWindowExW(0, w.L("STATIC"), w.L("Describe the new agent: which agent, machine and repo, and what to do."), w.WS_CHILD | w.WS_VISIBLE, 16, 12, 600, 22, dialog, null, g_instance, null);
-    g_edit = w.CreateWindowExW(w.WS_EX_CLIENTEDGE, w.L("EDIT"), w.L(""), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.ES_AUTOHSCROLL, 16, 40, 600, 28, dialog, @ptrFromInt(ID_EDIT), g_instance, null);
-    g_fields = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 80, 600, 22, dialog, null, g_instance, null);
-    g_intent = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 106, 600, 28, dialog, null, g_instance, null);
-    g_hint = w.CreateWindowExW(0, w.L("STATIC"), w.L("e.g. codex on windows in web-app to look into the login error"), w.WS_CHILD | w.WS_VISIBLE, 16, 142, 600, 20, dialog, null, g_instance, null);
-    const create = w.CreateWindowExW(0, w.L("BUTTON"), w.L("Create"), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.BS_DEFPUSHBUTTON, 516, 172, 100, 30, dialog, @ptrFromInt(ID_CREATE), g_instance, null);
-    for ([_]?w.HWND{ label, g_edit, g_fields, create }) |c| if (c) |ctl| if (font) |f| {
-        _ = w.SendMessageW(ctl, w.WM_SETFONT, @intFromPtr(f), 1);
-    };
-    if (small) |f| if (g_hint) |h| {
-        _ = w.SendMessageW(h, w.WM_SETFONT, @intFromPtr(f), 1);
-    };
-    if (bold) |f| if (g_intent) |h| {
-        _ = w.SendMessageW(h, w.WM_SETFONT, @intFromPtr(f), 1);
-    };
-    _ = w.SetForegroundWindow(dialog);
-    _ = w.SetFocus(g_edit);
-    // Fresh repo lists for the detection, in the background.
-    _ = std.Thread.spawn(.{}, refreshRepos, .{}) catch null;
-}
-
-fn refreshRepos() void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    var ctx = g_ctx;
-    ctx.gpa = arena.allocator();
-    const reg = hosts.load(ctx) catch return;
-    intent.refreshCache(ctx, reg, cli.reposOf) catch {};
-}
-
-fn setText(hwnd: ?w.HWND, text: []const u8) void {
-    const h = hwnd orelse return;
-    const wide = w.wide(g_ctx.gpa, text) catch return;
-    _ = w.SetWindowTextW(h, wide);
-}
-
-fn detectThread(dialog: w.HWND, serial: usize, text: []const u8) void {
-    const d = std.heap.page_allocator.create(Detected) catch return;
-    d.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
-    var ctx = g_ctx;
-    ctx.gpa = d.arena.allocator();
-    d.text = ctx.gpa.dupe(u8, text) catch "";
-    if (hosts.load(ctx)) |reg| {
-        d.plan = intent.detect(ctx, reg, text, .{}) catch |err| blk: {
-            d.failure = @errorName(err);
-            break :blk null;
-        };
-    } else |err| d.failure = @errorName(err);
-    if (w.PostMessageW(dialog, WM_PLAN, serial, @bitCast(@intFromPtr(d))) == 0) {
-        d.arena.deinit();
-        std.heap.page_allocator.destroy(d);
-        return;
-    }
-    // Then the session name and summary, written by an agent (seconds).
-    const s = std.heap.page_allocator.create(Detected) catch return;
-    s.* = .{ .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
-    var sctx = g_ctx;
-    sctx.gpa = s.arena.allocator();
-    s.summary = intent.summarize(sctx, text) catch null;
-    if (w.PostMessageW(dialog, WM_SUMMARY, serial, @bitCast(@intFromPtr(s))) == 0) {
-        s.arena.deinit();
-        std.heap.page_allocator.destroy(s);
-    }
-}
-
-var g_summary: ?*Detected = null;
-
-fn showPlan() void {
-    const d = g_detected orelse return;
-    const plan = d.plan orelse {
-        setText(g_fields, "");
-        setText(g_intent, "");
-        setText(g_hint, if (d.failure) |f| (g_ctx.fmt("Could not read the request: {s}", .{f}) catch "") else "");
-        return;
-    };
-    const unsure = struct {
-        fn mark(c: f64) []const u8 {
-            return if (c > 0 and c < 0.6) " ?" else ""; // 0 is a default, not a doubt
-        }
-    };
-    setText(g_fields, g_ctx.fmt("Agent  {s}{s}        Machine  {s}{s}        Repo  {s}{s}", .{
-        plan.agent,              unsure.mark(plan.agent_confidence),
-        plan.host,               unsure.mark(plan.host_confidence),
-        plan.repo orelse "none", if (plan.repo != null) unsure.mark(plan.repo_confidence) else "",
-    }) catch "");
-    const summary: ?intent.Summary = if (g_summary) |s| s.summary else null;
-    setText(g_intent, if (summary) |s| (g_ctx.fmt("→ {s}", .{s.summary}) catch "") else "→ summarizing…");
-    if (g_dialog) |dlg| setText(dlg, if (summary) |s| (g_ctx.fmt("Agent Belt: new agent · {s}", .{s.name}) catch "Agent Belt: new agent") else "Agent Belt: new agent");
-    const session: []const u8 = "";
-    setText(g_hint, if (g_create_pending) "Naming the session…" else if (plan.repo == null) (g_ctx.fmt("{s}No repo: works in ~/agents · Enter creates · Esc cancels", .{session}) catch "") else (g_ctx.fmt("{s}Enter creates the agent · Esc cancels", .{session}) catch ""));
-}
-
-fn editText() []const u8 {
-    var buf: [2048]u16 = undefined;
-    const n = if (g_edit) |e| w.GetWindowTextW(e, &buf, buf.len) else 0;
-    const text = std.unicode.utf16LeToUtf8Alloc(g_ctx.gpa, buf[0..@intCast(n)]) catch return "";
-    return std.mem.trim(u8, text, " \r\n");
-}
-
-fn createFromPlan(dialog: w.HWND) void {
-    // The fields must come from the text in the box now; if it changed since
-    // the last detection, detect it and create when that arrives.
-    const current = editText();
-    const fresh = if (g_detected) |d| std.mem.eql(u8, std.mem.trim(u8, d.text, " \r\n"), current) else false;
-    if (!fresh) {
-        if (current.len == 0) return;
-        g_create_pending = true;
-        _ = w.SetTimer(dialog, TIMER_DETECT, 1, null);
-        setText(g_hint, "Reading…");
-        return;
-    }
-    const d = g_detected.?;
-    const plan = d.plan orelse return;
-    const summary = (if (g_summary) |s| s.summary else null) orelse {
-        g_create_pending = true; // created when the name arrives
-        setText(g_hint, "Naming the session…");
-        return;
-    };
-    g_create_pending = false;
-    const task = summary.name;
-    const title = g_ctx.fmt("{s} · {s} @ {s}", .{ task, plan.agent, plan.host }) catch "Agent Belt";
-    // Without a repo the agent works in ~/agents/<task> (research).
-    const repo_args: []const []const u8 = if (plan.repo) |r| &.{ "--repo", r } else &.{"--no-repo"};
-    const args = std.mem.concat(g_ctx.gpa, []const u8, &.{ &.{ "new", "--agent", plan.agent, "--host", plan.host }, repo_args, &.{ "--task", task, "--prompt", if (summary.prompt.len > 0) summary.prompt else current } }) catch return;
-    openTerminal(title, args);
-    _ = w.DestroyWindow(dialog);
-}
-
-fn dialogProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callconv(.winapi) w.LRESULT {
-    switch (msg) {
-        w.WM_COMMAND => {
-            const id = wparam & 0xFFFF;
-            const code = (wparam >> 16) & 0xFFFF;
-            if (id == ID_CREATE) createFromPlan(hwnd);
-            if (id == ID_CANCEL) _ = w.DestroyWindow(hwnd);
-            if (id == ID_EDIT and code == 0x0300) { // EN_CHANGE: detect once typing pauses
-                _ = w.SetTimer(hwnd, TIMER_DETECT, 400, null);
-                setText(g_hint, "Reading…");
-            }
-            return 0;
-        },
-        w.WM_TIMER => if (wparam == TIMER_DETECT) {
-            _ = w.KillTimer(hwnd, TIMER_DETECT);
-            var buf: [2048]u16 = undefined;
-            const n = if (g_edit) |e| w.GetWindowTextW(e, &buf, buf.len) else 0;
-            const text = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, buf[0..@intCast(n)]) catch return 0;
-            if (std.mem.trim(u8, text, " ").len == 0) return 0;
-            g_serial += 1;
-            _ = std.Thread.spawn(.{}, detectThread, .{ hwnd, g_serial, text }) catch {};
-            return 0;
-        },
-        WM_PLAN => {
-            const d: *Detected = @ptrFromInt(@as(usize, @bitCast(lparam)));
-            if (wparam != g_serial) { // a newer request is on its way
-                d.arena.deinit();
-                std.heap.page_allocator.destroy(d);
-                return 0;
-            }
-            if (g_detected) |old| {
-                old.arena.deinit();
-                std.heap.page_allocator.destroy(old);
-            }
-            g_detected = d;
-            if (g_summary) |old| { // a new request: its name comes with its own summary
-                old.arena.deinit();
-                std.heap.page_allocator.destroy(old);
-            }
-            g_summary = null;
-            showPlan();
-            if (g_create_pending and d.plan != null) createFromPlan(hwnd); // waits for the name next
-            return 0;
-        },
-        WM_SUMMARY => {
-            const s: *Detected = @ptrFromInt(@as(usize, @bitCast(lparam)));
-            if (wparam != g_serial) {
-                s.arena.deinit();
-                std.heap.page_allocator.destroy(s);
-                return 0;
-            }
-            if (g_summary) |old| {
-                old.arena.deinit();
-                std.heap.page_allocator.destroy(old);
-            }
-            g_summary = s;
-            showPlan();
-            if (g_create_pending) createFromPlan(hwnd);
-            return 0;
-        },
-        0x0138 => if (g_intent != null and lparam == @as(isize, @bitCast(@intFromPtr(g_intent.?)))) { // WM_CTLCOLORSTATIC: the intent in the accent color
-            _ = w.SetTextColor(@ptrFromInt(wparam), w.rgb(37, 99, 235));
-            _ = w.SetBkMode(@ptrFromInt(wparam), w.TRANSPARENT);
-            return @bitCast(@intFromPtr(w.GetSysColorBrush(15)));
-        },
-        w.WM_DESTROY => {
-            g_dialog = null;
-            g_edit = null;
-            if (g_detected) |old| {
-                old.arena.deinit();
-                std.heap.page_allocator.destroy(old);
-            }
-            g_detected = null;
-            if (g_summary) |old| {
-                old.arena.deinit();
-                std.heap.page_allocator.destroy(old);
-            }
-            g_summary = null;
-            g_create_pending = false;
-            return 0;
-        },
-        else => {},
-    }
-    return w.DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
 // ---------------------------------------------------------------- overlay
@@ -687,6 +482,16 @@ pub fn preview() u8 {
         return 1;
     };
     _ = w.PostMessageW(h, WM_PREVIEW, 0, 0);
+    return 0;
+}
+
+/// `agb panel`: asks the running tray daemon for the create-agent panel.
+pub fn panel() u8 {
+    const h = w.FindWindowW(w.L("AgentBelt"), null) orelse {
+        std.debug.print("agent-belt.exe is not running (agb install starts it)\n", .{});
+        return 1;
+    };
+    _ = w.PostMessageW(h, WM_PANEL, 0, 0);
     return 0;
 }
 
@@ -737,7 +542,7 @@ fn mainProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callc
             return 0;
         },
         w.WM_COMMAND => {
-            if (wparam == CMD_NEW) showNewDialog();
+            if (wparam == CMD_NEW) create_panel.show();
             return 0;
         },
         WM_SESSIONS => {
@@ -755,6 +560,14 @@ fn mainProc(hwnd: w.HWND, msg: w.UINT, wparam: w.WPARAM, lparam: w.LPARAM) callc
             } else if (wparam == 0) {
                 g_recording.store(false, .release);
             }
+            return 0;
+        },
+        WM_PANEL => {
+            create_panel.show();
+            return 0;
+        },
+        WM_COUNT => {
+            updateTray(wparam);
             return 0;
         },
         WM_OVERLAY => {
@@ -790,12 +603,13 @@ pub fn run(ctx: sys.Ctx, version: []const u8) !u8 {
     g_instance = w.GetModuleHandleW(null);
     const icon: ?w.HICON = @ptrCast(w.LoadImageW(g_instance, 1, w.IMAGE_ICON, 0, 0, w.LR_DEFAULTSIZE));
     _ = w.RegisterClassExW(&.{ .lpfnWndProc = mainProc, .hInstance = g_instance, .lpszClassName = w.L("AgentBelt"), .hIcon = icon });
-    _ = w.RegisterClassExW(&.{ .lpfnWndProc = dialogProc, .hInstance = g_instance, .lpszClassName = w.L("AgentBeltNew"), .hIcon = icon, .hbrBackground = @ptrFromInt(16) }); // COLOR_BTNFACE + 1
 
     g_hwnd = w.CreateWindowExW(0, w.L("AgentBelt"), w.L("Agent Belt"), w.WS_OVERLAPPED, 0, 0, 0, 0, null, null, g_instance, null) orelse return error.NoWindow;
     overlay.create(g_instance, overlayProc);
+    create_panel.init(ctx, g_instance, openTerminal);
 
-    g_tray = .{ .hWnd = g_hwnd, .uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP, .uCallbackMessage = WM_TRAY, .hIcon = icon };
+    g_app_icon = icon;
+    g_tray = .{ .hWnd = g_hwnd, .uFlags = w.NIF_MESSAGE | w.NIF_ICON | w.NIF_TIP, .uCallbackMessage = WM_TRAY, .hIcon = trayIcon(0) orelse icon };
     const tip = w.L("Agent Belt · Ctrl+Alt+D dictates · Ctrl+Alt+Space menu");
     @memcpy(g_tray.szTip[0..tip.len], tip);
     _ = w.Shell_NotifyIconW(w.NIM_ADD, &g_tray);
@@ -808,7 +622,6 @@ pub fn run(ctx: sys.Ctx, version: []const u8) !u8 {
 
     var msg: w.MSG = undefined;
     while (w.GetMessageW(&msg, null, 0, 0) > 0) {
-        if (g_dialog) |d| if (w.IsDialogMessageW(d, &msg) != 0) continue;
         _ = w.TranslateMessage(&msg);
         _ = w.DispatchMessageW(&msg);
     }

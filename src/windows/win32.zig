@@ -118,6 +118,8 @@ pub const WM_SYSKEYDOWN = 0x0104;
 pub const WM_SYSKEYUP = 0x0105;
 pub const WM_LBUTTONUP = 0x0202;
 pub const WM_RBUTTONUP = 0x0205;
+pub const WM_CHAR = 0x0102;
+pub const WM_LBUTTONDOWN = 0x0201;
 pub const WM_APP = 0x8000;
 pub const WM_SETFONT = 0x0030;
 
@@ -171,6 +173,11 @@ pub const VK_RETURN = 0x0D;
 pub const VK_SPACE = 0x20;
 pub const VK_UP = 0x26;
 pub const VK_DOWN = 0x28;
+pub const VK_ESCAPE = 0x1B;
+pub const MF_CHECKED = 0x0008;
+pub const SM_CXSMICON = 49;
+pub const CF_UNICODETEXT = 13;
+pub const RRF_RT_REG_DWORD = 0x10;
 
 pub const INPUT_KEYBOARD = 1;
 pub const KEYEVENTF_KEYUP = 0x2;
@@ -278,6 +285,13 @@ pub extern "user32" fn SetWindowTextW(hwnd: HWND, text: LPCWSTR) callconv(.winap
 pub extern "user32" fn GetSysColorBrush(index: c_int) callconv(.winapi) ?HBRUSH;
 pub extern "user32" fn FindWindowW(class: ?LPCWSTR, name: ?LPCWSTR) callconv(.winapi) ?HWND;
 pub extern "user32" fn GetSystemMetrics(index: c_int) callconv(.winapi) c_int;
+pub extern "user32" fn DestroyIcon(icon: HICON) callconv(.winapi) BOOL;
+pub extern "user32" fn IsWindowVisible(hwnd: HWND) callconv(.winapi) BOOL;
+pub extern "user32" fn OpenClipboard(hwnd: ?HWND) callconv(.winapi) BOOL;
+pub extern "user32" fn CloseClipboard() callconv(.winapi) BOOL;
+pub extern "user32" fn GetClipboardData(format: UINT) callconv(.winapi) ?HANDLE;
+pub extern "kernel32" fn GlobalLock(mem: HANDLE) callconv(.winapi) ?[*:0]const u16;
+pub extern "kernel32" fn GlobalUnlock(mem: HANDLE) callconv(.winapi) BOOL;
 
 pub extern "shell32" fn Shell_NotifyIconW(message: DWORD, data: *NOTIFYICONDATAW) callconv(.winapi) BOOL;
 
@@ -297,6 +311,17 @@ pub extern "gdi32" fn BitBlt(dst: HDC, x: c_int, y: c_int, w: c_int, h: c_int, s
 pub extern "gdi32" fn DeleteDC(hdc: HDC) callconv(.winapi) BOOL;
 pub const SRCCOPY: DWORD = 0x00CC0020;
 
+// Layered windows drawn by GDI+ (the overlay, the create-agent panel).
+pub const BITMAPINFOHEADER = extern struct { size: u32 = @sizeOf(BITMAPINFOHEADER), width: i32, height: i32, planes: u16 = 1, bit_count: u16 = 32, compression: u32 = 0, size_image: u32 = 0, xppm: i32 = 0, yppm: i32 = 0, clr_used: u32 = 0, clr_important: u32 = 0 };
+pub const SIZE = extern struct { cx: LONG, cy: LONG };
+pub const BLENDFUNCTION = extern struct { op: u8 = 0, flags: u8 = 0, alpha: u8 = 255, format: u8 = 1 };
+pub extern "gdi32" fn CreateDIBSection(hdc: ?HDC, info: *const BITMAPINFOHEADER, usage: UINT, bits: *?*anyopaque, section: ?HANDLE, offset: DWORD) callconv(.winapi) ?HBITMAP;
+pub extern "gdi32" fn GetDeviceCaps(hdc: HDC, index: c_int) callconv(.winapi) c_int;
+pub extern "user32" fn GetDC(hwnd: ?HWND) callconv(.winapi) ?HDC;
+pub extern "user32" fn ReleaseDC(hwnd: ?HWND, hdc: HDC) callconv(.winapi) c_int;
+pub extern "user32" fn UpdateLayeredWindow(hwnd: HWND, dst: ?HDC, pos: ?*const POINT, size: ?*const SIZE, src: HDC, src_pos: ?*const POINT, key: DWORD, blend: *const BLENDFUNCTION, flags: DWORD) callconv(.winapi) BOOL;
+pub extern "user32" fn SetProcessDPIAware() callconv(.winapi) BOOL;
+
 pub extern "winmm" fn waveInOpen(handle: *?HWAVEIN, device: UINT, format: *const WAVEFORMATEX, callback: usize, instance: usize, flags: DWORD) callconv(.winapi) UINT;
 pub extern "winmm" fn waveInPrepareHeader(handle: HWAVEIN, header: *WAVEHDR, size: UINT) callconv(.winapi) UINT;
 pub extern "winmm" fn waveInUnprepareHeader(handle: HWAVEIN, header: *WAVEHDR, size: UINT) callconv(.winapi) UINT;
@@ -310,6 +335,7 @@ pub extern "advapi32" fn CredReadW(target: LPCWSTR, kind: DWORD, flags: DWORD, c
 pub extern "advapi32" fn CredWriteW(cred: *const CREDENTIALW, flags: DWORD) callconv(.winapi) BOOL;
 pub extern "advapi32" fn CredFree(buffer: *anyopaque) callconv(.winapi) void;
 pub extern "advapi32" fn RegSetKeyValueW(key: HKEY, sub: ?LPCWSTR, name: ?LPCWSTR, kind: DWORD, data: ?*const anyopaque, size: DWORD) callconv(.winapi) LONG;
+pub extern "advapi32" fn RegGetValueW(key: HKEY, sub: ?LPCWSTR, name: ?LPCWSTR, flags: DWORD, kind: ?*DWORD, data: ?*anyopaque, size: ?*DWORD) callconv(.winapi) LONG;
 pub extern "advapi32" fn RegDeleteKeyValueW(key: HKEY, sub: ?LPCWSTR, name: ?LPCWSTR) callconv(.winapi) LONG;
 
 /// UTF-8 to a NUL-terminated UTF-16 string.
