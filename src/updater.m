@@ -35,19 +35,29 @@ static NSString *MKUpdateScript(void) {
     return [NSFileManager.defaultManager isExecutableFileAtPath:script] ? script : nil;
 }
 
+// A tag reaches a shell and a download URL, and it arrives from the GitHub API
+// or from `agb update <tag>`: only the shape of a release tag is ever accepted.
+static BOOL MKIsReleaseTag(NSString *tag) {
+    NSCharacterSet *forbidden = [[NSCharacterSet characterSetWithCharactersInString:
+        @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_+"] invertedSet];
+    return tag.length > 0 && tag.length <= 64 && [tag rangeOfCharacterFromSet:forbidden].location == NSNotFound;
+}
+
 // The installer stops this daemon, and launchd then kills its whole process
 // group: the update runs in a session of its own, logging to a file.
 static int MKStartUpdate(NSString *tag) {
+    if (tag && !MKIsReleaseTag(tag)) { fprintf(stderr, "[agent-belt] not a release tag; refusing to update\n"); return -1; }
     NSString *script = MKUpdateScript();
     if (!script) { fprintf(stderr, "[agent-belt] update.sh is missing from the app; reinstall with ./install.sh\n"); return -1; }
     NSString *log = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/agent-belt-update.log"];
-    NSString *line = [NSString stringWithFormat:@"exec %@ %@ >>%@ 2>&1", [script stringByReplacingOccurrencesOfString:@" " withString:@"\\ "],
-                      tag ?: @"", [log stringByReplacingOccurrencesOfString:@" " withString:@"\\ "]];
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
     pid_t pid;
-    char *argv[] = {"/bin/bash", "-lc", (char *)line.UTF8String, NULL};
+    // The script, the tag and the log path are positional arguments: nothing
+    // that came over the network is ever spliced into the command itself.
+    char *argv[] = {"/bin/bash", "-lc", "exec \"$0\" ${1:+\"$1\"} >>\"$2\" 2>&1",
+                    (char *)script.UTF8String, (char *)(tag ?: @"").UTF8String, (char *)log.UTF8String, NULL};
     extern char **environ;
     int result = posix_spawn(&pid, "/bin/bash", NULL, &attr, argv, environ);
     posix_spawnattr_destroy(&attr);
@@ -64,7 +74,7 @@ static int MKStartUpdate(NSString *tag) {
     (void)center;
     NSDictionary *info = response.notification.request.content.userInfo;
     if ([response.actionIdentifier isEqual:@"update"]) MKStartUpdate(info[@"tag"]);
-    else if ([response.actionIdentifier isEqual:UNNotificationDefaultActionIdentifier] && info[@"url"])
+    else if ([response.actionIdentifier isEqual:UNNotificationDefaultActionIdentifier] && [info[@"url"] length])
         [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:info[@"url"]]];
     completion();
 }
@@ -101,22 +111,42 @@ static void MKNotifyUpdate(NSString *tag, NSString *notes, NSString *url) {
     }];
 }
 
+// The release page the notification opens on a click: an https github.com URL
+// or nothing. The response must not hand the workspace an arbitrary scheme.
+static NSString *MKReleaseURL(id value) {
+    if (![value isKindOfClass:NSString.class]) return nil;
+    NSURL *url = [NSURL URLWithString:value];
+    NSString *host = url.host.lowercaseString;
+    if (![url.scheme isEqual:@"https"]) return nil;
+    return ([host isEqual:@"github.com"] || [host hasSuffix:@".github.com"]) ? value : nil;
+}
+
+// A release payload is a few kB of JSON. Anything else — an error page, a
+// redirect to something huge, a body that never ends — is not one.
+static NSDictionary *MKReleaseBody(NSData *data, NSURLResponse *response, NSError *error) {
+    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+    if (error || status != 200 || data.length == 0 || data.length > 1024 * 1024) return nil;
+    NSDictionary *release = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [release isKindOfClass:NSDictionary.class] ? release : nil;
+}
+
 static void MKCheckForUpdate(void) {
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
         [NSURL URLWithString:[NSString stringWithFormat:@"https://api.github.com/repos/%@/releases/latest", mk_repo]]];
     [request setValue:@"agent-belt" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/vnd.github+json" forHTTPHeaderField:@"Accept"];
     [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        (void)response;
-        if (error || !data) return;
-        NSDictionary *release = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-        NSString *tag = [release isKindOfClass:NSDictionary.class] ? release[@"tag_name"] : nil;
-        if (![tag isKindOfClass:NSString.class] || MKCompareVersions(tag, mk_version) != NSOrderedDescending) return;
+        NSDictionary *release = MKReleaseBody(data, response, error);
+        NSString *tag = release[@"tag_name"];
+        if (![tag isKindOfClass:NSString.class] || !MKIsReleaseTag(tag) ||
+            MKCompareVersions(tag, mk_version) != NSOrderedDescending) return;
+        NSString *url = MKReleaseURL(release[@"html_url"]);
+        NSString *notes = [release[@"body"] isKindOfClass:NSString.class] ? release[@"body"] : @"";
         dispatch_async(dispatch_get_main_queue(), ^{
             mk_update_tag = tag;
-            mk_update_url = release[@"html_url"];
+            mk_update_url = url;
             fprintf(stderr, "[agent-belt] new version available: %s\n", tag.UTF8String);
-            MKNotifyUpdate(tag, [release[@"body"] isKindOfClass:NSString.class] ? release[@"body"] : @"", mk_update_url);
+            MKNotifyUpdate(tag, notes, url);
         });
     }] resume];
 }

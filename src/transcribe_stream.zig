@@ -22,6 +22,85 @@ fn isUnreserved(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '-' or c == '.' or c == '_' or c == '~';
 }
 
+/// Deepgram's results are JSON of a few kB. A longer message — or a longer run
+/// of continuation frames — is a hostile or broken server, and the length is
+/// attacker-controlled up to 2^64, so it is capped before anything is sized by it.
+const max_message_len = 1 << 20;
+
+/// A 101 response that never ends its header block must not hold the recording
+/// thread forever.
+const max_handshake_headers = 64;
+
+const Frame = struct { fin: bool, opcode: u4, len: usize };
+
+/// One frame header, validated against RFC 6455 before its length is trusted.
+fn takeHeader(r: *std.Io.Reader) !Frame {
+    const head = (try r.takeArray(2)).*;
+    if (head[0] & 0x70 != 0) return error.WebSocketProtocol; // no extension was negotiated
+    const fin = head[0] & 0x80 != 0;
+    const opcode: u4 = @truncate(head[0] & 0x0f);
+    var len: u64 = head[1] & 0x7f;
+    if (len == 126) {
+        len = std.mem.readInt(u16, try r.takeArray(2), .big);
+    } else if (len == 127) {
+        len = std.mem.readInt(u64, try r.takeArray(8), .big);
+    }
+    if (head[1] & 0x80 != 0) try r.discardAll(4); // servers never mask; tolerate it
+    if (opcode & 0x8 != 0 and (!fin or len > 125)) return error.WebSocketProtocol;
+    if (len > max_message_len) return error.WebSocketMessageTooLong;
+    return .{ .fin = fin, .opcode = opcode, .len = @intCast(len) };
+}
+
+/// `GET /v1/listen?...`: every configured value is percent-encoded, so a model,
+/// language or keyterm holding CRLF cannot inject a header into the upgrade request.
+fn writeTarget(w: *std.Io.Writer, options: Options) !void {
+    try w.writeAll("GET /v1/listen?model=");
+    try std.Uri.Component.percentEncode(w, options.model, isUnreserved);
+    try w.writeAll("&language=");
+    try std.Uri.Component.percentEncode(w, options.language, isUnreserved);
+    try w.print("&encoding=linear16&sample_rate=16000&channels=1&interim_results=true" ++
+        "&smart_format={}&punctuate=true&mip_opt_out={}", .{ options.smart_format, options.mip_opt_out });
+    for (options.keyterms) |term| {
+        try w.writeAll("&keyterm=");
+        try std.Uri.Component.percentEncode(w, term, isUnreserved);
+    }
+}
+
+/// RFC 6455 4.1: the server proves it completed the WebSocket handshake by
+/// echoing base64(sha1(key ++ guid)). Without the check, any 101 — a confused
+/// HTTP endpoint, a proxy, a cache — would be read as a stream of frames.
+fn acceptToken(key: []const u8) [28]u8 {
+    var sha1: std.crypto.hash.Sha1 = .init(.{});
+    sha1.update(key);
+    sha1.update("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    var digest: [20]u8 = undefined;
+    sha1.final(&digest);
+    var token: [28]u8 = undefined;
+    _ = std.base64.standard.Encoder.encode(&token, &digest);
+    return token;
+}
+
+fn headerValue(line: []const u8, name: []const u8) ?[]const u8 {
+    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return null;
+    if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, line[0..colon], " "), name)) return null;
+    return std.mem.trim(u8, line[colon + 1 ..], " ");
+}
+
+fn readHandshakeResponse(r: *std.Io.Reader, accept: []const u8) !void {
+    const status = try r.takeDelimiterInclusive('\n');
+    if (std.mem.indexOf(u8, status, " 101 ") == null) return error.DeepgramRejected;
+    var confirmed = false;
+    for (0..max_handshake_headers) |_| {
+        const line = std.mem.trim(u8, try r.takeDelimiterInclusive('\n'), "\r\n");
+        if (line.len == 0) {
+            if (!confirmed) return error.WebSocketHandshakeFailed;
+            return;
+        }
+        if (headerValue(line, "sec-websocket-accept")) |value| confirmed = std.mem.eql(u8, value, accept);
+    }
+    return error.WebSocketHandshakeFailed;
+}
+
 pub const Stream = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -68,23 +147,14 @@ pub const Stream = struct {
         self.io.random(&key_raw);
         var key: [24]u8 = undefined;
         _ = std.base64.standard.Encoder.encode(&key, &key_raw);
+        if (std.mem.indexOfAny(u8, options.api_key, "\r\n") != null) return error.InvalidApiKey;
         const w = self.connection.writer();
-        try w.print("GET /v1/listen?model={s}&language={s}&encoding=linear16&sample_rate=16000&channels=1" ++
-            "&interim_results=true&smart_format={}&punctuate=true&mip_opt_out={}", .{ options.model, options.language, options.smart_format, options.mip_opt_out });
-        for (options.keyterms) |term| {
-            try w.writeAll("&keyterm=");
-            try std.Uri.Component.percentEncode(w, term, isUnreserved);
-        }
+        try writeTarget(w, options);
         try w.print(" HTTP/1.1\r\nHost: {s}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" ++
             "Sec-WebSocket-Key: {s}\r\nSec-WebSocket-Version: 13\r\nAuthorization: Token {s}\r\n\r\n", .{ host, &key, options.api_key });
         try self.connection.flush();
-        const r = self.connection.reader();
-        const status = try r.takeDelimiterInclusive('\n');
-        if (std.mem.indexOf(u8, status, " 101 ") == null) return error.DeepgramRejected;
-        while (true) {
-            const line = try r.takeDelimiterInclusive('\n');
-            if (std.mem.trim(u8, line, "\r\n").len == 0) break;
-        }
+        const accept = acceptToken(&key);
+        try readHandshakeResponse(self.connection.reader(), &accept);
     }
 
     /// PCM16 mono 16 kHz, as captured. Safe to call from the recording thread
@@ -189,22 +259,18 @@ pub const Stream = struct {
         var message: std.ArrayList(u8) = .empty;
         defer message.deinit(self.gpa);
         while (true) {
-            const head = try r.takeArray(2);
-            const fin = head[0] & 0x80 != 0;
-            const opcode = head[0] & 0x0f;
-            var len: u64 = head[1] & 0x7f;
-            if (len == 126) len = std.mem.readInt(u16, try r.takeArray(2), .big);
-            if (len == 127) len = std.mem.readInt(u64, try r.takeArray(8), .big);
-            if (head[1] & 0x80 != 0) try r.discardAll(4); // servers never mask; tolerate it
-            if (opcode == 0x8) return; // close
-            const start = message.items.len;
-            try message.resize(self.gpa, start + @as(usize, @intCast(len)));
-            try r.readSliceAll(message.items[start..]);
-            if (opcode == 0x9 or opcode == 0xA) { // ping/pong: Deepgram does not ping clients
-                message.shrinkRetainingCapacity(start);
+            const frame = try takeHeader(r);
+            if (frame.opcode == 0x8) return; // close
+            if (frame.opcode & 0x8 != 0) { // ping/pong: Deepgram does not ping clients
+                try r.discardAll(frame.len);
                 continue;
             }
-            if (!fin) continue;
+            if (frame.opcode > 0x2) return error.WebSocketProtocol; // continuation, text or binary
+            const start = message.items.len;
+            if (start + frame.len > max_message_len) return error.WebSocketMessageTooLong;
+            try message.resize(self.gpa, start + frame.len);
+            try r.readSliceAll(message.items[start..]);
+            if (!frame.fin) continue;
             self.onMessage(message.items);
             message.clearRetainingCapacity();
         }
@@ -236,3 +302,55 @@ pub const Stream = struct {
         _ = self.revision.fetchAdd(1, .release);
     }
 };
+
+test "a frame length above the message cap is refused before anything is sized by it" {
+    var r = std.Io.Reader.fixed(&[_]u8{ 0x81, 127, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff });
+    try std.testing.expectError(error.WebSocketMessageTooLong, takeHeader(&r));
+}
+
+test "a 16-bit length of 127 stays a length" {
+    var r = std.Io.Reader.fixed(&[_]u8{ 0x82, 126, 0x00, 0x7f, 0xaa });
+    const frame = try takeHeader(&r);
+    try std.testing.expectEqual(@as(usize, 127), frame.len);
+    try std.testing.expectEqual(@as(u8, 0xaa), (try r.takeArray(1))[0]);
+}
+
+test "an oversized or fragmented control frame is refused" {
+    var oversized = std.Io.Reader.fixed(&[_]u8{ 0x89, 126, 0x01, 0x00 });
+    try std.testing.expectError(error.WebSocketProtocol, takeHeader(&oversized));
+    var fragmented = std.Io.Reader.fixed(&[_]u8{ 0x09, 0x02 });
+    try std.testing.expectError(error.WebSocketProtocol, takeHeader(&fragmented));
+    var reserved = std.Io.Reader.fixed(&[_]u8{ 0xc1, 0x00 });
+    try std.testing.expectError(error.WebSocketProtocol, takeHeader(&reserved));
+}
+
+test "the request target percent-encodes every configured value" {
+    var buffer: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buffer);
+    try writeTarget(&w, .{ .api_key = "k", .model = "nova-3\r\nX: y", .keyterms = &.{"Agent Belt"} });
+    const target = w.buffered();
+    try std.testing.expect(std.mem.indexOf(u8, target, "\r\n") == null);
+    try std.testing.expect(std.mem.indexOf(u8, target, "model=nova-3%0D%0AX%3A%20y&") != null);
+    try std.testing.expect(std.mem.indexOf(u8, target, "&keyterm=Agent%20Belt") != null);
+}
+
+test "the 101 response is accepted only with the matching Sec-WebSocket-Accept" {
+    const key = "dGhlIHNhbXBsZSBub25jZQ=="; // RFC 6455 1.3
+    const accept = acceptToken(key);
+    try std.testing.expectEqualStrings("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", &accept);
+    var forged = std.Io.Reader.fixed("HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: AAAA\r\n\r\n");
+    try std.testing.expectError(error.WebSocketHandshakeFailed, readHandshakeResponse(&forged, &accept));
+    var missing = std.Io.Reader.fixed("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n");
+    try std.testing.expectError(error.WebSocketHandshakeFailed, readHandshakeResponse(&missing, &accept));
+    var genuine = std.Io.Reader.fixed("HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n");
+    try readHandshakeResponse(&genuine, &accept);
+}
+
+test "an endless header block ends the handshake" {
+    var buffer: [64 + max_handshake_headers * 8]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buffer);
+    try w.writeAll("HTTP/1.1 101 Switching Protocols\r\n");
+    for (0..max_handshake_headers) |_| try w.writeAll("X: y\r\n");
+    var r = std.Io.Reader.fixed(w.buffered());
+    try std.testing.expectError(error.WebSocketHandshakeFailed, readHandshakeResponse(&r, "x"));
+}
