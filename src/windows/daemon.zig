@@ -314,7 +314,9 @@ fn openTerminal(title: []const u8, args: []const []const u8) void {
         line.append(g_ctx.gpa, ' ') catch return;
         appendQuoted(&line, arg) catch return;
     }
-    log("open: {s}", .{line.items});
+    // The window, not the command line: `agb new` carries the dictated
+    // request in --prompt, and the log stays for the life of the install.
+    log("open: {s}", .{title});
     var si = w.STARTUPINFOW{ .lpTitle = w.wide(g_ctx.gpa, title) catch return };
     var pi = w.PROCESS_INFORMATION{};
     const cmd = w.wide(g_ctx.gpa, line.items) catch return;

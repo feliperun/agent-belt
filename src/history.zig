@@ -13,6 +13,12 @@ const builtin = @import("builtin");
 
 pub const retention_days = 60;
 
+/// Voice and transcripts are the most private thing here: the directory and
+/// every file in it belong to the owner alone (on Windows the per-user
+/// profile is protected by its own ACL).
+const owner_only_file: std.Io.File.Permissions = if (builtin.os.tag == .windows) .default_file else .fromMode(0o600);
+const owner_only_dir: std.Io.File.Permissions = if (builtin.os.tag == .windows) .default_file else .fromMode(0o700);
+
 pub const Kind = enum { dictation, @"new-agent" };
 
 pub const Entry = struct {
@@ -82,12 +88,12 @@ const Job = struct {
         defer arena.deinit();
         const gpa = arena.allocator();
         const cwd = std.Io.Dir.cwd();
-        try cwd.createDirPath(self.io, self.dir);
+        try makeDir(self.io, self.dir);
         const now = std.Io.Clock.real.now(self.io).toSeconds();
         const base = try std.fmt.allocPrint(gpa, "{s}-{s}", .{ try stamp(gpa, now), @tagName(self.kind) });
         const audio = if (self.wav.len > 44) try std.fmt.allocPrint(gpa, "{s}.wav", .{base}) else "";
         if (audio.len > 0) {
-            const f = try cwd.createFile(self.io, try std.fs.path.join(gpa, &.{ self.dir, audio }), .{});
+            const f = try cwd.createFile(self.io, try std.fs.path.join(gpa, &.{ self.dir, audio }), .{ .permissions = owner_only_file });
             defer f.close(self.io);
             try f.writeStreamingAll(self.io, self.wav);
         }
@@ -99,11 +105,25 @@ const Job = struct {
             .audio = audio,
         };
         const json = try std.fmt.allocPrint(gpa, "{f}\n", .{std.json.fmt(entry, .{})});
-        const f = try cwd.createFile(self.io, try std.fs.path.join(gpa, &.{ self.dir, try std.fmt.allocPrint(gpa, "{s}.json", .{base}) }), .{});
+        const f = try cwd.createFile(self.io, try std.fs.path.join(gpa, &.{ self.dir, try std.fmt.allocPrint(gpa, "{s}.json", .{base}) }), .{ .permissions = owner_only_file });
         defer f.close(self.io);
         try f.writeStreamingAll(self.io, json);
     }
 };
+
+/// The history directory, owner-only. One left open by an older version is
+/// closed on the way: the recordings already in it are as private as the new one.
+fn makeDir(io: std.Io, history_dir: []const u8) !void {
+    if (try std.Io.Dir.cwd().createDirPathStatus(io, history_dir, owner_only_dir) == .created) return;
+    if (builtin.os.tag != .windows) makePrivate(io, history_dir) catch {};
+}
+
+fn makePrivate(io: std.Io, history_dir: []const u8) !void {
+    var d = try std.Io.Dir.cwd().openDir(io, history_dir, .{});
+    defer d.close(io);
+    const info = try d.stat(io);
+    if (info.permissions.toMode() & 0o077 != 0) try d.setPermissions(io, owner_only_dir);
+}
 
 /// Length of a 16 kHz mono PCM16 WAV (the format every recorder here uses).
 fn wavSeconds(wav: []const u8) f64 {
@@ -175,6 +195,9 @@ pub fn command(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Envir
         };
     }
     const d = try dir(gpa, env);
+    // 60 days is a promise, not an effect of recording again: someone who
+    // stops dictating keeps nothing older than that either.
+    prune(io, d) catch {};
     const entries = try list(gpa, io, d, days);
     var out: std.Io.Writer.Allocating = .init(gpa);
     const w = &out.writer;
@@ -212,4 +235,34 @@ test "stamps sort by time and prune compares prefixes" {
     try std.testing.expectEqualStrings("20260921T141320Z", a);
     try std.testing.expect(std.mem.order(u8, a, b) == .lt);
     try std.testing.expectEqual(@as(f64, 1), wavSeconds(&([_]u8{0} ** (44 + 32000))));
+}
+
+test "a recording is readable by its owner and by nobody else" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const history_dir = try std.fs.path.join(gpa, &.{ ".zig-cache", "tmp", &tmp.sub_path, "history" });
+    defer gpa.free(history_dir);
+    // A directory an older version left open to everyone is closed again.
+    try std.Io.Dir.cwd().createDirPath(io, history_dir);
+    var loose = try std.Io.Dir.cwd().openDir(io, history_dir, .{});
+    try loose.setPermissions(io, .fromMode(0o755));
+    loose.close(io);
+
+    save(io, history_dir, .dictation, &([_]u8{0} ** (44 + 32000)), "what was said");
+
+    const cwd = std.Io.Dir.cwd();
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try cwd.statFile(io, history_dir, .{})).permissions.toMode() & 0o777);
+    var d = try cwd.openDir(io, history_dir, .{ .iterate = true });
+    defer d.close(io);
+    var it = d.iterate();
+    var files: usize = 0;
+    while (try it.next(io)) |e| {
+        files += 1;
+        const info = try d.statFile(io, e.name, .{});
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), info.permissions.toMode() & 0o777);
+    }
+    try std.testing.expectEqual(@as(usize, 2), files); // the WAV and its transcript
 }

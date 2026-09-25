@@ -113,7 +113,9 @@ const Daemon = struct {
         }
         try macos.dismissOverlay();
         if (self.command) {
-            std.debug.print("[agent-belt] VOICE COMMAND: {s}\n", .{text});
+            // What was said goes to the history, never to the log: launchd
+            // keeps the log for as long as the install lives.
+            std.debug.print("[agent-belt] VOICE COMMAND ({d} characters)\n", .{text.len});
             try macos.voiceCommand(self.allocator, text);
             return;
         }

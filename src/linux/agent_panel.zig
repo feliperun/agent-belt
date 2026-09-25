@@ -145,6 +145,11 @@ const Host = struct {
         self.finishing_since = null;
         const wav_path = desktop.runtimeFile(ctx, "agb-agent.wav") catch return;
         if (sys.readFile(ctx, wav_path)) |wav| history.saveAsync(ctx.io, history.dir(ctx.gpa, ctx.env) catch return, .@"new-agent", wav, words);
+        // The history keeps the recording; the runtime copy of the voice and
+        // of its transcript does not outlive the panel.
+        for ([_][]const u8{ "agb-agent.wav", "agb-agent.final" }) |f| {
+            std.Io.Dir.cwd().deleteFile(ctx.io, desktop.runtimeFile(ctx, f) catch continue) catch {};
+        }
     }
 
     /// Edits, choices and actions from the panel, applied once per sequence.
@@ -275,6 +280,8 @@ fn host(ctx: sys.Ctx) !u8 {
     try ctx.env.put("AGB_PANEL_CMD", cmd_path);
     var shell = try std.process.spawn(ctx.io, .{ .argv = &.{ "quickshell", "-p", qml }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
     defer shell.kill(ctx.io);
+    // The state carries the whole request: it goes when the panel goes.
+    defer for ([_][]const u8{ state_path, cmd_path }) |p| std.Io.Dir.cwd().deleteFile(ctx.io, p) catch {};
 
     const opened = self.now();
     while (self.now() - opened < 15 * std.time.ns_per_min) {

@@ -148,8 +148,9 @@ int mk_status_report(uint16_t vendor_id, uint16_t product_id, const char *key_en
         // Reads the secret like the daemon does (same signed app), so a missing
         // Keychain grant shows up here as the system prompt, not mid-dictation.
         char *secret = keychain ? mk_keychain_secret("agent-belt", "deepgram") : NULL;
+        BOOL readable = secret != NULL;
         if (secret) { memset(secret, 0, strlen(secret)); free(secret); }
-        printf("deepgram:     %s\n", secret ? "key in the Keychain, readable by the app"
+        printf("deepgram:     %s\n", readable ? "key in the Keychain, readable by the app"
                                     : keychain ? "key in the Keychain, but the app has no access (run status again and allow it)"
                                     : getenv(key_env) ? "only in the terminal environment (the LaunchAgent does not see it)" : "no key");
 

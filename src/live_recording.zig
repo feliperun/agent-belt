@@ -64,7 +64,7 @@ pub const Live = struct {
     /// every 40 ms and passes new text on. On stop: the rest, then the final words.
     fn sendLoop(self: *Live) void {
         const key = macos.deepgramKey(self.gpa, self.config.deepgram_api_key_env) catch return;
-        defer self.gpa.free(key);
+        defer wipe(self.gpa, key);
         const stream = transcribe.Stream.open(self.gpa, self.io, .{
             .api_key = key,
             .model = self.config.deepgram_model,
@@ -118,7 +118,7 @@ pub const Live = struct {
     fn batch(self: *Live, wav: []const u8) ?[]u8 {
         if (wav.len <= 44) return null;
         const key = macos.deepgramKey(self.gpa, self.config.deepgram_api_key_env) catch return null;
-        defer self.gpa.free(key);
+        defer wipe(self.gpa, key);
         const client = deepgram.Client{
             .io = self.io,
             .allocator = self.gpa,
@@ -131,3 +131,9 @@ pub const Live = struct {
         return client.transcribe(wav) catch null;
     }
 };
+
+/// The API key leaves no copy behind in the daemon's heap.
+fn wipe(gpa: std.mem.Allocator, key: []u8) void {
+    @memset(key, 0);
+    gpa.free(key);
+}

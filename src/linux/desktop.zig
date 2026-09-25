@@ -165,8 +165,22 @@ fn waybar(ctx: sys.Ctx) !u8 {
 
 // ---------------------------------------------------------------- push-to-talk
 
+/// A runtime file, always in a directory only this user can enter: the audio,
+/// the transcript, the QML the panel runs and the commands it takes all live
+/// there. XDG_RUNTIME_DIR is that directory by definition; without it (a
+/// session without one) /tmp/agent-belt-<uid>, created 0700, stands in. Never
+/// /tmp itself: there another local user reads the recording, plants the QML
+/// quickshell runs, or writes agb-agent.cmd to have an agent created with a
+/// prompt of their choosing.
 pub fn runtimeFile(ctx: sys.Ctx, name: []const u8) ![]const u8 {
-    return ctx.join(&.{ ctx.getenv("XDG_RUNTIME_DIR") orelse "/tmp", name });
+    return ctx.join(&.{ try runtimeDir(ctx), name });
+}
+
+fn runtimeDir(ctx: sys.Ctx) ![]const u8 {
+    if (ctx.getenv("XDG_RUNTIME_DIR")) |d| if (d.len > 0) return d;
+    const path = try ctx.fmt("/tmp/agent-belt-{d}", .{std.os.linux.getuid()});
+    try sys.createPrivateDir(ctx.io, path);
+    return path;
 }
 
 fn recorderPid(ctx: sys.Ctx) ?std.posix.pid_t {
@@ -221,6 +235,10 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     const wav_path = try runtimeFile(ctx, "agb-ptt.wav");
     const wav = sys.readFile(ctx, wav_path) orelse "";
     defer std.Io.Dir.cwd().deleteFile(ctx.io, wav_path) catch {};
+    // The words were said once: the streamed transcript does not stay on disk.
+    defer for ([_][]const u8{ "agb-ptt.stream", "agb-ptt.final" }) |f| {
+        std.Io.Dir.cwd().deleteFile(ctx.io, runtimeFile(ctx, f) catch continue) catch {};
+    };
     if (wav.len < 44 + 16000 / 5) { // under ~100 ms: an accidental tap
         setMode(ctx, 0);
         notify(ctx, "Agent Belt", "recording too short", 1500);
@@ -249,7 +267,9 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     // Like on the Mac, the overlay leaves before the text is typed.
     setMode(ctx, 0);
     std.Io.sleep(ctx.io, .fromMilliseconds(120), .awake) catch {};
-    notify(ctx, "Agent Belt", text, 1);
+    // Only to take the "Listening" bubble away: the words themselves are not
+    // sent to the notification daemon, which keeps a history of what it showed.
+    notify(ctx, "Agent Belt", "", 1);
     // wtype waits for the compositor to take its keymap, or the first key is lost.
     const typed = if (sys.which(ctx, "wtype") != null) sys.run(ctx, &.{ "wtype", "-s", "120", "--", text }, null) else sys.run(ctx, &.{ "ydotool", "type", "--", text }, null);
     if (!typed.ok) {
@@ -444,9 +464,9 @@ fn install(ctx: sys.Ctx) !u8 {
     if (ctx.getenv("DEEPGRAM_API_KEY")) |key| if (key.len > 0) {
         const path = try keyPath(ctx);
         std.Io.Dir.cwd().createDirPath(ctx.io, std.fs.path.dirname(path).?) catch {};
-        const file = try std.Io.Dir.cwd().createFile(ctx.io, path, .{ .permissions = .fromMode(0o600) });
-        defer file.close(ctx.io);
-        try file.writeStreamingAll(ctx.io, key);
+        // Through a new file and a rename: a key file an earlier install left
+        // readable by everyone comes back owner-only.
+        try sys.writeFileAtomic(ctx, path, key);
         std.debug.print("Deepgram key saved to {s} (0600)\n", .{path});
     };
     const hypr = try hyprDir(ctx);

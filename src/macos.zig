@@ -27,8 +27,14 @@ pub fn deepgramKey(allocator: std.mem.Allocator, env_name: []const u8) ![]u8 {
     const name_z = std.fmt.bufPrintZ(&name, "{s}", .{env_name}) catch return error.DeepgramApiKeyMissing;
     if (std.c.getenv(name_z)) |value| return allocator.dupe(u8, std.mem.span(value));
     const secret = c.mk_keychain_secret("agent-belt", "deepgram") orelse return error.DeepgramApiKeyMissing;
-    defer c.mk_free_buffer(@ptrCast(secret));
-    return allocator.dupe(u8, std.mem.span(secret));
+    const span = std.mem.span(secret);
+    // Wiped before the heap takes it back: a crash report of this daemon
+    // should not carry the key.
+    defer {
+        @memset(span, 0);
+        c.mk_free_buffer(@ptrCast(secret));
+    }
+    return allocator.dupe(u8, span);
 }
 
 pub fn singleInstance() !void {

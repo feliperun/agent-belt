@@ -23,6 +23,19 @@ src=$(cd "$(dirname "$0")" && pwd)
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
+# Stores the Deepgram key in the login Keychain. The key goes on `security`'s
+# standard input, never in its arguments: on macOS any local user reads another
+# process's arguments (`ps -axo args`), so `-w <key>` would hand the key over
+# for as long as the command runs. `security -i` reads the same command from
+# stdin, where only this user can look.
+# store_key <key> [-U]
+store_key() {
+  local escape='s/[\\"]/\\&/g'
+  printf 'add-generic-password %s-s agent-belt -a deepgram -T "%s" -w "%s"\n' \
+    "${2:+$2 }" "$(printf '%s' "$app" | sed "$escape")" "$(printf '%s' "$1" | sed "$escape")" |
+    security -i >/dev/null
+}
+
 # Stops the LaunchAgent and any daemon started by hand in a terminal: two
 # daemons would double every key.
 stop_daemons() {
@@ -52,6 +65,9 @@ case "${1:-}" in
     rm -rf "$app"
     say "done. The config (~/.config/agent-belt) and the Keychain key were kept;"
     printf '    to delete the key: security delete-generic-password -s agent-belt -a deepgram\n'
+    # The recordings outlive the app: whoever uninstalls it should be told where.
+    printf '    your recordings and transcripts stay in "%s":\n' "$HOME/Library/Application Support/agent-belt/history"
+    printf '    to delete them: rm -rf ~/Library/Application\\ Support/agent-belt\n'
     exit 0 ;;
   --keep-config) keep_config=1 ;;
   "") ;;
@@ -144,11 +160,11 @@ if security find-generic-password -s agent-belt -a deepgram >/dev/null 2>&1 &&
 elif [ -n "${DEEPGRAM_API_KEY:-}" ]; then
   say "storing DEEPGRAM_API_KEY in the Keychain"
   security delete-generic-password -s agent-belt -a deepgram >/dev/null 2>&1 || true
-  security add-generic-password -s agent-belt -a deepgram -w "$DEEPGRAM_API_KEY" -T "$app" >/dev/null
+  store_key "$DEEPGRAM_API_KEY"
 else
   if [ -t 0 ]; then
     read -rsp "Deepgram key: " key; echo
-    [ -n "$key" ] && security add-generic-password -U -s agent-belt -a deepgram -w "$key" -T "$app" >/dev/null
+    [ -n "$key" ] && store_key "$key" -U
   else
     say "no Deepgram key: push-to-talk fails until this runs again with DEEPGRAM_API_KEY"
   fi

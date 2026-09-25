@@ -397,7 +397,9 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     NSString *agentPrompt = [self.summary[@"prompt"] length] ? self.summary[@"prompt"] : text;
     [command appendFormat:@" --prompt %@", q(agentPrompt)];
     NSString *title = [NSString stringWithFormat:@"🦇 %@ · %@ @ %@", task, agent, host];
-    fprintf(stderr, "[agent-belt] new agent: %s\n", command.UTF8String);
+    // The session, not the request: the prompt is what was dictated, and the
+    // log lives as long as the install does (`agb history` keeps the words).
+    fprintf(stderr, "[agent-belt] new agent: %s\n", title.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus
     mk_create_panel_show(NULL);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ mk_open_terminal(command, title); });

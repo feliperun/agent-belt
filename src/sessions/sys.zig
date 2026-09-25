@@ -172,14 +172,35 @@ pub fn lockInstance(ctx: Ctx, path: []const u8) ?std.Io.File {
     return std.Io.Dir.cwd().createFile(ctx.io, path, .{ .truncate = false, .lock = .exclusive, .lock_nonblocking = true }) catch null;
 }
 
+/// What agb writes is private: transcripts, spoken prompts, the Deepgram key,
+/// the panel's state. Nothing for the group or for everyone else on the
+/// machine (on Windows the per-user profile is protected by its own ACL).
+pub const owner_only_file: std.Io.File.Permissions = if (platform == .windows) .default_file else .fromMode(0o600);
+pub const owner_only_dir: std.Io.File.Permissions = if (platform == .windows) .default_file else .fromMode(0o700);
+
 /// Writes through a temporary file and a rename, so a crash never leaves a
-/// half-written file behind.
+/// half-written file behind. The rename also repairs the mode of a file an
+/// older version left readable by everyone.
 pub fn writeFileAtomic(ctx: Ctx, path: []const u8, bytes: []const u8) !void {
     const tmp = try ctx.fmt("{s}.agb.tmp", .{path});
-    var file = try std.Io.Dir.cwd().createFile(ctx.io, tmp, .{ .truncate = true });
+    var file = try std.Io.Dir.cwd().createFile(ctx.io, tmp, .{ .truncate = true, .permissions = owner_only_file });
     try file.writeStreamingAll(ctx.io, bytes);
     file.close(ctx.io);
     try std.Io.Dir.rename(std.Io.Dir.cwd(), tmp, std.Io.Dir.cwd(), path, ctx.io);
+}
+
+/// Creates a directory only this user can enter, and refuses one that is not:
+/// another local user's symlink, or a directory open to the group or to
+/// everyone. What goes there — recordings, transcripts, the panel's command
+/// file — is private, and a directory others can write to is a way in.
+pub fn createPrivateDir(io: std.Io, path: []const u8) !void {
+    _ = try std.Io.Dir.cwd().createDirPathStatus(io, path, owner_only_dir);
+    if (platform != .windows) try requirePrivateDir(io, path);
+}
+
+fn requirePrivateDir(io: std.Io, path: []const u8) !void {
+    const info = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
+    if (info.kind != .directory or info.permissions.toMode() & 0o077 != 0) return error.DirectoryNotPrivate;
 }
 
 // ---------------------------------------------------------------- quoting
@@ -300,4 +321,30 @@ test "one instance holds the lock" {
     first.close(ctx.io);
     const again = lockInstance(ctx, path) orelse return error.TestUnexpectedResult;
     again.close(ctx.io);
+}
+
+test "what is written is the owner's alone, and a shared directory is refused" {
+    if (platform == .windows) return error.SkipZigTest;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fs.path.join(ctx.gpa, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+
+    const secret = try ctx.join(&.{ base, "deepgram.key" });
+    try writeFileAtomic(ctx, secret, "a-key");
+    const info = try std.Io.Dir.cwd().statFile(ctx.io, secret, .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), info.permissions.toMode() & 0o777);
+
+    const private = try ctx.join(&.{ base, "runtime" });
+    try createPrivateDir(ctx.io, private);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try std.Io.Dir.cwd().statFile(ctx.io, private, .{})).permissions.toMode() & 0o777);
+
+    // A directory another local user could write to is never used.
+    var shared = try std.Io.Dir.cwd().openDir(ctx.io, private, .{});
+    defer shared.close(ctx.io);
+    try shared.setPermissions(ctx.io, .fromMode(0o777));
+    try std.testing.expectError(error.DirectoryNotPrivate, createPrivateDir(ctx.io, private));
 }
