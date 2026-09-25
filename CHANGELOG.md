@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.4.0](https://github.com/feliperun/agent-belt/compare/v0.3.0...v0.4.0) (2026-09-25)
+
+
+### Features
+
+* a fast model cleans the dictated request for the new agent ([9b52446](https://github.com/feliperun/agent-belt/commit/9b524460e321e052a9bd62d536f4884a26f0f994))
+* a new agent by voice on Omarchy (hold Shift+F9) ([ac0997d](https://github.com/feliperun/agent-belt/commit/ac0997d32552c2f5e02adf0de740f3abc330e684))
+* meaningful session names, intent summaries and a recording history ([223b737](https://github.com/feliperun/agent-belt/commit/223b7373dff116855986119f113e9e3f70c8f319))
+* real-time dictation on Linux ([0deef25](https://github.com/feliperun/agent-belt/commit/0deef252045857c077d5422dd8a7a3a3bd83ffbe))
+* real-time dictation on the Mac ([c95a113](https://github.com/feliperun/agent-belt/commit/c95a113c85b6def3c82e548aba06e0b87b6493ba))
+* **sessions:** agents without a repo, for research ([167a606](https://github.com/feliperun/agent-belt/commit/167a60698398662c1dc74981f2854f2a438339df))
+* the new agent gets only the work, as a clear prompt ([0f0d175](https://github.com/feliperun/agent-belt/commit/0f0d17564b2dd613b494ac187de79e8989966b9c))
+
+
+### Bug Fixes
+
+* adopting an agent could reopen another agent's conversation ([39f768c](https://github.com/feliperun/agent-belt/commit/39f768cef323d2587bd694b96ef5afd04cc059f8))
+* create panel marks only real doubts; defaults (not said) are shown dimmer ([333e39c](https://github.com/feliperun/agent-belt/commit/333e39ceb441877610d2228fc3f3b95e591d2716))
+* dictation overlay born at full size, starts clean, shows a discreet timer ([b13b0c7](https://github.com/feliperun/agent-belt/commit/b13b0c79f9dd619eabb43659361d94459ce8c49d))
+* dictation overlay: the waveform spans the widened pill; no Transcribing while streaming ([11f1479](https://github.com/feliperun/agent-belt/commit/11f147929bff15d29fc98c7b42437ae7053b0485))
+* long requests reached the new agent cut short ([13aa529](https://github.com/feliperun/agent-belt/commit/13aa5293cc6dff4c522579bc552df417ec5eaf65))
+* machines said by their last name part; the session name in the panel header ([c15e12c](https://github.com/feliperun/agent-belt/commit/c15e12c07d6938f84f1be163eff6594eaa9384a7))
+* pressing Shift+F9 again opened another panel on top ([fdb68aa](https://github.com/feliperun/agent-belt/commit/fdb68aa448b685c9c6a089c8c4954e6803aab7c8))
+* remote attaches drew accents and symbols as underscores ([8fd215e](https://github.com/feliperun/agent-belt/commit/8fd215e8c5bbc986b1a1f037f3552027003c465c))
+* **security:** close quoting and naming holes in the session layer ([fa8f210](https://github.com/feliperun/agent-belt/commit/fa8f21071c107f686f3fd8ff56f8b74f3087b501))
+* **security:** harden the network clients, the updater and CI ([e897984](https://github.com/feliperun/agent-belt/commit/e897984e564e41f072c4e4c9845802e4d7d3f1c3))
+* **security:** keep recordings, transcripts, keys and runtime files private ([52ceca8](https://github.com/feliperun/agent-belt/commit/52ceca822b7330e51a45e77225a2531c4534e35d))
+* the installer hung for minutes stopping the daemon ([0b85b59](https://github.com/feliperun/agent-belt/commit/0b85b59e40b75cdcc2cc0552a1eceab2cb54cb9d))
+
 ## [0.3.0](https://github.com/feliperun/agent-belt/compare/v0.2.0...v0.3.0) (2026-09-24)
 
 
