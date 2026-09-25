@@ -20,6 +20,11 @@ static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
 }
 
 int main(void) {
+    // A terminal already attached to a session: `agb attach` from the app (a path with a space).
+    assert([MKAttachKey(@"  4242 /Applications/Agent Belt.app/Contents/MacOS/agb attach report windows-pc") isEqual:@"windows-pc\treport"]);
+    assert([MKAttachKey(@"77 /home/alice/.local/bin/agb attach -d api home-linux") isEqual:@"home-linux\tapi"]);
+    assert(MKAttachKey(@"77 /usr/bin/agb attach api") == nil); // no machine: not a remote attach
+    assert(MKAttachKey(@"77 ssh -t windows-pc agb attach api") == nil);
     // Environment is read by pid through sysctl, so it must be set before exec.
     if (!getenv("MK_TEST_MARK")) {
         setenv("MK_TEST_MARK", "switcher", 1);

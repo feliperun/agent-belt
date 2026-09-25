@@ -262,23 +262,60 @@ static void MKWatchSessions(void) {
     dispatch_resume(timer);
 }
 
-// Sessions no terminal here shows: every other machine's, and this machine's
-// tmux sessions without a client. Opening one runs `agb attach` in a terminal.
+// Terminals here already running `agb attach <session> <machine>` (one opened
+// from a menu, or typed), keyed "machine\tsession": the process id.
+// "machine\tsession" of a `ps -o pid=,args=` line running `agb attach`, or nil.
+// The app's path has a space: the line is split after "/agb attach ".
+static NSString *MKAttachKey(NSString *line) {
+    NSRange at = [line rangeOfString:@"/agb attach "];
+    if (at.location == NSNotFound) return nil;
+    NSMutableArray *words = [[[line substringFromIndex:NSMaxRange(at)] componentsSeparatedByString:@" "] mutableCopy];
+    [words removeObject:@"-d"];
+    [words removeObject:@""];
+    return words.count >= 2 ? [NSString stringWithFormat:@"%@\t%@", words[1], words[0]] : nil;
+}
+
+static NSDictionary<NSString *, NSNumber *> *MKAttachProcesses(void) {
+    NSData *data = MKRun(@"/bin/ps", @[@"-axo", @"pid=,args="]);
+    NSMutableDictionary *found = [NSMutableDictionary dictionary];
+    for (NSString *line in [[[NSString alloc] initWithData:data ?: NSData.data encoding:NSUTF8StringEncoding] componentsSeparatedByString:@"\n"]) {
+        NSString *key = MKAttachKey(line);
+        if (key) found[key] = @([line intValue]);
+    }
+    return found;
+}
+
+// Every machine's agb sessions that no terminal target above covers: this
+// machine's tmux sessions without a client and the other machines' sessions.
+// A terminal here that already runs `agb attach` for one is that session's
+// window; without one, opening it runs `agb attach` in a new terminal. The
+// state comes from the session's own machine (working or idle).
 static NSArray<MKAgentTarget *> *MKSessionTargets(NSArray<MKAgentTarget *> *shown) {
     NSArray *sessions;
     @synchronized([MKAgentTarget class]) { sessions = mk_sessions ?: @[]; }
     NSMutableSet *here = [NSMutableSet set];
     for (MKAgentTarget *target in shown) if (target.tmuxSession) [here addObject:target.tmuxSession];
+    NSDictionary *attached = sessions.count ? MKAttachProcesses() : @{};
     NSMutableArray *targets = [NSMutableArray array];
     for (NSDictionary *session in sessions) {
         NSString *name = MKString(session[@"name"]), *host = MKString(session[@"host"]), *agent = MKString(session[@"agent"]);
         if (!name.length || !host.length || (MKBool(session[@"here"]) && [here containsObject:name])) continue;
+        if (!agent.length) agent = @"shell";
         MKAgentTarget *target = [MKAgentTarget new];
         target.key = [NSString stringWithFormat:@"session:%@:%@", host, name];
         target.session = name;
         target.host = host;
-        target.label = [NSString stringWithFormat:@"%@ · %@", name, agent.length ? agent : @"shell"];
-        target.detail = [NSString stringWithFormat:@"%@ · %@%@", agent.length ? agent : @"shell", host, MKBool(session[@"attached"]) ? @" · attached" : @""];
+        target.label = [NSString stringWithFormat:@"%@ · %@", name, agent];
+        target.title = MKBool(session[@"working"]) ? @"\u2802 working" : @"\u2733 idle"; // as the agent titles itself
+        target.detail = [NSString stringWithFormat:@"%@ · %@%@", agent, host, MKBool(session[@"attached"]) ? @" · attached" : @""];
+        NSNumber *pid = attached[[NSString stringWithFormat:@"%@\t%@", host, name]];
+        if (pid) {
+            NSString *handle = MKProcessEnv(pid.intValue, "ORCA_TERMINAL_HANDLE");
+            target.terminal = handle.length ? handle : nil;
+            target.app = handle.length ? [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject
+                                       : MKOwningApp(pid.intValue);
+            target.bundle = target.app.bundleIdentifier;
+        }
         [targets addObject:target];
     }
     return targets;
@@ -337,7 +374,13 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
     [targets sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [outside sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [targets addObjectsFromArray:outside];
-    [targets addObjectsFromArray:MKSessionTargets(targets)];
+    // An Orca terminal running `agb attach` is listed once, as its session.
+    NSArray<MKAgentTarget *> *sessions = MKSessionTargets(targets);
+    NSSet *attachTerminals = [NSSet setWithArray:[sessions valueForKeyPath:@"terminal"] ?: @[]];
+    [targets filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(MKAgentTarget *t, NSDictionary *b) {
+        (void)b; return !t.terminal || t.host || ![attachTerminals containsObject:t.terminal];
+    }]];
+    [targets addObjectsFromArray:sessions];
     return targets;
 }
 
@@ -523,14 +566,14 @@ static NSString *MKQuote(NSString *s) {
 }
 
 static BOOL MKFocus(MKAgentTarget *target) {
-    if (target.host) {
+    if (target.host && !target.app) {
         MKOpenTerminal([NSString stringWithFormat:@"%@ attach %@ %@", MKQuote(NSBundle.mainBundle.executablePath),
                         MKQuote(target.session), MKQuote(target.host)],
                        [NSString stringWithFormat:@"%@ @ %@", target.session, target.host]);
         return YES;
     }
     if (target.app.terminated) return MKFocusFailed(target, "app encerrado");
-    if (target.terminal || target.tmuxSession) {
+    if (target.terminal || target.tmuxSession || target.host) {
         MKRestoreWindows(target.app);
         if (target.terminal && !MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal]))
             return MKFocusFailed(target, "orca terminal switch");
@@ -693,6 +736,9 @@ static int MKCycle(BOOL desktop) {
     NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
         MKAgentTarget *target = mk_ring[(start + offset) % mk_ring.count];
+        // A session no terminal shows is opened from the menu, never by the
+        // switch key: cycling would open a new terminal (and tmux client) each lap.
+        if (target.host && !target.app) continue;
         if (!MKFocus(target)) continue; // app/tab may have closed after discovery
         MKOpened(target, mk_ring);
         MKShowHud(target, mk_ring);
