@@ -36,10 +36,14 @@ const agent_programs = [_]struct { []const u8, []const u8 }{
 
 // ---------------------------------------------------------------- tmux
 
-/// tmux with arguments. On Windows tmux is an MSYS2 program: it runs inside
-/// MSYS2's login bash, which gives it the paths and runtime it expects.
+/// tmux with arguments. On Windows tmux is an MSYS2 program. What starts the
+/// server or a session runs in MSYS2's login bash, so the agents inherit its
+/// paths; everything else calls tmux.exe directly: a login bash costs about
+/// 2 s there, and the listing every machine polls made a dozen calls.
 pub fn tmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
     if (sys.platform == .windows) {
+        const starts = args.len > 0 and (std.mem.eql(u8, args[0], "start-server") or std.mem.eql(u8, args[0], "new-session"));
+        if (!starts) return windowsTmux(ctx, args);
         const line = std.mem.concat(ctx.gpa, u8, &.{ "tmux ", sys.shJoin(ctx, args) catch return failed() }) catch return failed();
         return sys.run(ctx, &.{ sys.msys_bash, "-lc", line }, null);
     }
@@ -47,6 +51,17 @@ pub fn tmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
     argv.append(ctx.gpa, tmuxBin(ctx)) catch return failed();
     argv.appendSlice(ctx.gpa, args) catch return failed();
     return sys.run(ctx, argv.items, null);
+}
+
+/// tmux.exe from a native process. MSYS2 programs glob and brace-expand their
+/// command line when a Windows program starts them, which turns every
+/// "#{format}" into "#format": MSYS=noglob stops it. Without a UTF-8 locale
+/// tmux prints the agents' title glyphs as "_".
+fn windowsTmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
+    ctx.env.put("MSYS", "noglob") catch return failed();
+    if (ctx.getenv("LANG") == null) ctx.env.put("LANG", "C.UTF-8") catch return failed();
+    const argv = std.mem.concat(ctx.gpa, []const u8, &.{ &.{"C:\\msys64\\usr\\bin\\tmux.exe"}, args }) catch return failed();
+    return sys.run(ctx, argv, null);
 }
 
 /// tmux by full path: a non-interactive ssh session on macOS has no Homebrew on PATH.
@@ -471,6 +486,45 @@ pub fn stop(ctx: sys.Ctx, name: []const u8) bool {
     return tmux(ctx, &.{ "kill-session", "-t", ctx.fmt("={s}", .{name}) catch return false }).ok;
 }
 
+/// Windows: an ssh connection that drops leaves its tmux client attached (its
+/// script(1) parent dies, the client does not). tmux keeps drawing for every
+/// one of them, each at its own size, and the window flickers between sizes.
+/// A client whose parent process is gone is detached.
+fn dropOrphanClients(ctx: sys.Ctx) void {
+    const clients = tmux(ctx, &.{ "list-clients", "-F", "#{client_pid} #{client_tty}" });
+    if (!clients.ok or clients.stdout.len == 0) return;
+    const ps = sys.run(ctx, &.{ "C:\\msys64\\usr\\bin\\ps.exe", "-e" }, null);
+    if (!ps.ok) return;
+    for (orphanTtys(ctx.gpa, clients.stdout, ps.stdout) catch return) |tty| _ = tmux(ctx, &.{ "detach-client", "-t", tty });
+}
+
+/// The ttys of clients (`pid tty` lines) whose parent is not in MSYS2's
+/// `ps -e` (PID PPID … columns).
+fn orphanTtys(gpa: std.mem.Allocator, clients: []const u8, ps: []const u8) ![]const []const u8 {
+    var ttys: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.splitScalar(u8, clients, '\n');
+    while (it.next()) |raw| {
+        var words = std.mem.tokenizeAny(u8, raw, " \r");
+        const pid = words.next() orelse continue;
+        const tty = words.next() orelse continue;
+        var parent: ?[]const u8 = null;
+        var rows = std.mem.splitScalar(u8, ps, '\n');
+        while (rows.next()) |row| {
+            var cols = std.mem.tokenizeAny(u8, row, " \r");
+            if (std.mem.eql(u8, cols.next() orelse continue, pid)) parent = cols.next();
+        }
+        const ppid = parent orelse continue; // not in the listing: leave it alone
+        var alive = false;
+        rows = std.mem.splitScalar(u8, ps, '\n');
+        while (rows.next()) |row| {
+            var cols = std.mem.tokenizeAny(u8, row, " \r");
+            if (std.mem.eql(u8, cols.next() orelse continue, ppid)) alive = true;
+        }
+        if (!alive) try ttys.append(gpa, tty);
+    }
+    return ttys.toOwnedSlice(gpa);
+}
+
 /// Attaches this terminal to a local session (switching client inside tmux).
 pub fn attach(ctx: sys.Ctx, name: []const u8, detach_others: bool) noreturn {
     if (!hasSession(ctx, name)) {
@@ -590,7 +644,7 @@ fn agentsOutside(ctx: sys.Ctx) usize {
             const cmd = std.mem.trimEnd(u8, c, "\r");
             if (std.mem.eql(u8, cmd, "winpty") or isAgentCommand(cmd)) inside += 1;
         }
-        const total = windowsAgentPids(ctx).len;
+        const total = windowsAgentCount();
         return if (total > inside) total - inside else 0;
     }
     return posixOutside(ctx).len;
@@ -649,20 +703,45 @@ fn posixOutside(ctx: sys.Ctx) []Loose {
     return result.items;
 }
 
-fn windowsAgentPids(ctx: sys.Ctx) [][]const u8 {
-    var pids: std.ArrayList([]const u8) = .empty;
-    for ([_][]const u8{ "claude.exe", "codex.exe", "zcode.exe", "fx.exe" }) |image| {
-        const out = sys.run(ctx, &.{ "tasklist", "/FO", "CSV", "/NH", "/FI", ctx.fmt("IMAGENAME eq {s}", .{image}) catch continue }, null);
-        var lines = std.mem.splitScalar(u8, out.stdout, '\n');
-        while (lines.next()) |line| {
-            var cols = std.mem.splitSequence(u8, line, "\",\"");
-            _ = cols.next();
-            const pid = cols.next() orelse continue;
-            pids.append(ctx.gpa, pid) catch {};
+/// Harness processes on this Windows machine, from a process snapshot (a
+/// `tasklist` per image took 2 s each).
+fn windowsAgentCount() usize {
+    if (sys.platform != .windows) return 0;
+    const snapshot = win.CreateToolhelp32Snapshot(2, 0); // TH32CS_SNAPPROCESS
+    if (@intFromPtr(snapshot) == std.math.maxInt(usize)) return 0; // INVALID_HANDLE_VALUE
+    defer _ = win.CloseHandle(snapshot);
+    var entry: win.PROCESSENTRY32W = .{};
+    var count: usize = 0;
+    var more = win.Process32FirstW(snapshot, &entry) != 0;
+    while (more) : (more = win.Process32NextW(snapshot, &entry) != 0) {
+        const name = std.mem.sliceTo(&entry.szExeFile, 0);
+        for ([_][]const u8{ "claude.exe", "codex.exe", "zcode.exe", "fx.exe" }) |image| {
+            if (name.len == image.len and for (name, image) |c, i| {
+                if (std.ascii.toLower(@truncate(c)) != i) break false;
+            } else true) count += 1;
         }
     }
-    return pids.items;
+    return count;
 }
+
+const win = struct {
+    const PROCESSENTRY32W = extern struct {
+        dwSize: u32 = @sizeOf(PROCESSENTRY32W),
+        cntUsage: u32 = 0,
+        th32ProcessID: u32 = 0,
+        th32DefaultHeapID: usize = 0,
+        th32ModuleID: u32 = 0,
+        cntThreads: u32 = 0,
+        th32ParentProcessID: u32 = 0,
+        pcPriClassBase: i32 = 0,
+        dwFlags: u32 = 0,
+        szExeFile: [260]u16 = .{0} ** 260,
+    };
+    extern "kernel32" fn CreateToolhelp32Snapshot(flags: u32, pid: u32) callconv(.winapi) *anyopaque;
+    extern "kernel32" fn Process32FirstW(snapshot: *anyopaque, entry: *PROCESSENTRY32W) callconv(.winapi) c_int;
+    extern "kernel32" fn Process32NextW(snapshot: *anyopaque, entry: *PROCESSENTRY32W) callconv(.winapi) c_int;
+    extern "kernel32" fn CloseHandle(handle: *anyopaque) callconv(.winapi) c_int;
+};
 
 /// A value inside the "|"-separated answer. tmux allows "|" in a session name
 /// and a path can hold anything: unescaped, one such session shifts every column
@@ -680,6 +759,7 @@ fn field(ctx: sys.Ctx, value: []const u8) ![]const u8 {
 /// then #outside|<count>, which also marks the answer as complete.
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
+    if (sys.platform == .windows) dropOrphanClients(ctx);
     const fields = "#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,1,0}|#{?@work_agent,#{@work_agent},}|#{session_path}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{pane_title}";
     const list = tmux(ctx, &.{ "list-sessions", "-F", fields });
     var lines = std.mem.splitScalar(u8, list.stdout, '\n');
@@ -942,4 +1022,17 @@ test "every harness is recognized in a pane" {
     try std.testing.expect(!isAgentCommand("fxtop"));
     try std.testing.expectEqualStrings("dsh", Agent.deepseek.program());
     try std.testing.expectEqual(Agent.zcode, parseAgent("zcode").?);
+}
+
+test "an orphan tmux client is found by its missing parent" {
+    const ps =
+        \\      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND
+        \\   330309  330279  330309     165648  pty3      197609 14:26:54 /usr/bin/tmux
+        \\   348605       1  348605      70832  cons0     197609 15:58:47 /usr/bin/script
+        \\   348623  348605  348623      90168  pty8      197609 15:58:49 /usr/bin/tmux
+    ;
+    const ttys = try orphanTtys(std.testing.allocator, "330309 /dev/pty3\n348623 /dev/pty8\n999 /dev/pty9\n", ps);
+    defer std.testing.allocator.free(ttys);
+    try std.testing.expectEqual(@as(usize, 1), ttys.len);
+    try std.testing.expectEqualStrings("/dev/pty3", ttys[0]);
 }
