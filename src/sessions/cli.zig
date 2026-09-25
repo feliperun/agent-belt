@@ -147,7 +147,7 @@ fn remoteArgv(ctx: sys.Ctx, host: hosts.Host, tty: bool, args: []const []const u
     return argv.items;
 }
 
-/// The user part of an ssh destination ("Micromed@felipe-windows"). On a Windows
+/// The user part of an ssh destination ("alice@windows-pc"). On a Windows
 /// machine it becomes a path and part of a PowerShell command line, and with no
 /// "@" the old code silently used the empty string and wrote to C:\\Users\\.
 /// `hosts.load` has already restricted it to a name's characters.
@@ -316,9 +316,9 @@ fn usageNew() void {
     say(
         \\usage: agb new [claude|codex|shell] [machine|here] [repo] [what to do…]
         \\  agb new                                   claude here, in this repo
-        \\  agb new codex windows coreum fix the login
+        \\  agb new codex windows web-app fix the login
         \\  agb new claude linux2 agent-belt review the README
-        \\  agb new create an agent on windows with codex in coreum to look into the login
+        \\  agb new create an agent on windows with codex in web-app to look into the login
         \\  agb new claude here --no-repo research tmux alternatives   (no repo: works in ~/agents/<task>)
         \\flags: --agent --host --repo --no-repo --task --prompt --detach (print the session, don't attach) -d --dry-run
     , .{});
@@ -401,7 +401,7 @@ fn parseRun(args: []const []const u8) !Plan {
     return plan;
 }
 
-/// Sentences like "create an agent on windows with codex in coreum to …":
+/// Sentences like "create an agent on windows with codex in web-app to …":
 /// a small model turns them into a plan, checked like any other input.
 /// `agb new crie um agente no windows com codex …`: the same detection as the
 /// create-agent panel (agb _intent, backed by Jev).
@@ -993,7 +993,7 @@ fn deployTray(ctx: sys.Ctx, h: hosts.Host, user: []const u8, prefix: []const u8,
 // ---------------------------------------------------------------- tests
 
 fn noRepos(_: sys.Ctx, _: ?hosts.Host, name: []const u8) bool {
-    return std.mem.eql(u8, name, "coreum") or std.mem.eql(u8, name, "agent-belt");
+    return std.mem.eql(u8, name, "web-app") or std.mem.eql(u8, name, "agent-belt");
 }
 
 test "humane agb new" {
@@ -1002,16 +1002,16 @@ test "humane agb new" {
     var env_map = std.process.Environ.Map.init(arena.allocator());
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
     var list = [_]hosts.Host{
-        .{ .name = "macbook-pro", .target = "frb@macbook-pro", .kind = .posix },
-        .{ .name = "felipe-windows", .target = "Micromed@felipe-windows", .kind = .msys },
-        .{ .name = "frb-linux2", .target = "frb@frb-linux2", .kind = .posix },
+        .{ .name = "macbook", .target = "alice@macbook", .kind = .posix },
+        .{ .name = "windows-pc", .target = "alice@windows-pc", .kind = .msys },
+        .{ .name = "home-linux2", .target = "alice@home-linux2", .kind = .posix },
     };
-    const reg = hosts.Registry{ .path = "", .hosts = &list, .self_line = "macbook-pro", .self = "macbook-pro" };
+    const reg = hosts.Registry{ .path = "", .hosts = &list, .self_line = "macbook", .self = "macbook" };
 
-    var p = try parseNew(ctx, reg, &.{ "codex", "windows", "coreum", "fix", "the", "login" }, noRepos);
+    var p = try parseNew(ctx, reg, &.{ "codex", "windows", "web-app", "fix", "the", "login" }, noRepos);
     try std.testing.expectEqual(local.Agent.codex, p.agent);
-    try std.testing.expectEqualStrings("felipe-windows", p.host.?.name);
-    try std.testing.expectEqualStrings("coreum", p.repo.?);
+    try std.testing.expectEqualStrings("windows-pc", p.host.?.name);
+    try std.testing.expectEqualStrings("web-app", p.repo.?);
     try std.testing.expectEqualStrings("fix the login", p.prompt.?);
     try std.testing.expectEqualStrings("fix-the-login", p.task.?);
 
@@ -1024,11 +1024,11 @@ test "humane agb new" {
     try std.testing.expect(p.host == null);
     try std.testing.expectEqualStrings("agent-belt", p.repo.?);
 
-    p = try parseNew(ctx, reg, &.{ "macbook-pro", "coreum" }, noRepos); // naming this machine = here
+    p = try parseNew(ctx, reg, &.{ "macbook", "web-app" }, noRepos); // naming this machine = here
     try std.testing.expect(p.host == null);
 
     p = try parseNew(ctx, reg, &.{ "linux2", "look", "at", "logs" }, noRepos); // no repo word: all prompt
-    try std.testing.expectEqualStrings("frb-linux2", p.host.?.name);
+    try std.testing.expectEqualStrings("home-linux2", p.host.?.name);
     try std.testing.expect(p.repo == null);
     try std.testing.expectEqualStrings("look at logs", p.prompt.?);
 
@@ -1040,9 +1040,9 @@ test "humane agb new" {
     try std.testing.expect(isNaturalLanguage("crie"));
     try std.testing.expect(!isNaturalLanguage("codex"));
 
-    const detected = intent.Plan{ .agent = "codex", .agent_confidence = 1, .host = "felipe-windows", .host_confidence = 1, .repo = "coreum", .repo_confidence = 1, .task = "login-bug", .prompt = "Look into it", .hosts = &.{}, .repos = &.{} };
+    const detected = intent.Plan{ .agent = "codex", .agent_confidence = 1, .host = "windows-pc", .host_confidence = 1, .repo = "web-app", .repo_confidence = 1, .task = "login-bug", .prompt = "Look into it", .hosts = &.{}, .repos = &.{} };
     const plan = try planFromIntent(reg, detected);
-    try std.testing.expectEqualStrings("felipe-windows", plan.host.?.name);
+    try std.testing.expectEqualStrings("windows-pc", plan.host.?.name);
     try std.testing.expectEqual(local.Agent.codex, plan.agent);
     try std.testing.expectEqualStrings("login-bug", plan.task.?);
     var unsafe = detected;
@@ -1052,17 +1052,17 @@ test "humane agb new" {
     mars.host = "mars";
     try std.testing.expectError(error.UnknownHost, planFromIntent(reg, mars));
     var here = detected;
-    here.host = "macbook-pro";
+    here.host = "macbook";
     try std.testing.expect((try planFromIntent(reg, here)).host == null);
 }
 
 test "a confirmed plan as agb new arguments" {
     const gpa = std.testing.allocator;
-    const with_repo = try newArgs(gpa, "codex", "frb-linux", "coreum", "login-bug", "Revise o login.");
+    const with_repo = try newArgs(gpa, "codex", "home-linux", "web-app", "login-bug", "Revise o login.");
     defer gpa.free(with_repo);
     try std.testing.expectEqualStrings("--repo", with_repo[5]);
     try std.testing.expectEqualStrings("Revise o login.", with_repo[10]);
-    const research = try newArgs(gpa, "claude", "macbook-pro", null, "tmux-alternatives", "Pesquise alternativas ao tmux.");
+    const research = try newArgs(gpa, "claude", "macbook", null, "tmux-alternatives", "Pesquise alternativas ao tmux.");
     defer gpa.free(research);
     try std.testing.expectEqualStrings("--no-repo", research[5]);
     try std.testing.expectEqual(@as(usize, 10), research.len);

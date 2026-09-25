@@ -32,20 +32,21 @@ agb tm [name]                     a plain tmux session, no worktree or agent
 | Word | Meaning | Default |
 |---|---|---|
 | agent | `claude`, `codex` or `shell` | `claude` |
-| machine | a registry name, a unique prefix, a dash-separated part (`windows` for `felipe-windows`), or `here` | this machine |
+| machine | a registry name, a unique prefix, a dash-separated part (`windows` for `windows-pc`), or `here` | this machine |
 | repo | a repository name on that machine (checked by asking it) or a path | the repo this terminal is in; none elsewhere |
 | what to do | the agent's first prompt; its first words also name the task | none |
 
 ```sh
 agb new                                          # claude here, in this repo (task "claude")
-agb new codex windows coreum fix the login       # task fix-the-login, prompt "fix the login"
-agb new shell linux2 mac-debian --task scratch --detach
-agb new create an agent on windows with codex in coreum to look into the login
+agb new codex windows web-app fix the login       # task fix-the-login, prompt "fix the login"
+agb new shell linux-box api --task scratch --detach
+agb new create an agent on windows with codex in web-app to look into the login
 ```
 
-A sentence that starts with a verb (`create`, `crie`, `open`, `start`…) is read like the
-create-agent panel reads speech (`agb _intent`: exact names in code, the rest decided by Jev),
-then checked like any other input.
+A sentence that starts with a verb, in English or Portuguese (`create`, `crie`, `open`,
+`abra`, `start`, `inicie`…), is read like the create-agent panel reads speech
+(`agb _intent`: exact names in code, the rest decided by Jev), then checked like any other
+input.
 
 Without a repo (research, a first sketch) the agent works in `~/agents/<task>`: a plain
 directory, no worktree or branch, kept after the session. That is what happens on another
@@ -58,7 +59,7 @@ attaching: for scripts and orchestrators), `--dry-run` (print the plan).
 ### Orchestrating from scripts or another agent
 
 ```sh
-s=$(agb new codex linux2 mac-debian --detach --prompt "run the tests and fix failures")
+s=$(agb new codex linux-box api --detach --prompt "run the tests and fix failures")
 agb peek "$s" 40          # what the agent shows now
 agb send "$s" "also update the changelog"
 agb stop "$s"
@@ -68,11 +69,11 @@ The machine is optional in `send`/`peek`/`stop`: `agb` finds the session.
 
 ## What a session is
 
-`agb new … coreum fix-login` on a machine creates, next to the repository:
+`agb new … web-app fix-login` on a machine creates, next to the repository:
 
-- the worktree `coreum-fix-login` on branch `work/fix-login` (reused if it already is a
+- the worktree `web-app-fix-login` on branch `work/fix-login` (reused if it already is a
   worktree of that repo; refused if the path is something else);
-- the tmux session `coreum-fix-login`, marked with `@work_agent` and `@work_task`;
+- the tmux session `web-app-fix-login`, marked with `@work_agent` and `@work_task`;
 - the agent started inside it, already trusting the worktree (Claude Code's
   `~/.claude.json`, Codex's `config.toml`; `WORK_NO_AUTOTRUST=1` turns this off).
   A worktree that already had a Claude conversation continues it (`WORK_NEW=1` starts over).
@@ -93,10 +94,10 @@ The registry is `~/.config/work/hosts.conf` (`%USERPROFILE%\.config\work\hosts.c
 Windows):
 
 ```
-host macbook-pro     frb@macbook-pro           posix
-host felipe-windows  Micromed@felipe-windows   msys
-host frb-linux       frb@frb-linux             posix
-self macbook-pro
+host macbook     alice@macbook      posix
+host windows-pc  alice@windows-pc   msys
+host linux-box   alice@linux-box    posix
+self macbook
 ```
 
 `agb hosts discover` fills it from `tailscale status` (ssh user from `~/.ssh/config`,
@@ -130,6 +131,9 @@ section): its menu lists these sessions and opens them in a terminal window.
 
 A Claude Code or Codex process started directly in a terminal cannot be attached, but
 its conversation lives on disk. `agb adopt` lists them (on macOS and Linux), stops the
-chosen one and reopens the same conversation inside tmux (`--resume <id>` when the
-process carries it, otherwise `--continue`). The turn in progress and the scrollback are
-lost.
+chosen one and reopens **that exact conversation** inside tmux (`claude --resume <id>`,
+`codex resume <id>`). The id comes from the process's own arguments, from
+`~/.claude/sessions/<pid>.json` or from the rollout file Codex keeps open; when it cannot
+be established, adopt refuses rather than falling back to "the latest conversation here",
+which can belong to another agent and leaves two processes fighting over one conversation.
+The turn in progress and the scrollback are lost.

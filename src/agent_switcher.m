@@ -893,7 +893,7 @@ static void MKNotifyAway(NSArray<MKAgentTarget *> *ring) {
         task.arguments = @[[NSString stringWithFormat:@"🔴 %@ has been waiting for your decision for %.0f min", name,
                             (now - since[target.key].doubleValue) / 60]];
         task.standardOutput = task.standardError = [NSFileHandle fileHandleWithNullDevice];
-        if ([task launchAndReturnError:nil]) fprintf(stderr, "[agent-belt] aviso no WhatsApp: %s\n", name.UTF8String);
+        if ([task launchAndReturnError:nil]) fprintf(stderr, "[agent-belt] away notice sent: %s\n", name.UTF8String);
     }
 }
 

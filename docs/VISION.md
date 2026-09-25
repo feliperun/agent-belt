@@ -18,7 +18,8 @@ tmux and a worktree by hand. Typing long instructions is slower than saying them
 A cheap 6-key macropad with a knob, plus the Mac's own keyboard, is enough to run a
 fleet of agents: hold a key to dictate, one key jumps to the agent that needs you,
 the key lights tell you when to look, and a sentence creates a new agent anywhere on
-the tailnet. Everything stays local except the transcription call.
+the tailnet. Everything stays local except the speech calls (transcription, and
+the small model that reads a spoken request).
 
 ## Principles
 

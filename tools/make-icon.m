@@ -19,7 +19,7 @@ static void glow(NSPoint center, CGFloat radius, NSColor *color) {
 }
 
 int main(int argc, char **argv) { @autoreleasepool {
-    if (argc != 2) { fprintf(stderr, "uso: make-icon <saida.png>\n"); return 2; }
+    if (argc != 2) { fprintf(stderr, "usage: make-icon <output.png>\n"); return 2; }
     const CGFloat S = 1024;
     NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:S pixelsHigh:S
         bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];

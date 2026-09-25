@@ -348,15 +348,15 @@ test "quoting, paths and slugs" {
     const ctx = Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env };
     try std.testing.expectEqualStrings("'it'\\''s'", try shQuote(ctx, "it's"));
     try std.testing.expectEqualStrings("'it''s'", try psQuote(ctx, "it's"));
-    try std.testing.expectEqualStrings("/c/dev/coreum", try toMsys(ctx, "C:\\dev\\coreum"));
+    try std.testing.expectEqualStrings("/c/dev/web-app", try toMsys(ctx, "C:\\dev\\web-app"));
     try std.testing.expectEqualStrings("/c/dev/x", try toMsys(ctx, "C:/dev/x"));
     try std.testing.expectEqualStrings("C:/dev/x", try fromMsys(ctx, "/c/dev/x"));
     try std.testing.expectEqualStrings("/home/a", try fromMsys(ctx, "/home/a"));
     try std.testing.expectEqualStrings("fix-the-login-after", try slugFromWords(ctx, "Fix the login, after the update!", 4));
     try std.testing.expectEqualStrings("corrigir-o-login", try slugFromWords(ctx, "corrigir o login", 4));
-    try std.testing.expect(validSlug("coreum-xpto_1.2"));
+    try std.testing.expect(validSlug("web-app-xpto_1.2"));
     try std.testing.expect(!validSlug("tem espaço"));
-    try std.testing.expect(validRepo("C:/dev/coreum"));
+    try std.testing.expect(validRepo("C:/dev/web-app"));
     try std.testing.expect(!validRepo("x; rm -rf ~"));
     try std.testing.expect(!validRepo("C:\\dev"));
 }
@@ -373,7 +373,7 @@ test "a name is one component, never a flag and never a directory entry" {
     try std.testing.expect(!validRepo("../../etc"));
     try std.testing.expect(!validRepo("a/../../b"));
     try std.testing.expect(!validRepo("-oProxyCommand=x"));
-    try std.testing.expect(validRepo("~/dev/coreum"));
+    try std.testing.expect(validRepo("~/dev/web-app"));
 }
 
 test "an ssh destination cannot be an ssh option" {
@@ -385,16 +385,16 @@ test "an ssh destination cannot be an ssh option" {
     try std.testing.expect(!validSshTarget("user@host:path"));
     try std.testing.expect(!validSshTarget("a@b@c"));
     try std.testing.expect(!validSshTarget(""));
-    try std.testing.expect(validSshTarget("frb@macbook-pro"));
-    try std.testing.expect(validSshTarget("Micromed@felipe-windows"));
+    try std.testing.expect(validSshTarget("alice@macbook"));
+    try std.testing.expect(validSshTarget("Alice@windows-pc"));
     try std.testing.expect(validSshTarget("100.64.0.1"));
 }
 
 test "a session name that tmux would read as another session is refused" {
-    try std.testing.expect(!validTarget("coreum:1"));
+    try std.testing.expect(!validTarget("web-app:1"));
     try std.testing.expect(!validTarget("a\nb"));
     try std.testing.expect(!validTarget(""));
-    try std.testing.expect(validTarget("coreum-login-bug"));
+    try std.testing.expect(validTarget("web-app-login-bug"));
     try std.testing.expect(validTarget("a.b"));
 }
 

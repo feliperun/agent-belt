@@ -16,6 +16,9 @@
 # SYSTEM + Administrators, and editing it needs care with the DACL. Windows
 # already accepts the other machines, so the script only reports what is missing.
 
+# No -e on purpose: a mesh pass must report every offline machine, and this
+# script reads failures (an unreachable ssh, a grep that matches nothing) as
+# results to print rather than reasons to stop.
 set -uo pipefail
 
 CONFIG="${WORK_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/work/hosts.conf}"
@@ -25,7 +28,7 @@ dry=0
 
 die() { printf 'mesh-keys: %s\n' "$*" >&2; exit 1; }
 
-[ -f "$CONFIG" ] || die "sem registro em $CONFIG (run: agb hosts discover)"
+[ -f "$CONFIG" ] || die "no registry at $CONFIG (run: agb hosts discover)"
 
 NAMES=(); TARGETS=(); KINDS=(); SELF=""
 while read -r kw a b c || [ -n "$kw" ]; do
@@ -39,11 +42,11 @@ done < "$CONFIG"
 # does not need to be.
 is_self() { [ "$1" = "$SELF" ]; }
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/meshkeys.XXXXXX") || die "sem diretorio temporario"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/meshkeys.XXXXXX") || die "no temporary directory"
 trap 'rm -rf "$tmp"' EXIT
 
 # Taking each machine's ~/.ssh/id_ed25519.pub is not enough: ~/.ssh/config may
-# force a different IdentityFile per target (felipe-windows offers
+# force a different IdentityFile per target (one machine can offer
 # id_ed25519_tailnet_mesh to some hosts and id_ed25519 to others). The source's
 # own ssh knows: `ssh -G <target>` prints, resolved, what it will offer.
 printf '== collecting the keys each machine offers to each target\n'
@@ -103,8 +106,8 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
   for ((j = 0; j < ${#NAMES[@]}; j++)); do
     [ "$j" = "$i" ] && continue
     [ -f "$tmp/offers.${NAMES[$j]}" ] || continue
-    awk -v alvo="$target" -v n="${NAMES[$j]}" \
-      '$1 == alvo && $2 ~ /^ssh-/ { print $2, $3, "work-mesh-" n }' \
+    awk -v dest="$target" -v n="${NAMES[$j]}" \
+      '$1 == dest && $2 ~ /^ssh-/ { print $2, $3, "work-mesh-" n }' \
       "$tmp/offers.${NAMES[$j]}" >> "$tmp/push"
   done
   sort -u -k2,2 "$tmp/push" -o "$tmp/push"
@@ -152,15 +155,15 @@ while read -r h k; do
   [ -n "$k" ] || continue
   s=$(ssh-keygen -F "$h" 2>/dev/null | grep -v '^#' | head -1 | cut -d' ' -f3)
   if [ -z "$s" ]; then
-    echo "      $h: sem registro (aprende no primeiro acesso)"
+    echo "      $h: not known yet (learned on the first connection)"
   elif [ "$s" = "$k" ]; then
     echo "      $h: ok"
   elif [ "$DRY" = 1 ]; then
-    echo "      $h: host key ANTIGA (seria atualizada)"
+    echo "      $h: host key STALE (would be updated)"
   else
     ssh-keygen -R "$h" >/dev/null 2>&1
     printf '%s ssh-ed25519 %s\n' "$h" "$k" >> ~/.ssh/known_hosts
-    echo "      $h: host key ATUALIZADA"
+    echo "      $h: host key UPDATED"
   fi
 done
 FIX
@@ -171,7 +174,7 @@ FIX
 # script *and* data to Windows, where a quoted argument does not survive sshd's
 # `powershell -c`.
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
-  printf '   em %s:\n' "${NAMES[$i]}"
+  printf '   on %s:\n' "${NAMES[$i]}"
   grep -v "^${TARGETS[$i]#*@} " "$tmp/hostkeys" > "$tmp/hk.in"
   if is_self "${NAMES[$i]}"; then
     bash "$tmp/fixhk.sh" < "$tmp/hk.in"
@@ -181,17 +184,17 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
       ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'C:\msys64\usr\bin\bash.exe -l -s' < "$tmp/hk.send" 2>&1 | tr -d '\r'
     else
       ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'bash -s' < "$tmp/hk.send" 2>&1
-    fi | grep -E ': ok$|: host key|: sem registro'
+    fi | grep -E ': ok$|: host key|: not known yet'
   fi
 done
 
-printf '\n== conferindo o mesh (pode demorar alguns segundos)\n'
+printf '\n== checking the mesh (this can take a few seconds)\n'
 
 # The probe goes on stdin, not as an argument: the only way to send a script
 # with quotes to Windows, where sshd wraps everything in `powershell -c` and
 # destroys shell quoting. `bash -s` reads the script from stdin on both.
 for ((i = 0; i < ${#NAMES[@]}; i++)); do
-  printf '   de %s:\n' "${NAMES[$i]}"
+  printf '   from %s:\n' "${NAMES[$i]}"
   {
     # On MSYS2 ssh is Windows' own and not on the login shell's PATH.
     printf 'case "$(uname -s)" in MSYS*|MINGW*) PATH="$PATH:/c/Windows/System32/OpenSSH" ;; esac\n'
@@ -202,7 +205,7 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
     done
     printf '; do\n'
     printf '  if ssh -n -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$t" echo OK 2>/dev/null | tr -d "\\r" | grep -qx OK; then\n'
-    printf '    echo "      $t ok"\n  else\n    echo "      $t FALHA"\n  fi\ndone\n'
+    printf '    echo "      $t ok"\n  else\n    echo "      $t FAILED"\n  fi\ndone\n'
   } > "$tmp/probe.sh"
 
   if is_self "${NAMES[$i]}"; then
@@ -211,8 +214,8 @@ for ((i = 0; i < ${#NAMES[@]}; i++)); do
     # -l with -s: without a login shell MSYS2 does not even put /usr/bin on the
     # PATH, and the script dies with "uname: command not found".
     ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'C:\msys64\usr\bin\bash.exe -l -s' < "$tmp/probe.sh" 2>&1 \
-      | tr -d '\r' | grep -E ' ok$| FALHA$'
+      | tr -d '\r' | grep -E ' ok$| FAILED$'
   else
-    ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'bash -s' < "$tmp/probe.sh" 2>&1 | grep -E ' ok$| FALHA$'
+    ssh "${SSH_OPTS[@]}" "${TARGETS[$i]}" 'bash -s' < "$tmp/probe.sh" 2>&1 | grep -E ' ok$| FAILED$'
   fi
 done

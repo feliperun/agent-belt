@@ -1,5 +1,5 @@
 // The create-agent panel: hold key 5 and say the agent ("codex no windows no
-// coreum para investigar o login"). A floating panel, the dictation overlay's
+// web-app para investigar o login"). A floating panel, the dictation overlay's
 // sibling, shows the transcript as it streams in and what was understood:
 // harness, machine, repo and intent (`agb _intent`, backed by Jev). Release to
 // review; hold again to add, type to fix, pick from a field to correct it; tap 5

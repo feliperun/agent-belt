@@ -3,3 +3,8 @@ zig-out/
 .DS_Store
 *.dSYM/
 .runs/
+# install.sh --package <dir> and the release workflow write the zipped app here.
+dist/
+# Local secrets never belong in the tree.
+.env
+*.key

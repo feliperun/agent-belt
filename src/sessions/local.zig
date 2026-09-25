@@ -76,14 +76,12 @@ pub fn hasSession(ctx: sys.Ctx, name: []const u8) bool {
 pub fn reposDir(ctx: sys.Ctx) ![]const u8 {
     if (ctx.getenv("WORK_REPOS_DIR")) |d| return d;
     if (sys.platform == .windows) return "C:\\dev";
-    const micromed = try ctx.join(&.{ ctx.home(), "dev", "micromed" });
-    if (sys.isDir(ctx, micromed)) return micromed;
     return ctx.join(&.{ ctx.home(), "dev" });
 }
 
 /// Where repositories live on this machine: the paths listed in
 /// ~/.config/agent-belt/repo-roots (one per line, ~ for home), or else the
-/// repos directory plus ~/dev/frb and ~/dev.
+/// repos directory and ~/dev. Anything else is named in repo-roots.
 pub fn repoRoots(ctx: sys.Ctx) ![]const []const u8 {
     var roots: std.ArrayList([]const u8) = .empty;
     const config = try ctx.join(&.{ ctx.home(), ".config", "agent-belt", "repo-roots" });
@@ -97,10 +95,7 @@ pub fn repoRoots(ctx: sys.Ctx) ![]const []const u8 {
         if (roots.items.len > 0) return roots.items;
     }
     try roots.append(ctx.gpa, try reposDir(ctx));
-    if (sys.platform != .windows) {
-        try roots.append(ctx.gpa, try ctx.join(&.{ ctx.home(), "dev", "frb" }));
-        try roots.append(ctx.gpa, try ctx.join(&.{ ctx.home(), "dev" }));
-    }
+    if (sys.platform != .windows) try roots.append(ctx.gpa, try ctx.join(&.{ ctx.home(), "dev" }));
     return roots.items;
 }
 
@@ -458,7 +453,7 @@ fn hasWord(text: []const u8, word: []const u8) bool {
 
 /// Renaming the conversation in the agent renames the tmux session: the agent
 /// publishes its name as the terminal title, which tmux keeps as pane_title.
-/// The repo prefix stays ("coreum-xpto" renamed to "bug" becomes "coreum-bug").
+/// The repo prefix stays ("web-app-xpto" renamed to "bug" becomes "web-app-bug").
 /// A session name from an agent's terminal title: without the console's
 /// prefix (an elevated Windows console shows "Administrador: …") and the
 /// agent's status glyph, accents folded ("custódia" is "custodia"), words
@@ -780,7 +775,7 @@ test "session names from titles" {
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
     try std.testing.expectEqualStrings("criar-1-novo-agente", try sessionSlug(ctx, "Administrador: ✳ criar 1 novo agente"));
     try std.testing.expectEqualStrings("leave", try sessionSlug(ctx, "✳ leave"));
-    try std.testing.expectEqualStrings("Resposta-ao-Odelio-sobre-custodia", try sessionSlug(ctx, "⠂ Resposta ao Odelio sobre custódia"));
+    try std.testing.expectEqualStrings("Resposta-ao-cliente-sobre-custodia", try sessionSlug(ctx, "⠂ Resposta ao cliente sobre custódia"));
 }
 
 test "word match, conversation ids and tty normalization" {
@@ -829,7 +824,7 @@ test "the listing answer keeps its columns whatever a session is called" {
     // the machine reading the answer shows the wrong agent and path for the row.
     try std.testing.expectEqualStrings("a b", try field(ctx, "a|b"));
     try std.testing.expectEqualStrings("a b c", try field(ctx, "a\nb\rc"));
-    try std.testing.expectEqualStrings("coreum-login", try field(ctx, "coreum-login"));
+    try std.testing.expectEqualStrings("web-app-login", try field(ctx, "web-app-login"));
 }
 
 test "a worktree path cannot write its own Codex trust entry" {
@@ -841,5 +836,5 @@ test "a worktree path cannot write its own Codex trust entry" {
     // let the rest of the path open a table that trusts a directory nobody chose.
     try std.testing.expectEqualStrings("C:\\\\dev\\\\x", try tomlQuote(ctx, "C:\\dev\\x"));
     try std.testing.expectEqualStrings("a\\\"]\\n[projects.\\\"/\\\"", try tomlQuote(ctx, "a\"]\n[projects.\"/\""));
-    try std.testing.expectEqualStrings("/home/frb/dev/coreum", try tomlQuote(ctx, "/home/frb/dev/coreum"));
+    try std.testing.expectEqualStrings("/home/alice/dev/web-app", try tomlQuote(ctx, "/home/alice/dev/web-app"));
 }

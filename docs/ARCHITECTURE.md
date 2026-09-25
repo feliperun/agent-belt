@@ -54,12 +54,19 @@ the `com.frb.agentbelt` LaunchAgent (`KeepAlive`). Releases come from release-pl
 
 ## Security model
 
+Full statement, including the trust boundaries of the machine mesh: [SECURITY.md](../SECURITY.md).
+
 - The Deepgram key lives in the login Keychain, readable by the signed app only.
-- Audio leaves the machine only for Deepgram; nothing else is sent anywhere except
-  the optional WhatsApp alert (session title only) and GitHub release checks.
+- What leaves the machine: audio to Deepgram, and — when a spoken request has to be
+  understood — the same request text to Jev (`api.typesafe.ai`) and to DeepSeek
+  (`api.deepseek.com`), which name the session and strip the routing words. Plus GitHub
+  release checks and, if the user configured a sender, the away alert (session title only).
 - Agent screens are read locally to detect approval prompts and never logged.
 - Voice commands become `agb new` arguments validated against known hosts and a safe
   charset before reaching a shell.
+- Every machine listed in `~/.config/work/hosts.conf` is trusted to run `agb` here over
+  ssh, which includes creating an agent session. The registry is itself an input:
+  `agb deploy` rewrites it on the machines it installs to.
 
 ## Related docs
 

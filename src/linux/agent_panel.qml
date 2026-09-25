@@ -211,7 +211,7 @@ ShellRoot {
                 }
                 Text {
                     visible: edit.length === 0 && !root.st.recording
-                    text: "Say or type the agent: “codex no linux no coreum que investigue o login”"
+                    text: "Say or type the agent: “codex no linux no web-app que investigue o login”"
                     color: root.ink(0.35)
                     font.pixelSize: 15
                 }

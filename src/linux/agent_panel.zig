@@ -1,5 +1,5 @@
 //! The create-agent panel on Linux (Omarchy): hold Shift+F9 and say the agent
-//! ("codex no windows no coreum que investigue o login"). A centered Quickshell
+//! ("codex no windows no web-app que investigue o login"). A centered Quickshell
 //! panel (src/linux/agent_panel.qml), the Mac panel's twin (src/create_panel.m),
 //! shows the words as they stream in and what was understood (`agb _intent`,
 //! backed by Jev): harness, machine and repo, and the session's name and summary

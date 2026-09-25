@@ -14,7 +14,7 @@ static double voice(double t) { // syllables with pauses between words
 }
 
 int main(int argc, char **argv) { @autoreleasepool {
-    if (argc != 2) { fprintf(stderr, "uso: render-overlay <saida.gif>\n"); return 2; }
+    if (argc != 2) { fprintf(stderr, "usage: render-overlay <output.gif>\n"); return 2; }
     [NSApplication sharedApplication];
     const double fps = 25, listen = 3.4, decipher = 5.6;
     const CGFloat scale = 2, pad = 28;

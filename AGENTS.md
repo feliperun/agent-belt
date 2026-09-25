@@ -175,6 +175,16 @@ file — keep appending.
 - **Windows: only a scheduled task (`schtasks /it`) reaches the desktop session from
   ssh**, and a running `.exe` can be renamed but not overwritten: `agb deploy` renames
   `agb.exe` aside and swaps `agent-belt.exe` in before restarting it.
+- **A module's tests run only if it is in `build.zig`'s `test_step` list.** Importing it
+  from a listed module compiles it but does not collect its `test` blocks: twelve
+  regression tests in `deepgram.zig`, `transcribe_stream.zig`, `jev.zig` and
+  `deepseek.zig` passed locally with `zig test <file>` and never ran in CI. Add every new
+  test-bearing module to the list.
+- **Examples are neutral.** Docs, help text and test fixtures use `macbook`, `linux-box`,
+  `windows-pc`, the user `alice` and repositories `web-app`/`api` — never a real machine,
+  person or company. The repository is public. The detection fixtures in `src/sessions/`
+  also need `home-linux`/`home-linux2` (a shared prefix and a numeric suffix, which
+  `spokenName` and `resolve` both key off), so change a name there only with the tests.
 
 ---
 

@@ -442,7 +442,7 @@ fn showNewDialog() void {
     g_edit = w.CreateWindowExW(w.WS_EX_CLIENTEDGE, w.L("EDIT"), w.L(""), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.ES_AUTOHSCROLL, 16, 40, 600, 28, dialog, @ptrFromInt(ID_EDIT), g_instance, null);
     g_fields = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 80, 600, 22, dialog, null, g_instance, null);
     g_intent = w.CreateWindowExW(0, w.L("STATIC"), w.L(""), w.WS_CHILD | w.WS_VISIBLE, 16, 106, 600, 28, dialog, null, g_instance, null);
-    g_hint = w.CreateWindowExW(0, w.L("STATIC"), w.L("e.g. codex on windows in coreum to look into the login error"), w.WS_CHILD | w.WS_VISIBLE, 16, 142, 600, 20, dialog, null, g_instance, null);
+    g_hint = w.CreateWindowExW(0, w.L("STATIC"), w.L("e.g. codex on windows in web-app to look into the login error"), w.WS_CHILD | w.WS_VISIBLE, 16, 142, 600, 20, dialog, null, g_instance, null);
     const create = w.CreateWindowExW(0, w.L("BUTTON"), w.L("Create"), w.WS_CHILD | w.WS_VISIBLE | w.WS_TABSTOP | w.BS_DEFPUSHBUTTON, 516, 172, 100, 30, dialog, @ptrFromInt(ID_CREATE), g_instance, null);
     for ([_]?w.HWND{ label, g_edit, g_fields, create }) |c| if (c) |ctl| if (font) |f| {
         _ = w.SendMessageW(ctl, w.WM_SETFONT, @intFromPtr(f), 1);

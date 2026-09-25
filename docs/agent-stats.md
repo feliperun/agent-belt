@@ -22,7 +22,9 @@ on subscription plans, it is not a charge.
 Codex sessions don't have per-session title/cost yet (the process →
 rollout mapping hasn't been verified against a live Codex); the Codex quota does show.
 
-## WhatsApp alert
+## Away alert
 
-An agent waiting on a decision for 3 min, with the Mac idle for 2 min, triggers a
-message via `ford-send` with the session title, once per wait.
+An agent waiting on a decision for 3 min, with the Mac idle for 2 min, runs an alert
+sender once per wait, with the session title as its only argument. The sender is a
+program named `ford-send` on `PATH`, or whatever `AGENT_BELT_FORD_SEND` points at;
+none is shipped, and without one nothing is sent.

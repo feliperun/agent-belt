@@ -25,8 +25,8 @@
 | 🎙️ **Dictation** | Hold a key and speak: the words appear as you say them, and on release the text lands at the cursor. |
 | 🔀 **Agent switching** | One key jumps to the next agent, first to the one waiting for your decision or the one that just finished. |
 | 📋 **Agent menu** | Every agent with its state, recap, time, cost and tokens, plus Claude and Codex plan quotas. |
-| 🦇 **New agent by voice** | *"Create an agent on Windows with Codex in coreum to look into the login"*: the session opens ready, on any machine of your tailnet. |
-| 🚨 **Signal** | Keys turn red when an agent waits for you and green when one finishes; away from the Mac, a WhatsApp message arrives. |
+| 🦇 **New agent by voice** | *"Create an agent on Windows with Codex in web-app to look into the login"*: the session opens ready, on any machine of your tailnet. |
+| 🚨 **Signal** | Keys turn red when an agent waits for you and green when one finishes; away from the Mac, a sender you configure gets the alert (see below). |
 | 🎛️ **Knob** | Turn to scroll; press to bring every agent back to the bottom of its output. |
 | ⌨️ **No keypad** | Mac keyboard shortcuts and a menu bar menu do everything the macropad does. |
 
@@ -152,7 +152,7 @@ agent inside, on any machine of your tailnet. Closing the terminal kills nothing
 again resumes.
 
 ```sh
-agb new --task login --repo coreum --host felipe-windows --agent codex --prompt "look into the login"
+agb new --task login --repo web-app --host windows-pc --agent codex --prompt "look into the login"
 agb new create an agent here with claude in agent-belt to review the README   # plain words
 agb sessions            # interactive picker across all machines
 agb ls                  # the same list, as text
@@ -166,12 +166,16 @@ All of it, including the `--detach` mode for scripts and other agents, is in
 
 ### New agent by voice
 
-Hold key 5 and say it: *"codex on windows in coreum to look into the login error"*. A panel,
+Hold key 5 and say it: *"codex on windows in web-app to look into the login error"*. A panel,
 the dictation overlay's sibling, opens at the center of the screen with the words streaming in
 as you speak and what they mean: **agent**, **machine**, **repo** and the **intent** the agent
 will get as its first prompt. Release to review. Hold again to add or correct, type to fix a
 word, or click a field to pick another option; tap 5 (or press Return) to create the agent,
 Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
+
+Requests are understood in **English and Portuguese** — `create`, `crie`, `open`, `abra`,
+`start` and `inicie` all open one — so the Portuguese examples below work as written. Set
+`"deepgram_language"` (see Configuration) to the language you dictate in.
 
 - Exact names are matched directly; misheard ones ("codecs", "linux dois", "core um") are
   decided by [Jev](https://docs.typesafe.ai), with its key in the Keychain (service
@@ -179,8 +183,9 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
   one machine has it.
 - With a single machine, the machine is always this one.
 - The agent gets only the work, in your own words: a small model with no reasoning removes
-  the spoken routing ("crie um agente com claude no repositório xyz que revise o login"
-  sends "Revise o login.") and fixes transcription errors, adding nothing; it also names
+  the spoken routing ("crie um agente com claude no repositório xyz que revise o login" —
+  "create an agent with claude in repo xyz to review the login" — sends "Revise o login.")
+  and fixes transcription errors, adding nothing; it also names
   the session and writes the one-line summary shown in the panel. DeepSeek Flash over HTTP
   answers in about a second, with `DEEPSEEK_API_KEY` from the environment or your login
   shell (the daemon reads it once at start). Without it, Codex (`gpt-6-luna`), then Claude
@@ -188,11 +193,11 @@ Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
   the words after the routing clause.
 - A machine said by name wins; a repo it lacks is left for you to pick. Unnamed, the repo
   decides the machine ("no mac debian" is on the Linux box that has it).
-- No repo is fine: research ("pesquise alternativas ao tmux") runs in `~/agents/<task>`,
-  and the repo field offers **none (research)** to choose it.
+- No repo is fine: research ("pesquise alternativas ao tmux", "research tmux alternatives")
+  runs in `~/agents/<task>`, and the repo field offers **none (research)** to choose it.
 - Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).
   Each machine lists what is under the paths in `~/.config/agent-belt/repo-roots` (one per
-  line), or `~/dev/micromed`, `~/dev/frb` and `~/dev` without it.
+  line), or `~/dev` without it.
 
 Without the keypad, **New agent…** in the menu bar menu opens the same panel to type into,
 and `agb panel [words]` opens it from a terminal.
@@ -230,8 +235,10 @@ The LED protocol was reverse-engineered from the vendor's configurator; it is in
 In the menu bar, the belt's buckle light shows the state: orange recording, cyan
 transcribing, red an agent waits for you, green one finished. A click opens a menu with the
 agents (click one to open it), **New agent…**, the quotas, updates, permissions and the log.
-If an agent has been waiting for you for 3 minutes while the Mac sits idle, a WhatsApp alert
-goes out through `ford-send`.
+If an agent has been waiting for you for 3 minutes while the Mac sits idle, Agent Belt runs
+a sender of your own with one argument, the alert text — a program named `ford-send` on
+`PATH`, or any program `AGENT_BELT_FORD_SEND` points at. None is shipped: without one, the
+alert is simply not sent. The message carries the session title and nothing else.
 
 ## Configuration
 
@@ -251,6 +258,12 @@ agb bind 5 text 'Hello!'
 Other settings: `"knob": "scroll"` or `"system"` (volume), `"knob_scroll_lines": 3` (negative
 inverts), `"led": true`, `"f5_push_to_talk": true` and `"sounds": true`.
 
+Dictation: `"deepgram_language": "pt-BR"` — set your own ([Deepgram's
+codes](https://developers.deepgram.com/docs/models-languages-overview), `"en-US"`,
+`"multi"`…) or nothing is transcribed the way you speak. Also `"deepgram_model": "nova-3"`,
+`"deepgram_smart_format": true` and `"deepgram_mip_opt_out": true` (keeps your audio out of
+Deepgram's model training).
+
 ## CLI
 
 ```
@@ -258,6 +271,7 @@ agb status                        daemon, permissions, device, key, log
 agb agents list|next|bottom       agents with state and stats · next · back to the bottom
 agb new <words> | --task …        create an agent session (plain words or flags)
 agb sessions|ls|attach|hosts      agent sessions across machines
+agb repos [machine]               the repository names agb new accepts there
 agb send|peek|stop                drive a session's agent (scripts, orchestrators)
 agb doctor|adopt|deploy|tm        session engine housekeeping
 agb led <color 0-7> <mode 0-5>    lights by hand
@@ -266,6 +280,9 @@ agb version · agb update [tag]    version · update now
 agb preview                       show the dictation animation without a microphone (macOS, Windows, Linux)
 agb panel [words] | --close       the create-agent panel
 agb history [days] [--json]       recordings and transcripts of the last 60 days
+agb bind <0-5|a-f> <action> …     rebind a key (see Configuration)
+agb init · agb devices            write the default config · list HID devices
+agb daemon                        run in the foreground (launchd starts it normally)
 ```
 
 ## Updates
@@ -311,6 +328,13 @@ tools/render-menu.sh      # regenerate assets/menu.png
 ```
 
 The log is `~/Library/Logs/agent-belt.log`. To uninstall: `./install.sh --uninstall`.
+
+## Security
+
+What Agent Belt trusts — the machines in `hosts.conf`, your ssh keys, the agents it
+starts with their permission prompts off — and how to report a vulnerability privately:
+[SECURITY.md](SECURITY.md). Read it before putting a machine on the mesh.
+
 
 ---
 

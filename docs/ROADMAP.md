@@ -36,7 +36,7 @@ not. The agent menu also lists the sessions of the other machines, to open them 
 
 Today only the Mac knows which agent is waiting for a decision (red) or just finished
 (green). Carry that state in the session protocol (`agb _ls-raw`) so the Windows tray,
-the Omarchy bar module and orchestrators such as Hermes see it too.
+the Omarchy bar module and external orchestrators see it too.
 
 ### Updates on Windows and Linux
 

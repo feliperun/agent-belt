@@ -24,6 +24,8 @@ pub const Config = struct {
     product_id: u16 = 0x8850,
     deepgram_api_key_env: []const u8 = "DEEPGRAM_API_KEY",
     deepgram_model: []const u8 = "nova-3",
+    /// The language dictation is transcribed as. Set your own: a mismatch is
+    /// transcribed phonetically into the wrong language, not left untranscribed.
     deepgram_language: []const u8 = "pt-BR",
     deepgram_smart_format: bool = true,
     deepgram_mip_opt_out: bool = true,
