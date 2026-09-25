@@ -455,7 +455,7 @@ pub fn planFromIntent(reg: hosts.Registry, detected: intent.Plan) !Plan {
 
 // ---------------------------------------------------------------- listing
 
-pub const Row = struct { host: hosts.Host, name: []const u8, windows: []const u8, created: []const u8, attached: bool, agent: []const u8, path: []const u8 };
+pub const Row = struct { host: hosts.Host, name: []const u8, windows: []const u8, created: []const u8, attached: bool, agent: []const u8, path: []const u8, working: bool = false };
 pub const HostState = struct { ok: bool = false, outside: usize = 0, sessions: usize = 0 };
 
 pub const Collected = struct { rows: []Row, states: []HostState };
@@ -490,7 +490,7 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
                 states[i].outside = std.fmt.parseInt(usize, f.next() orelse "0", 10) catch 0;
                 continue;
             }
-            try rows.append(ctx.gpa, .{ .host = h, .name = name, .windows = f.next() orelse "", .created = f.next() orelse "", .attached = std.mem.eql(u8, f.next() orelse "0", "1"), .agent = f.next() orelse "-", .path = f.rest() });
+            try rows.append(ctx.gpa, .{ .host = h, .name = name, .windows = f.next() orelse "", .created = f.next() orelse "", .attached = std.mem.eql(u8, f.next() orelse "0", "1"), .agent = f.next() orelse "-", .path = f.next() orelse "", .working = std.mem.eql(u8, f.next() orelse "", "working") });
             states[i].sessions += 1;
         }
     }
@@ -502,9 +502,9 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
 fn sessionsJson(ctx: sys.Ctx) ![]const u8 {
     const reg = try loadRegistry(ctx);
     const c = try collect(ctx, reg);
-    const Session = struct { host: []const u8, name: []const u8, agent: []const u8, attached: bool, here: bool };
+    const Session = struct { host: []const u8, name: []const u8, agent: []const u8, attached: bool, here: bool, working: bool };
     const list = try ctx.gpa.alloc(Session, c.rows.len);
-    for (c.rows, list) |r, *s| s.* = .{ .host = r.host.name, .name = r.name, .agent = r.agent, .attached = r.attached, .here = reg.isSelf(r.host) };
+    for (c.rows, list) |r, *s| s.* = .{ .host = r.host.name, .name = r.name, .agent = r.agent, .attached = r.attached, .here = reg.isSelf(r.host), .working = r.working };
     var down: std.ArrayList([]const u8) = .empty;
     for (reg.hosts, c.states) |h, st| if (!st.ok) try down.append(ctx.gpa, h.name);
     return ctx.fmt("{f}\n", .{std.json.fmt(.{ .sessions = list, .unreachable_hosts = down.items }, .{})});

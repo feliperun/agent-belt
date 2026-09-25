@@ -755,8 +755,16 @@ fn field(ctx: sys.Ctx, value: []const u8) ![]const u8 {
     return copy;
 }
 
-/// `agb _ls-raw`: one line per session, name|windows|created|attached|agent|path,
-/// then #outside|<count>, which also marks the answer as complete.
+/// Is the agent working? Claude Code titles its terminal with a spinner
+/// (◐◓◑◒ or braille) while it works and "✳" when idle.
+fn titleWorking(title: []const u8) bool {
+    const t = std.mem.trimStart(u8, title, " _");
+    if (t.len < 3 or t[0] != 0xE2) return false;
+    return (t[1] >= 0xA0 and t[1] <= 0xA3) or (t[1] == 0x97 and t[2] >= 0x90 and t[2] <= 0x93);
+}
+
+/// `agb _ls-raw`: one line per session, name|windows|created|attached|agent|path|state
+/// (working or idle), then #outside|<count>, which also marks the answer as complete.
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     if (sys.platform == .windows) dropOrphanClients(ctx);
@@ -779,7 +787,7 @@ pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
         const title = f.rest();
         if (agent.len == 0) agent = inferAgent(ctx, tty, command);
         if (syncName(ctx, name, agent, task, title)) |renamed| name = renamed;
-        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path) }));
+        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), if (titleWorking(title)) "working" else "idle" }));
     }
     try out.appendSlice(ctx.gpa, try ctx.fmt("#outside|{d}\n", .{agentsOutside(ctx)}));
     return out.items;
@@ -1035,4 +1043,8 @@ test "an orphan tmux client is found by its missing parent" {
     defer std.testing.allocator.free(ttys);
     try std.testing.expectEqual(@as(usize, 1), ttys.len);
     try std.testing.expectEqualStrings("/dev/pty3", ttys[0]);
+    try std.testing.expect(titleWorking("⠂ Resposta ao cliente"));
+    try std.testing.expect(titleWorking("◐ build"));
+    try std.testing.expect(!titleWorking("✳ idle"));
+    try std.testing.expect(!titleWorking("_ report-rust"));
 }
