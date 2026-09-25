@@ -10,6 +10,7 @@ const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
 const history = @import("../history.zig");
 const wav_stream = @import("../wav_stream.zig");
+const build_options = @import("build_options");
 
 pub fn isCommand(name: []const u8) bool {
     for ([_][]const u8{ "menu", "waybar", "ptt", "install", "uninstall", "preview", "_overlay" }) |c| if (std.mem.eql(u8, name, c)) return true;
@@ -112,15 +113,24 @@ fn omarchyPick(ctx: sys.Ctx, prompt: []const u8, lines: []const u8) ?[]const u8 
     return if (choice.len > 0) choice else null;
 }
 
-const new_agent = "+ New agent…";
+const new_agent = "+ New agent…    Shift+F9";
+const sessions_line = "Sessions in a terminal    Ctrl+Alt+↑";
+const dictate_line = "Dictate: hold Ctrl+Alt+D";
 
+/// The same menu as the macOS menu bar and the Windows tray: the agent count,
+/// every machine's sessions, a new agent, the sessions in a terminal.
 fn menu(ctx: sys.Ctx) !u8 {
     const reg = try hosts.load(ctx);
     const c = try cli.collect(ctx, reg);
     var lines: std.ArrayList(u8) = .empty;
-    try lines.appendSlice(ctx.gpa, new_agent);
-    for (c.rows) |r| try lines.print(ctx.gpa, "\n{s} · {s} · {s}", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name });
-    const choice = pick(ctx, "Agent Belt", lines.items) orelse return 0;
+    for (c.rows) |r| try lines.print(ctx.gpa, "{s} · {s} · {s}\n", .{ r.name, if (r.agent.len > 0) r.agent else "shell", r.host.name });
+    try lines.appendSlice(ctx.gpa, new_agent ++ "\n" ++ sessions_line ++ "\n" ++ dictate_line);
+    const title = try ctx.fmt("Agent Belt {s} · {d} agent{s}", .{ build_options.version, c.rows.len, if (c.rows.len == 1) "" else "s" });
+    const choice = pick(ctx, title, lines.items) orelse return 0;
+    if (std.mem.eql(u8, choice, sessions_line)) {
+        openTerminal(ctx, &.{"sessions"});
+        return 0;
+    }
     if (std.mem.eql(u8, choice, new_agent)) {
         // The panel, to type or hold Shift+F9 and say it; else a typed line.
         if (sys.which(ctx, "quickshell") != null) {
@@ -142,7 +152,9 @@ fn menu(ctx: sys.Ctx) !u8 {
     return 0;
 }
 
-/// A Waybar custom module: `"exec": "agb waybar", "return-type": "json"`.
+/// A Waybar custom module: `"exec": "agb waybar", "return-type": "json"`. The
+/// text is the count of agent sessions; Omarchy's bar draws the belt beside it
+/// (bar.qml).
 fn waybar(ctx: sys.Ctx) !u8 {
     const reg = try hosts.load(ctx);
     const c = try cli.collect(ctx, reg);
@@ -154,7 +166,7 @@ fn waybar(ctx: sys.Ctx) !u8 {
         try tooltip.print(ctx.gpa, "{s}{s} unreachable", .{ if (tooltip.items.len > 0) "\n" else "", h.name });
     };
     const out = std.json.fmt(.{
-        .text = try ctx.fmt("🦇 {d}", .{c.rows.len}),
+        .text = try ctx.fmt("{d}", .{c.rows.len}),
         .tooltip = if (tooltip.items.len > 0) tooltip.items else "no agent sessions",
         .class = if (c.rows.len == 0) "idle" else "active",
         .alt = if (down > 0) "degraded" else "ok",
@@ -490,7 +502,7 @@ fn install(ctx: sys.Ctx) !u8 {
     } else {
         std.debug.print(
             \\Waybar module (add "custom/agent-belt" to a modules list):
-            \\  "custom/agent-belt": {{ "exec": "{s} waybar", "return-type": "json", "interval": 15, "on-click": "{s} menu" }}
+            \\  "custom/agent-belt": {{ "exec": "{s} waybar", "return-type": "json", "format": "agents {{}}", "interval": 15, "on-click": "{s} menu" }}
             \\
         , .{ selfExe(ctx), selfExe(ctx) });
     }
@@ -498,32 +510,35 @@ fn install(ctx: sys.Ctx) !u8 {
     return 0;
 }
 
-/// A command module in Omarchy's bar, which reads the same JSON as Waybar.
-/// `omarchy bar put` only knows plugin widgets, so it goes into shell.json.
+/// A QML module in Omarchy's bar (bar.qml): the belt, as on macOS and
+/// Windows, with the agent count from `agb waybar`. Replaces an older entry in
+/// place, wherever the user moved it.
 fn installOmarchyBar(ctx: sys.Ctx) void {
     const shell_json = omarchyShellJson(ctx) catch return;
     const json = sys.readFile(ctx, shell_json) orelse {
         std.debug.print("Omarchy bar: no {s} yet; customize the bar once, then run agb install again\n", .{shell_json});
         return;
     };
-    if (std.mem.indexOf(u8, json, "\"agent-belt\"") == null) {
-        const self = selfExe(ctx);
-        const module = ctx.fmt("{f}", .{std.json.fmt(.{
-            .id = "agent-belt",
-            .type = "command",
-            .exec = ctx.fmt("{s} waybar", .{self}) catch return,
-            .interval = 15,
-            .tooltip = "Agent Belt",
-            .onClick = ctx.fmt("{s} menu", .{self}) catch return,
-        }, .{})}) catch return;
-        const out = sys.run(ctx, &.{ "jq", "--argjson", "m", module, ".bar.layout.right = [$m] + (.bar.layout.right // [])", shell_json }, null);
-        if (!out.ok) {
-            std.debug.print("Omarchy bar: could not edit {s}\n", .{shell_json});
-            return;
-        }
-        sys.writeFileAtomic(ctx, shell_json, out.stdout) catch return;
+    const qml = omarchyBarModule(ctx) catch return;
+    std.Io.Dir.cwd().createDirPath(ctx.io, std.fs.path.dirname(qml).?) catch {};
+    sys.writeFileAtomic(ctx, qml, std.mem.replaceOwned(u8, ctx.gpa, @embedFile("bar.qml"), "@AGB@", selfExe(ctx)) catch return) catch return;
+    const module = ctx.fmt("{f}", .{std.json.fmt(.{ .id = "agent-belt", .type = "qml", .source = qml }, .{})}) catch return;
+    const program =
+        \\if ([.bar.layout[][]? | select(.id == "agent-belt")] | length) > 0
+        \\then .bar.layout |= map_values(map(if .id == "agent-belt" then $m else . end))
+        \\else .bar.layout.right = [$m] + (.bar.layout.right // []) end
+    ;
+    const out = sys.run(ctx, &.{ "jq", "--argjson", "m", module, program, shell_json }, null);
+    if (!out.ok) {
+        std.debug.print("Omarchy bar: could not edit {s}\n", .{shell_json});
+        return;
     }
-    std.debug.print("Omarchy bar: 🦇 with the agent sessions (click for the menu)\n", .{});
+    if (!std.mem.eql(u8, out.stdout, json)) sys.writeFileAtomic(ctx, shell_json, out.stdout) catch return;
+    std.debug.print("Omarchy bar: the belt with the agent count (click for the menu)\n", .{});
+}
+
+fn omarchyBarModule(ctx: sys.Ctx) ![]const u8 {
+    return ctx.join(&.{ ctx.getenv("XDG_CONFIG_HOME") orelse try ctx.join(&.{ ctx.home(), ".config" }), "omarchy", "bar", "modules", "agent-belt.qml" });
 }
 
 fn omarchyShellJson(ctx: sys.Ctx) ![]const u8 {
@@ -548,6 +563,7 @@ fn uninstall(ctx: sys.Ctx) !u8 {
         const out = sys.run(ctx, &.{ "jq", ".bar.layout |= map_values(map(select(.id != \"agent-belt\")))", shell_json }, null);
         if (out.ok) try sys.writeFileAtomic(ctx, shell_json, out.stdout);
     };
+    std.Io.Dir.cwd().deleteFile(ctx.io, try omarchyBarModule(ctx)) catch {};
     std.debug.print("Agent Belt binds and bar module removed; the Deepgram key stays in {s}\n", .{try keyPath(ctx)});
     return 0;
 }
