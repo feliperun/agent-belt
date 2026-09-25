@@ -17,7 +17,7 @@ without the run going red.
 
 ## Where it stands
 
-**64 findings — 59 fixed, 4 accepted, 1 open.** 5 critical, 17 high, 26 medium, 16 low. All 64 proofs pass. The open one, P10, is the licence: the owner's decision, pending before the wide release.
+**64 findings — 60 fixed, 4 accepted.** 5 critical, 17 high, 26 medium, 16 low. All 64 proofs pass.
 
 The critical ones:
 
@@ -131,7 +131,7 @@ outsider can cause, *medium* is a defect needing a precondition, *low* is hygien
 | P8 | high | Personal and production-derived data is compiled into `src/` and `tools/` | fixed | `! git ls-files -z -- src tools \| xargs -0 grep -nIE "felipe\|frb@\|ford@\|Micromed\|[Cc]oreum\|Odelio\|micromed\|frb-linux\|macbook-pro\|[Hh]ermes\|/home/frb\|uso: \|aviso no" \| grep -v 'feliperun/agent-belt' && grep -q 'return ctx.join(&.{ ctx.home(), "dev" });' src/sessions/local.zig` |
 | P13 | low | Nothing said that requests are understood in Portuguese as well as English | fixed | `grep -q 'Requests are understood in \*\*English and Portuguese\*\*' README.md && grep -q 'in English or Portuguese' docs/sessions.md` |
 | P9 | high | No security policy and no threat model | fixed | `test -f SECURITY.md && grep -q 'security/advisories/new' SECURITY.md && grep -q 'one compromised machine in the mesh' SECURITY.md && grep -q 'SECURITY.md' README.md` |
-| P10 | high | No licence, so nobody could legally use the project | **open (owner decision)** | `! grep -q '(LICENSE)' README.md \|\| test -f LICENSE` |
+| P10 | high | No licence, so nobody could legally use the project | fixed | `test -f LICENSE && grep -q 'MIT License' LICENSE && grep -q '(LICENSE)' README.md` |
 | P11 | medium | `.gitignore` did not cover the build's own output or local secrets | fixed | `for p in dist/x.zip .env deepgram.key; do git check-ignore -q "$p" \|\| exit 1; done; test -z "$(git ls-files \| git check-ignore --stdin)"` |
 | P12 | high | Twelve regression tests existed and never ran | fixed | `zig build test --summary all 2>&1 \| grep -qE '69/69 tests passed' && grep -q '"src/deepgram.zig", "src/transcribe_stream.zig", "src/sessions/jev.zig", "src/sessions/deepseek.zig"' build.zig` |
 

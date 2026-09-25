@@ -271,11 +271,10 @@ and `api`. Every proof command below exits 0 on this tree.
   is "all rights reserved" by default: a reader may look at it but may not use, fork or
   redistribute it, which makes a wide public release meaningless. The README advertises
   `curl … | bash` installation, which nobody is actually permitted to do.
-- **fix:** none yet. **The licence is the repository owner's decision**, pending before
-  the wide release: the review does not pick one. Until then the README claims no licence,
-  so it does not promise a right the project has not granted.
-- **status:** open (owner decision)
-- **proof:** command: `! grep -q '(LICENSE)' README.md || test -f LICENSE`
+- **fix:** MIT, chosen by the repository owner, with the copyright held by "the Agent
+  Belt contributors" so no individual's legal name is added to the tree. The README links it.
+- **status:** fixed
+- **proof:** command: `test -f LICENSE && grep -q 'MIT License' LICENSE && grep -q '(LICENSE)' README.md`
 
 ### P11. `.gitignore` did not cover the build's own output or local secrets
 - **severity:** medium

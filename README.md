@@ -329,12 +329,13 @@ tools/render-menu.sh      # regenerate assets/menu.png
 
 The log is `~/Library/Logs/agent-belt.log`. To uninstall: `./install.sh --uninstall`.
 
-## Security
+## Security and license
 
 What Agent Belt trusts — the machines in `hosts.conf`, your ssh keys, the agents it
 starts with their permission prompts off — and how to report a vulnerability privately:
 [SECURITY.md](SECURITY.md). Read it before putting a machine on the mesh.
 
+Released under the [MIT License](LICENSE).
 
 ---
 
