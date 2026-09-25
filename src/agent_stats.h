@@ -8,6 +8,7 @@
 @property unsigned long long tokens; // input + cache + output, subagents included
 @property double cost;          // USD at API list prices
 @property BOOL costKnown;       // NO when a model has no known price
+@property NSString *status;     // Claude Code's own state: busy, idle or waiting
 @end
 
 // Live Claude Code sessions keyed by "pane:<tmux pane id>" and "orca:<terminal handle>".

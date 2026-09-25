@@ -134,9 +134,13 @@ file — keep appending.
   `message.id` or tokens and cost multiply (`src/agent_stats.m`).
 - **The app name has a space.** Quote every path in `install.sh`
   (`"$(mktemp -d)/Agent Belt.app"`).
-- **Agent status comes from the terminal title.** Claude Code writes `✳ title` when
-  idle and a spinner (◐◓◑◒, braille) while working; "finished" is a working→idle
-  transition seen by the 5 s monitor.
+- **Agent status comes from Claude Code's own record, not the title.** Under tmux it keeps
+  a static `✳ title` (its `tengu_static_title_under_mux` flag), so the spinner the key
+  lights relied on never shows and green stopped lighting. `~/.claude/sessions/<pid>.json`
+  carries `status` (`busy`, `idle`, `waiting`) and `tmux` (ending in the pane id); a
+  parked session's state is its background job's. "Finished" is a working→idle transition
+  seen by the 5 s monitor; the title spinner and the screen stay as fallbacks for other
+  agents (`src/agent_stats.m`, `claudeStates` in `src/sessions/local.zig`).
 - **Windows: MSYS2's tmux refuses a native console** ("open terminal failed: not a
   terminal"), in Windows Terminal or conhost alike. Attaching runs it under
   `script -qfc … /dev/null`, which gives it a pty (`src/sessions/local.zig`).

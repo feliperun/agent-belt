@@ -185,6 +185,9 @@ NSDictionary<NSString *, MKSessionInfo *> *MKClaudeSessionInfo(void) {
         NSDictionary *owner = byJob[MKStr(session[@"parkedJobId"]) ?: @""] ?: session;
         MKSessionInfo *info = MKInfoForSession(owner[@"sessionId"], MKNum(session[@"startedAt"]) / 1000);
         if (!info) continue;
+        // Under tmux Claude Code keeps a static title (its "tengu_static_title_under_mux"
+        // flag), so its own record is the only sign it is working or waiting for you.
+        info.status = MKStr(owner[@"status"]) ?: MKStr(session[@"status"]);
         if (!info.title && [@[@"user", @"auto"] containsObject:session[@"nameSource"] ?: @""]) info.title = MKStr(session[@"name"]);
         NSString *pane = [[MKStr(session[@"tmux"]) componentsSeparatedByString:@"."] lastObject];
         if ([pane hasPrefix:@"%"]) result[[@"pane:" stringByAppendingString:pane]] = info;

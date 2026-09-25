@@ -31,6 +31,7 @@
 @property NSString *detail;     // recap and stats for the menu
 @property NSString *host;       // an agb session opened with `agb attach` (another machine, or detached here)
 @property NSString *session;
+@property NSString *status;     // the agent's own state when it records one: busy, idle or waiting
 @end
 @implementation MKAgentTarget
 @end
@@ -306,7 +307,8 @@ static NSArray<MKAgentTarget *> *MKSessionTargets(NSArray<MKAgentTarget *> *show
         target.session = name;
         target.host = host;
         target.label = [NSString stringWithFormat:@"%@ · %@", name, agent];
-        target.title = MKBool(session[@"working"]) ? @"\u2802 working" : @"\u2733 idle"; // as the agent titles itself
+        NSString *state = MKString(session[@"state"]);
+        target.status = [state isEqual:@"working"] ? @"busy" : state; // as the session's machine read it
         target.detail = [NSString stringWithFormat:@"%@ · %@%@", agent, host, MKBool(session[@"attached"]) ? @" · attached" : @""];
         NSNumber *pid = attached[[NSString stringWithFormat:@"%@\t%@", host, name]];
         if (pid) {
@@ -615,7 +617,7 @@ static void MKObserve(NSArray<MKAgentTarget *> *ring) {
     NSMutableSet *live = [NSMutableSet set];
     for (MKAgentTarget *target in ring) {
         [live addObject:target.key];
-        if (MKTitleWorking(target.title)) {
+        if (MKTitleWorking(target.title) || [target.status isEqual:@"busy"]) {
             [mk_seen_working addObject:target.key];
             [mk_done removeObject:target.key];
             target.state = MKStateWorking;
@@ -635,8 +637,11 @@ static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
     dispatch_apply(ring.count, DISPATCH_APPLY_AUTO, ^(size_t i) {
         MKAgentTarget *target = ring[i];
         if (target.state == MKStateWorking) return; // a spinning agent is not asking
-        BOOL waiting = NO;
-        if (target.pane) {
+        // Claude Code says so itself; other agents are read from the screen.
+        BOOL waiting = [target.status isEqual:@"waiting"];
+        if (waiting || target.host) {
+            // known already, or read on the session's own machine
+        } else if (target.pane) {
             NSData *screen = MKRun(MKToolPath(@"tmux", @"AGENT_BELT_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
             waiting = screen && MKWaitingScreen([[NSString alloc] initWithData:screen encoding:NSUTF8StringEncoding] ?: @"");
         } else if (target.terminal) {
@@ -696,11 +701,12 @@ static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
 static void MKEnrich(NSArray<MKAgentTarget *> *ring) {
     NSDictionary<NSString *, MKSessionInfo *> *sessions = MKClaudeSessionInfo();
     for (MKAgentTarget *target in ring) {
-        if (target.host) { target.name = target.session; continue; } // detail set at discovery
+        if (target.host) { target.name = target.session; continue; } // detail and state set at discovery
         MKSessionInfo *info = target.pane ? sessions[[@"pane:" stringByAppendingString:target.pane]] : nil;
         if (!info && target.terminal) info = sessions[[@"orca:" stringByAppendingString:target.terminal]];
         NSString *agent = [target.label componentsSeparatedByString:@" · "].lastObject;
         target.name = info.title.length ? info.title : [target.label componentsSeparatedByString:@" · "].firstObject;
+        target.status = info.status;
         NSMutableArray *parts = [NSMutableArray arrayWithObject:agent ?: @""];
         NSString *stats = info ? MKSessionStatsText(info) : @"";
         if (stats.length) [parts addObject:stats];
@@ -719,9 +725,9 @@ static NSString *MKEnrichedName(MKAgentTarget *target) {
 static NSArray<MKAgentTarget *> *MKRefreshRing(BOOL desktop) {
     mk_ring = MKStableRing(mk_ring, MKDiscover(desktop));
     for (NSUInteger i = 0; i < mk_ring.count; i++) mk_ring[i].position = i + 1;
+    MKEnrich(mk_ring); // Claude's own state, read with the titles
     MKObserve(mk_ring);
     MKDetectWaiting(mk_ring);
-    MKEnrich(mk_ring);
     return mk_ring;
 }
 
@@ -911,9 +917,9 @@ int mk_agents_command(int mode, int desktop) {
         }
         MKFetchSessions();
         NSArray *targets = MKDiscover(desktop != 0);
+        MKEnrich(targets);
         MKObserve(targets);
         MKDetectWaiting(targets);
-        MKEnrich(targets);
         for (MKAgentTarget *target in targets)
             printf("%-12s %s\n             %s\n", [@[@"idle", @"working", @"finished", @"waiting"][target.state] UTF8String],
                    MKTitleOf(target).UTF8String, target.detail.UTF8String);
@@ -1028,9 +1034,9 @@ void mk_agents_monitor(void) {
     dispatch_source_set_event_handler(timer, ^{
         @autoreleasepool {
             NSArray *ring = MKTerminalTargets();
+            MKEnrich(ring);
             MKObserve(ring);
             MKDetectWaiting(ring);
-            MKEnrich(ring);
             MKUpdateLed(ring);
             MKNotifyAway(ring);
             MKTakeSnapshot(ring);

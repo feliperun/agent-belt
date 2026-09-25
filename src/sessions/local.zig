@@ -763,13 +763,64 @@ fn titleWorking(title: []const u8) bool {
     return (t[1] >= 0xA0 and t[1] <= 0xA3) or (t[1] == 0x97 and t[2] >= 0x90 and t[2] <= 0x93);
 }
 
+/// Claude Code's own state for the panes it runs in, from its record of each
+/// process (~/.claude/sessions/<pid>.json: "tmux" ends in the pane id, "status"
+/// is busy, idle or waiting). Under tmux it keeps a static title, so the title
+/// alone no longer shows it working. A parked session's state is its
+/// background job's.
+const PaneState = struct { pane: []const u8, status: []const u8 };
+
+fn claudeStates(ctx: sys.Ctx) []PaneState {
+    const Record = struct { pid: i64 = 0, tmux: []const u8 = "", status: []const u8 = "", kind: []const u8 = "", jobId: []const u8 = "", parkedJobId: []const u8 = "" };
+    var records: std.ArrayList(Record) = .empty;
+    const dir_path = ctx.join(&.{ ctx.home(), ".claude", "sessions" }) catch return &.{};
+    var dir = std.Io.Dir.cwd().openDir(ctx.io, dir_path, .{ .iterate = true }) catch return &.{};
+    defer dir.close(ctx.io);
+    var it = dir.iterate();
+    while (it.next(ctx.io) catch null) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
+        const bytes = sys.readFile(ctx, ctx.join(&.{ dir_path, entry.name }) catch continue) orelse continue;
+        const r = std.json.parseFromSliceLeaky(Record, ctx.gpa, bytes, .{ .ignore_unknown_fields = true }) catch continue;
+        // A record outlives a crashed process; on Windows the pane match has to do.
+        if (sys.platform != .windows and (r.pid <= 0 or !processAlive(@intCast(r.pid)))) continue;
+        records.append(ctx.gpa, r) catch return &.{};
+    }
+    var states: std.ArrayList(PaneState) = .empty;
+    for (records.items) |r| {
+        if (std.mem.eql(u8, r.kind, "bg")) continue;
+        const dot = std.mem.lastIndexOfScalar(u8, r.tmux, '.') orelse continue;
+        var status = r.status;
+        if (r.parkedJobId.len > 0) for (records.items) |job| {
+            if (std.mem.eql(u8, job.jobId, r.parkedJobId)) status = job.status;
+        };
+        states.append(ctx.gpa, .{ .pane = r.tmux[dot + 1 ..], .status = status }) catch break;
+    }
+    return states.items;
+}
+
+fn processAlive(pid: std.posix.pid_t) bool {
+    if (sys.platform == .windows) return true;
+    std.posix.kill(pid, @enumFromInt(0)) catch |err| return err == error.PermissionDenied;
+    return true;
+}
+
+/// working, waiting (for you) or idle: Claude Code's record, else the title.
+fn paneState(states: []const PaneState, pane: []const u8, title: []const u8) []const u8 {
+    for (states) |st| if (std.mem.eql(u8, st.pane, pane)) {
+        if (std.mem.eql(u8, st.status, "waiting")) return "waiting";
+        if (std.mem.eql(u8, st.status, "busy")) return "working";
+    };
+    return if (titleWorking(title)) "working" else "idle";
+}
+
 /// `agb _ls-raw`: one line per session, name|windows|created|attached|agent|path|state
-/// (working or idle), then #outside|<count>, which also marks the answer as complete.
+/// (working, waiting or idle), then #outside|<count>, which also marks the answer as complete.
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     if (sys.platform == .windows) dropOrphanClients(ctx);
-    const fields = "#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,1,0}|#{?@work_agent,#{@work_agent},}|#{session_path}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{pane_title}";
+    const fields = "#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,1,0}|#{?@work_agent,#{@work_agent},}|#{session_path}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{pane_id}|#{pane_title}";
     const list = tmux(ctx, &.{ "list-sessions", "-F", fields });
+    const states = claudeStates(ctx);
     var lines = std.mem.splitScalar(u8, list.stdout, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r");
@@ -784,10 +835,11 @@ pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
         const tty = f.next() orelse "";
         const command = f.next() orelse "";
         const task = f.next() orelse "";
+        const pane = f.next() orelse "";
         const title = f.rest();
         if (agent.len == 0) agent = inferAgent(ctx, tty, command);
         if (syncName(ctx, name, agent, task, title)) |renamed| name = renamed;
-        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), if (titleWorking(title)) "working" else "idle" }));
+        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), paneState(states, pane, title) }));
     }
     try out.appendSlice(ctx.gpa, try ctx.fmt("#outside|{d}\n", .{agentsOutside(ctx)}));
     return out.items;
@@ -1047,4 +1099,9 @@ test "an orphan tmux client is found by its missing parent" {
     try std.testing.expect(titleWorking("◐ build"));
     try std.testing.expect(!titleWorking("✳ idle"));
     try std.testing.expect(!titleWorking("_ report-rust"));
+    const states = [_]PaneState{ .{ .pane = "%3", .status = "busy" }, .{ .pane = "%4", .status = "waiting" }, .{ .pane = "%5", .status = "idle" } };
+    try std.testing.expectEqualStrings("working", paneState(&states, "%3", "✳ static under tmux"));
+    try std.testing.expectEqualStrings("waiting", paneState(&states, "%4", "✳ x"));
+    try std.testing.expectEqualStrings("idle", paneState(&states, "%5", "✳ x"));
+    try std.testing.expectEqualStrings("working", paneState(&states, "%9", "⠂ codex"));
 }
