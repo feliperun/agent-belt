@@ -96,10 +96,13 @@ agb uninstall    # remove the login item
 | `Ctrl+Alt+Space` | the agent menu |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal window |
 
-The tray icon's menu lists the agent sessions of every machine (click one to attach in
-a terminal), **New agent…** (type the request; agent, machine, repo and the highlighted intent are detected as you type), the log
-(`%LOCALAPPDATA%\agent-belt\agent-belt.log`) and quit. The macropad and its lights are
-macOS-only for now.
+The tray icon is the Mac's belt, with the number of agent sessions in its buckle. Its menu
+lists the sessions of every machine (click one to attach in a terminal), **New agent…**,
+the sessions in a terminal, the log (`%LOCALAPPDATA%\agent-belt\agent-belt.log`) and quit.
+**New agent…** (or `agb panel`) opens the same create-agent panel as the Mac and Linux: the
+dark surface with the breathing core, the request as you type it, the agent, machine and
+repo as chips to click and correct, the session's name and summary; Return creates, Esc
+cancels. The macropad and its lights are macOS-only for now.
 
 ### Linux desktop (Hyprland, Omarchy)
 
@@ -112,17 +115,18 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 |---|---|
 | hold `Ctrl+Alt+D` | dictation: `pw-record` while held, the words streaming from Deepgram into the Mac's overlay (drawn by Quickshell; notifications without it), typed with `wtype` on release |
 | hold `Shift+F9` | a new agent by voice: the create-agent panel (Quickshell), with the words streaming in, the agent, machine and repo understood, the session's name and summary; release to review, hold again to add, type to fix, click a field to correct it, Return creates, Esc cancels |
-| `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **New agent…** (the panel) in walker (or fuzzel, wofi, rofi) |
+| `Ctrl+Alt+Space` | `agb menu`: the agent count, the sessions of every machine, **New agent…** (the panel) and the sessions in a terminal, in walker (or fuzzel, wofi, rofi) |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal |
 
-`agb waybar` feeds a Waybar custom module (`agb install` prints the snippet): 🦇 and the
-number of sessions, the list in the tooltip. `agb ptt toggle` suits desktops without
+`agb waybar` feeds a Waybar custom module (`agb install` prints the snippet): the number
+of sessions, the list in the tooltip. `agb ptt toggle` suits desktops without
 key-release binds. `agb uninstall` removes the binds.
 
 On Omarchy (Hyprland configured in Lua, Quickshell bar and menu) `agb install` writes
-`~/.config/hypr/agent-belt.lua` and requires it from `hyprland.lua`, adds a 🦇 command
-module to the bar in `~/.config/omarchy/shell.json`, and `agb menu` opens Omarchy's own
-menu. To dictate with another key, point a bind at `agb ptt start` / `agb ptt stop`
+`~/.config/hypr/agent-belt.lua` and requires it from `hyprland.lua`, adds a QML module to
+the bar (`~/.config/omarchy/bar/modules/agent-belt.qml`, listed in
+`~/.config/omarchy/shell.json`) that draws the Mac's belt with the number of sessions
+beside it, and `agb menu` opens Omarchy's own menu. To dictate with another key, point a bind at `agb ptt start` / `agb ptt stop`
 (with `{ release = true }`).
 
 ## Agents
@@ -196,8 +200,13 @@ Requests are understood in **English and Portuguese** — `create`, `crie`, `ope
 - No repo is fine: research ("pesquise alternativas ao tmux", "research tmux alternatives")
   runs in `~/agents/<task>`, and the repo field offers **none (research)** to choose it.
 - Repos come from an index per machine, refreshed in the background (`agb _repos-cache`).
-  Each machine lists what is under the paths in `~/.config/agent-belt/repo-roots` (one per
-  line), or `~/dev` without it.
+  Each machine lists the repositories under the paths in `~/.config/agent-belt/repo-roots`
+  (one per line), or `~/dev` without it: directly inside, or one folder down
+  (`~/dev/work/web-app`).
+- The agent can be **claude** (Claude Code), **codex**, **deepseek** (DeepSeek Harness,
+  `dsh`), **zcode** (ZCode) or **fx**, or a plain **shell**. ZCode and fx take no first
+  prompt on their command line, so tmux types it once their screen is up. DeepSeek Harness
+  has no terminal UI: it answers the task headless and the session stays open in a shell.
 
 Without the keypad, **New agent…** in the menu bar menu opens the same panel to type into,
 and `agb panel [words]` opens it from a terminal.
@@ -233,8 +242,11 @@ The LED protocol was reverse-engineered from the vendor's configurator; it is in
 | fn+F5 | push-to-talk |
 
 In the menu bar, the belt's buckle light shows the state: orange recording, cyan
-transcribing, red an agent waits for you, green one finished. A click opens a menu with the
-agents (click one to open it), **New agent…**, the quotas, updates, permissions and the log.
+transcribing, red an agent waits for you, green one finished; beside it, the number of
+agents. A click opens a menu with the agents of every machine (click one to open it),
+**New agent…**, the sessions in a terminal, the quotas, updates, permissions and the log.
+The agent menu and `agb agents` list the other machines' sessions too, and the sessions here
+no terminal shows; opening one attaches it in a new terminal.
 If an agent has been waiting for you for 3 minutes while the Mac sits idle, Agent Belt runs
 a sender of your own with one argument, the alert text — a program named `ford-send` on
 `PATH`, or any program `AGENT_BELT_FORD_SEND` points at. None is shipped: without one, the

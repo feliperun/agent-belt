@@ -110,7 +110,7 @@ Scope of this pass: `src/history.zig`, `src/linux/`, `src/windows/`,
   log is kept for the life of the install (trimmed only past 2 MB), is printed
   by `agb status`, and is what a user pastes when asking for help — while the
   60-day store is the place these words are supposed to live.
-- **fix:** the panel logs the session (`🦇 <task> · <agent> @ <host>`), the
+- **fix:** the panel logs the session (`<task> · <agent> @ <host>`), the
   voice command logs its length, and the Windows tray logs the window title.
 - **status:** fixed
 - **proof:** command: `bash -c '! grep -q "new agent: %s\\\\n\", command.UTF8String" src/create_panel.m && ! grep -q "VOICE COMMAND: {s}" src/daemon.zig && ! grep -q "open: {s}\", .{line.items}" src/windows/daemon.zig'`

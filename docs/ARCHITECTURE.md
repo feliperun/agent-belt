@@ -26,7 +26,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/daemon.zig` | key bindings, push-to-talk flow, knob, F5 |
 | `src/macos_shim.c` | HID monitor, event tap (swallowing and global shortcuts), audio capture, key injection |
 | `src/status_item.m` | overlay, switch HUD, agent menu, menu bar icon and menu |
-| `src/agent_switcher.m` | agent discovery (Orca + tmux), states, priority, focus, voice commands |
+| `src/agent_switcher.m` | agent discovery (Orca + tmux here, every machine's sessions through `agb _sessions`), states, priority, focus, voice commands |
 | `src/agent_stats.m` | titles, recaps, tokens, cost and quotas from local agent files |
 | `src/led.m` | keypad LED worker (latest state wins, repeats skipped) |
 | `src/updater.m` | release checks, notifications, source updates |
@@ -34,9 +34,9 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/create_panel.m`, `src/create_agent.zig` | the create-agent panel (key 5): streamed transcript, detected fields, confirmation |
 | `src/history.zig` | every recording (audio + transcript) kept 60 days; `agb history` |
 | `src/transcribe_stream.zig` | real-time transcription: Deepgram's live API over a std-only WebSocket client |
-| `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms); `intent.zig` + `jev.zig` turn a spoken request into agent, machine, repo and intent; `deepseek.zig` cleans the request for the agent and names the session |
-| `src/linux/` | the Linux desktop commands run by compositor binds: `menu` (Omarchy's menu or walker), `waybar`, `ptt` (pw-record, wtype), Hyprland `install`; `overlay.qml` is the dictation overlay, hosted in Quickshell, with the words streamed by `src/wav_stream.zig`; `agent_panel.zig` + `agent_panel.qml` are the create-agent panel (Shift+F9) |
-| `src/windows/` | the Windows tray daemon (`agent-belt.exe`): notification-area menu, push-to-talk, Win32 bindings; `overlay.zig` draws the dictation overlay with GDI+ |
+| `src/sessions/` | agent sessions on any tailnet host: registry, tmux, worktrees, ssh protocol (all platforms); `intent.zig` + `jev.zig` turn a spoken request into agent, machine, repo and intent; `deepseek.zig` cleans the request for the agent and names the session; `local.Agent` is the list of harnesses (claude, codex, deepseek, zcode, fx, shell) every picker reads ([ADR 0004](adr/0004-agent-harnesses-and-typed-first-prompt.md)) |
+| `src/linux/` | the Linux desktop commands run by compositor binds: `menu` (Omarchy's menu or walker), `waybar`, `ptt` (pw-record, wtype), Hyprland `install`; `overlay.qml` is the dictation overlay, hosted in Quickshell, with the words streamed by `src/wav_stream.zig`; `agent_panel.zig` + `agent_panel.qml` are the create-agent panel (Shift+F9); `bar.qml` is the belt with the agent count in Omarchy's bar |
+| `src/windows/` | the Windows tray daemon (`agent-belt.exe`): notification-area menu and belt icon with the agent count, push-to-talk, Win32 bindings; `gdiplus.zig` holds what the GDI+ surfaces share (ink, shell, core, belt), `overlay.zig` draws the dictation overlay and `create_panel.zig` the create-agent panel |
 | `install.sh` | build, bundle, sign, Keychain, LaunchAgent |
 
 ## Runtime & hosting

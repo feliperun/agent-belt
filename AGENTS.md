@@ -185,6 +185,17 @@ file — keep appending.
   person or company. The repository is public. The detection fixtures in `src/sessions/`
   also need `home-linux`/`home-linux2` (a shared prefix and a numeric suffix, which
   `spokenName` and `resolve` both key off), so change a name there only with the tests.
+- **ZCode and fx take no first prompt on their command line** (`zcode "…"` and `fx "…"`
+  print their help), and DeepSeek Harness (`dsh`) ships no terminal UI at all. tmux types
+  the prompt into ZCode and fx once their screen is stable; DeepSeek runs `--profile
+  headless` then a shell ([ADR 0004](docs/adr/0004-agent-harnesses-and-typed-first-prompt.md),
+  `src/sessions/local.zig`).
+- **Repositories are often grouped** (`~/dev/work/web-app`): the Omarchy panel's repo picker
+  was empty because only the first level under a root was scanned. `findRepos` looks one
+  folder down; keep `listRepos` and `resolveRepo` on it (`src/sessions/local.zig`).
+- **Windows: a screen capture from a DPI-unaware process sees the scaled top-left only**,
+  so a panel that is centered looks cut off. Call `SetProcessDPIAware` in the capturing
+  script before `CopyFromScreen`; the daemon itself is DPI-aware (`overlay.create`).
 
 ---
 
