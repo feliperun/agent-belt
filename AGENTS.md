@@ -196,6 +196,17 @@ file — keep appending.
 - **Windows: a screen capture from a DPI-unaware process sees the scaled top-left only**,
   so a panel that is centered looks cut off. Call `SetProcessDPIAware` in the capturing
   script before `CopyFromScreen`; the daemon itself is DPI-aware (`overlay.create`).
+- **Windows: a login bash costs about 2 s, and `tasklist` about 2 s per call.** The session
+  listing every machine polls every 15 s made a dozen of them (13 s), and the Windows
+  machine stuttered under the load. Queries call `tmux.exe` directly; only `start-server`
+  and `new-session` go through the login bash, so agents inherit its PATH. Called from a
+  native process, an MSYS2 program brace-expands its arguments (`#{session_name}` arrives
+  as `#session_name`): set `MSYS=noglob`, and a UTF-8 `LANG` for the glyphs
+  (`src/sessions/local.zig`).
+- **Windows: a dropped ssh connection leaves its tmux client attached** (its `script`
+  parent dies, the client does not). tmux draws for every client, each at its own size,
+  and the window flickers; the listing detaches clients whose parent is gone
+  (`dropOrphanClients`).
 
 ---
 
