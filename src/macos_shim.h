@@ -47,6 +47,8 @@ const char *mk_update_available(void);
 const char *mk_app_version(void);
 /* Menu bar emoji when idle: 0 nothing, 1 an agent finished, 2 an agent waits. */
 void mk_status_attention(int attention);
+/* Agent sessions on every machine: the count beside the menu bar icon. */
+void mk_status_agents(int count);
 void mk_menu_hide(void);
 void mk_led_start(uint16_t vendor_id, uint16_t product_id);
 void mk_led_status(int status);

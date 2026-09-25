@@ -29,6 +29,8 @@
 @property NSUInteger position;  // 1-based place in the ring, for the HUD
 @property NSString *name;       // readable session title, when the agent's files have one
 @property NSString *detail;     // recap and stats for the menu
+@property NSString *host;       // an agb session opened with `agb attach` (another machine, or detached here)
+@property NSString *session;
 @end
 @implementation MKAgentTarget
 @end
@@ -69,7 +71,7 @@ static NSString *MKToolPath(NSString *name, NSString *overrideVar) {
 
 // Bounded subprocess output and timeout: a stalled app must not block the HID
 // listener or leave an unbounded queue of focus changes. Arguments bypass a shell.
-static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) {
+static NSData *MKRunFor(NSString *path, NSArray<NSString *> *arguments, double timeout) {
     if (!path) return nil;
     NSTask *task = [NSTask new];
     task.executableURL = [NSURL fileURLWithPath:path];
@@ -87,7 +89,7 @@ static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) {
     int fd = pipe.fileHandleForReading.fileDescriptor;
     fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
     NSMutableData *data = [NSMutableData data];
-    double deadline = NSProcessInfo.processInfo.systemUptime + 2.0;
+    double deadline = NSProcessInfo.processInfo.systemUptime + timeout;
     BOOL failed = NO;
     for (;;) {
         uint8_t buffer[16384];
@@ -106,6 +108,8 @@ static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) {
     [pipe.fileHandleForReading closeFile];
     return failed || task.terminationStatus != 0 ? nil : data;
 }
+
+static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) { return MKRunFor(path, arguments, 2.0); }
 
 static NSDictionary *MKOrca(NSArray<NSString *> *arguments) {
     NSData *data = MKRun(MKToolPath(@"orca", @"AGENT_BELT_ORCA_CLI"), [arguments arrayByAddingObject:@"--json"]);
@@ -128,7 +132,7 @@ static NSArray<NSArray<NSString *> *> *MKTmux(NSArray<NSString *> *arguments) {
 // Name of the coding agent a pane is running, from its foreground command.
 static NSString *MKAgentCommand(NSString *command) {
     NSString *name = command.lowercaseString;
-    for (NSString *agent in @[@"claude", @"codex", @"opencode", @"gemini", @"aider", @"amp", @"cursor-agent", @"goose", @"pi", @"omp"])
+    for (NSString *agent in @[@"claude", @"codex", @"zcode", @"fx", @"opencode", @"gemini", @"aider", @"amp", @"cursor-agent", @"goose", @"pi", @"omp"])
         if ([name isEqual:agent]) return agent;
     // Claude Code replaces its process title with its version, e.g. "2.1.280".
     if ([name rangeOfString:@"^[0-9]+\\.[0-9]+\\.[0-9]+$" options:NSRegularExpressionSearch].location != NSNotFound)
@@ -136,14 +140,24 @@ static NSString *MKAgentCommand(NSString *command) {
     return nil;
 }
 
-// Rows of `session, @work_agent, pane_current_command`. A session counts only
-// while some pane runs an agent: the `work` mark survives the agent exiting.
+// The agent of a `session, @work_agent, pane_current_command` row: the
+// session's agb mark while its pane runs something other than a shell (the
+// mark survives the agent exiting; DeepSeek Harness runs as node), else the
+// foreground command.
+static NSString *MKPaneAgent(NSArray<NSString *> *row) {
+    if (row.count < 3) return nil;
+    NSString *agent = MKAgentCommand(row[2]);
+    const BOOL marked = [@[@"claude", @"codex", @"deepseek", @"zcode", @"fx"] containsObject:row[1]];
+    const BOOL shell = [@[@"bash", @"zsh", @"sh", @"fish", @"tmux"] containsObject:row[2]];
+    return marked && (agent || !shell) ? row[1] : agent;
+}
+
 static NSDictionary<NSString *, NSString *> *MKSessionAgents(NSArray<NSArray<NSString *> *> *rows) {
     NSMutableDictionary *agents = [NSMutableDictionary dictionary];
     for (NSArray<NSString *> *row in rows) {
         if (row.count < 3 || agents[row[0]]) continue;
-        NSString *agent = MKAgentCommand(row[2]);
-        if (agent) agents[row[0]] = [@[@"claude", @"codex"] containsObject:row[1]] ? row[1] : agent;
+        NSString *agent = MKPaneAgent(row);
+        if (agent) agents[row[0]] = agent;
     }
     return agents;
 }
@@ -217,7 +231,7 @@ static BOOL MKWaitingScreen(NSString *screen) {
 static NSDictionary<NSString *, NSArray<NSString *> *> *MKSessionAgentPanes(NSArray<NSArray<NSString *> *> *rows) {
     NSMutableDictionary *panes = [NSMutableDictionary dictionary];
     for (NSArray<NSString *> *row in rows)
-        if (row.count >= 5 && !panes[row[0]] && MKAgentCommand(row[2])) panes[row[0]] = @[row[3], row[4]];
+        if (row.count >= 5 && !panes[row[0]] && MKPaneAgent(row)) panes[row[0]] = @[row[3], row[4]];
     return panes;
 }
 
@@ -226,6 +240,49 @@ static BOOL MKLiveTerminal(NSDictionary *terminal) {
            [MKString(terminal[@"handle"]) hasPrefix:@"term_"];
 }
 
+
+// Every machine's agb sessions (`agb _sessions`, an ssh call per machine),
+// refreshed every 15 s on a queue of their own: the menus read the last answer.
+static NSArray<NSDictionary *> *mk_sessions;
+
+static void MKFetchSessions(void) {
+    NSData *data = MKRunFor(NSBundle.mainBundle.executablePath, @[@"_sessions"], 20);
+    id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    NSArray *sessions = [json isKindOfClass:NSDictionary.class] ? MKArray(json[@"sessions"]) : nil;
+    if (!sessions) return; // no answer: keep the last one
+    @synchronized([MKAgentTarget class]) { mk_sessions = sessions; }
+}
+
+static void MKWatchSessions(void) {
+    static dispatch_source_t timer;
+    if (timer) return;
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_queue_create("agent-belt.sessions", DISPATCH_QUEUE_SERIAL));
+    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC, 2 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(timer, ^{ @autoreleasepool { MKFetchSessions(); } });
+    dispatch_resume(timer);
+}
+
+// Sessions no terminal here shows: every other machine's, and this machine's
+// tmux sessions without a client. Opening one runs `agb attach` in a terminal.
+static NSArray<MKAgentTarget *> *MKSessionTargets(NSArray<MKAgentTarget *> *shown) {
+    NSArray *sessions;
+    @synchronized([MKAgentTarget class]) { sessions = mk_sessions ?: @[]; }
+    NSMutableSet *here = [NSMutableSet set];
+    for (MKAgentTarget *target in shown) if (target.tmuxSession) [here addObject:target.tmuxSession];
+    NSMutableArray *targets = [NSMutableArray array];
+    for (NSDictionary *session in sessions) {
+        NSString *name = MKString(session[@"name"]), *host = MKString(session[@"host"]), *agent = MKString(session[@"agent"]);
+        if (!name.length || !host.length || (MKBool(session[@"here"]) && [here containsObject:name])) continue;
+        MKAgentTarget *target = [MKAgentTarget new];
+        target.key = [NSString stringWithFormat:@"session:%@:%@", host, name];
+        target.session = name;
+        target.host = host;
+        target.label = [NSString stringWithFormat:@"%@ · %@", name, agent.length ? agent : @"shell"];
+        target.detail = [NSString stringWithFormat:@"%@ · %@%@", agent.length ? agent : @"shell", host, MKBool(session[@"attached"]) ? @" · attached" : @""];
+        [targets addObject:target];
+    }
+    return targets;
+}
 
 static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
     NSArray *paneRows = MKTmux(@[@"list-panes", @"-a", @"-F",
@@ -280,6 +337,7 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
     [targets sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [outside sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [targets addObjectsFromArray:outside];
+    [targets addObjectsFromArray:MKSessionTargets(targets)];
     return targets;
 }
 
@@ -459,7 +517,18 @@ static BOOL MKFocusFailed(MKAgentTarget *target, const char *step) {
     return NO;
 }
 
+static void MKOpenTerminal(NSString *command, NSString *title);
+static NSString *MKQuote(NSString *s) {
+    return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
 static BOOL MKFocus(MKAgentTarget *target) {
+    if (target.host) {
+        MKOpenTerminal([NSString stringWithFormat:@"%@ attach %@ %@", MKQuote(NSBundle.mainBundle.executablePath),
+                        MKQuote(target.session), MKQuote(target.host)],
+                       [NSString stringWithFormat:@"%@ @ %@", target.session, target.host]);
+        return YES;
+    }
     if (target.app.terminated) return MKFocusFailed(target, "app encerrado");
     if (target.terminal || target.tmuxSession) {
         MKRestoreWindows(target.app);
@@ -584,6 +653,7 @@ static void MKOpened(MKAgentTarget *target, NSArray<MKAgentTarget *> *ring) {
 static void MKEnrich(NSArray<MKAgentTarget *> *ring) {
     NSDictionary<NSString *, MKSessionInfo *> *sessions = MKClaudeSessionInfo();
     for (MKAgentTarget *target in ring) {
+        if (target.host) { target.name = target.session; continue; } // detail set at discovery
         MKSessionInfo *info = target.pane ? sessions[[@"pane:" stringByAppendingString:target.pane]] : nil;
         if (!info && target.terminal) info = sessions[[@"orca:" stringByAppendingString:target.terminal]];
         NSString *agent = [target.label componentsSeparatedByString:@" · "].lastObject;
@@ -793,6 +863,7 @@ int mk_agents_command(int mode, int desktop) {
             fprintf(stderr, "[agent-belt] agents list requer Accessibility\n");
             return -1;
         }
+        MKFetchSessions();
         NSArray *targets = MKDiscover(desktop != 0);
         MKObserve(targets);
         MKDetectWaiting(targets);
@@ -845,9 +916,10 @@ static void MKTakeSnapshot(NSArray<MKAgentTarget *> *ring) {
     NSMutableArray *rows = [NSMutableArray array];
     for (MKAgentTarget *target in ring)
         [rows addObject:@{@"title": MKTitleOf(target), @"detail": target.detail ?: @"",
-                          @"tone": @(target.state), @"key": target.key}];
+                          @"tone": @(target.state), @"key": target.key, @"host": target.host ?: @""}];
     NSString *quota = MKQuotaLine();
     @synchronized([MKAgentTarget class]) { mk_snapshot = rows; mk_snapshot_quota = quota; }
+    mk_status_agents((int)rows.count);
 }
 
 NSArray<NSDictionary *> *MKAgentsSnapshot(void) {
@@ -904,6 +976,7 @@ void mk_agents_monitor(void) {
     static dispatch_source_t timer;
     pthread_once(&once, MKCreateAgentsQueue);
     if (timer) return;
+    MKWatchSessions();
     timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, mk_agents_queue);
     dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC, NSEC_PER_SEC);
     dispatch_source_set_event_handler(timer, ^{

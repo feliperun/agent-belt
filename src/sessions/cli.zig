@@ -19,7 +19,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -62,6 +62,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
         const summary = try intent.summarize(ctx, try std.mem.join(ctx.gpa, " ", rest));
         return print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(summary, .{})}));
     }
+    if (std.mem.eql(u8, verb, "_sessions")) return print(ctx, try sessionsJson(ctx));
     if (std.mem.eql(u8, verb, "_repos-cache")) {
         try intent.refreshCache(ctx, try loadRegistry(ctx), reposOf);
         return 0;
@@ -494,6 +495,19 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
         }
     }
     return .{ .rows = rows.items, .states = states };
+}
+
+/// `agb _sessions`: every machine's sessions as JSON, for the Mac's menus
+/// (the Linux and Windows desktops call `collect` in-process).
+fn sessionsJson(ctx: sys.Ctx) ![]const u8 {
+    const reg = try loadRegistry(ctx);
+    const c = try collect(ctx, reg);
+    const Session = struct { host: []const u8, name: []const u8, agent: []const u8, attached: bool, here: bool };
+    const list = try ctx.gpa.alloc(Session, c.rows.len);
+    for (c.rows, list) |r, *s| s.* = .{ .host = r.host.name, .name = r.name, .agent = r.agent, .attached = r.attached, .here = reg.isSelf(r.host) };
+    var down: std.ArrayList([]const u8) = .empty;
+    for (reg.hosts, c.states) |h, st| if (!st.ok) try down.append(ctx.gpa, h.name);
+    return ctx.fmt("{f}\n", .{std.json.fmt(.{ .sessions = list, .unreachable_hosts = down.items }, .{})});
 }
 
 fn age(ctx: sys.Ctx, created: []const u8) []const u8 {

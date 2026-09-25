@@ -6,6 +6,7 @@ void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (vo
 void mk_led_agents(int attention) { (void)attention; } // led.m
 void mk_menu_show(const char *const *l, const char *const *d, const int *t, int c, int s, const char *f, int k) { (void)l; (void)d; (void)t; (void)c; (void)s; (void)f; (void)k; }
 void mk_status_attention(int a) { (void)a; }
+void mk_status_agents(int count) { (void)count; }
 void mk_menu_hide(void) {}
 void mk_create_panel_show(const char *t) { (void)t; } // create_panel.m
 const char *mk_update_line(void) { return NULL; }

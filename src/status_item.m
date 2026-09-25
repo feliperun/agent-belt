@@ -20,11 +20,13 @@ static void mk_label(NSString *text, NSPoint point, CGFloat size, NSColor *color
     }];
 }
 
+extern void mk_open_terminal(NSString *command, NSString *title);
 static void mk_status_ready(void);
 static void mk_refresh_title(void);
 static void mk_install_status_menu(void);
 static int mk_attention;        // 0 nothing, 1 an agent finished, 2 an agent waits
 static int mk_dictation_status; // mk_status_set: nonzero while dictating
+static int mk_agent_count;      // agent sessions on every machine, beside the icon
 
 
 // The overlay's core: a halo and three drifting contours that breathe with the
@@ -782,7 +784,9 @@ static void mk_refresh_title(void) {
         else if (mk_attention == 1) { light = NSColor.systemGreenColor; tip = @"Agent Belt: an agent finished"; }
     }
     mk_status_item.button.image = mk_belt_icon(light);
-    mk_status_item.button.title = @"";
+    mk_status_item.button.imagePosition = NSImageLeft;
+    // The count of agents, as the Linux bar and the Windows tray icon show it.
+    mk_status_item.button.title = mk_agent_count > 0 ? [NSString stringWithFormat:@"%d", mk_agent_count] : @"";
     mk_status_item.button.toolTip = tip;
 }
 
@@ -799,21 +803,24 @@ static void mk_refresh_title(void) {
 - (void)menuNeedsUpdate:(NSMenu *)menu {
     [menu removeAllItems];
     const char *update = mk_update_available();
-    NSMenuItem *header = [menu addItemWithTitle:[NSString stringWithFormat:@"Agent Belt %s", mk_app_version()] action:nil keyEquivalent:@""];
+    NSArray<NSDictionary *> *agents = MKAgentsSnapshot();
+    NSMenuItem *header = [menu addItemWithTitle:[NSString stringWithFormat:@"Agent Belt %s · %lu agent%@", mk_app_version(),
+                                                 (unsigned long)agents.count, agents.count == 1 ? @"" : @"s"] action:nil keyEquivalent:@""];
     header.enabled = NO;
     [menu addItem:NSMenuItem.separatorItem];
-    NSArray<NSDictionary *> *agents = MKAgentsSnapshot();
     NSArray *dots = @[@"⚪", @"🔵", @"🟢", @"🔴"], *states = @[@"idle", @"working", @"finished", @"waiting for you"];
     if (!agents.count) [menu addItemWithTitle:@"No agents running" action:nil keyEquivalent:@""].enabled = NO;
     for (NSDictionary *agent in agents) {
         const int tone = MAX(0, MIN(3, [agent[@"tone"] intValue]));
-        NSMenuItem *item = [self add:menu title:[NSString stringWithFormat:@"%@  %@", dots[tone], agent[@"title"]] action:@selector(openAgent:)];
+        NSString *host = [agent[@"host"] length] ? [@" · " stringByAppendingString:agent[@"host"]] : @"";
+        NSMenuItem *item = [self add:menu title:[NSString stringWithFormat:@"%@  %@%@", dots[tone], agent[@"title"], host] action:@selector(openAgent:)];
         item.representedObject = agent[@"key"];
         item.toolTip = [NSString stringWithFormat:@"%@ · %@", states[tone], agent[@"detail"]];
     }
     [menu addItem:NSMenuItem.separatorItem];
     [self add:menu title:@"New agent…   hold 5" action:@selector(newAgent:)];
     [self add:menu title:@"Agent menu   ⌃⌥Space" action:@selector(floatingMenu:)];
+    [self add:menu title:@"Sessions in a terminal" action:@selector(sessions:)];
     NSString *quota = MKAgentsQuotaLine();
     if (quota) {
         [menu addItem:NSMenuItem.separatorItem];
@@ -827,6 +834,13 @@ static void mk_refresh_title(void) {
 }
 - (void)openAgent:(NSMenuItem *)item { MKAgentsOpenKey(item.representedObject); }
 - (void)floatingMenu:(id)sender { (void)sender; mk_agents_menu_click(); }
+- (void)sessions:(id)sender {
+    (void)sender;
+    NSString *agb = [NSString stringWithFormat:@"'%@'", [NSBundle.mainBundle.executablePath stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        mk_open_terminal([agb stringByAppendingString:@" sessions"], @"Agent Belt sessions");
+    });
+}
 - (void)newAgent:(id)sender {
     (void)sender;
     mk_create_panel_show(""); // the same panel as key 5, to type into
@@ -849,6 +863,16 @@ static void mk_install_status_menu(void) {
     NSMenu *menu = [NSMenu new];
     menu.delegate = controller;
     mk_status_item.menu = menu;
+}
+
+void mk_status_agents(int count) {
+    if (!mk_status_runloop) return;
+    CFRunLoopPerformBlock(mk_status_runloop, kCFRunLoopCommonModes, ^{
+        if (mk_agent_count == count) return;
+        mk_agent_count = count;
+        mk_refresh_title();
+    });
+    CFRunLoopWakeUp(mk_status_runloop);
 }
 
 void mk_status_attention(int attention) {

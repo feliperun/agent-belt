@@ -22,3 +22,4 @@ void MKAgentsOpenKey(NSString *k) { (void)k; }
 NSString *MKAgentsQuotaLine(void) { return nil; }
 void mk_create_panel_show(const char *t) { (void)t; }
 void mk_create_panel_listen(void) {}
+void mk_open_terminal(NSString *c, NSString *t) { (void)c; (void)t; }
