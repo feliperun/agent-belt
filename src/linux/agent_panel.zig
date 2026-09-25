@@ -27,20 +27,14 @@ pub fn main(ctx: sys.Ctx, argv: []const []const u8) !u8 {
     if (std.mem.eql(u8, argv[0], "_agent-panel")) return host(ctx);
     const hold = std.mem.eql(u8, argv[0], "agent-ptt") and !(argv.len > 1 and std.mem.eql(u8, argv[1], "stop"));
     try sys.writeFileAtomic(ctx, try desktop.runtimeFile(ctx, "agb-agent.rec"), if (hold) "1" else "0");
+    // A host already open keeps the panel: this one sees its lock and leaves.
     if (hold or std.mem.eql(u8, argv[0], "agent-panel")) {
-        if (!hostAlive(ctx)) _ = std.process.spawn(ctx.io, .{ .argv = &.{ desktop.selfExe(ctx), "_agent-panel" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch |err| {
+        _ = std.process.spawn(ctx.io, .{ .argv = &.{ desktop.selfExe(ctx), "_agent-panel" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch |err| {
             desktop.notify(ctx, "Agent Belt", ctx.fmt("could not open the panel: {s}", .{@errorName(err)}) catch "", 5000);
             return 1;
         };
     }
     return 0;
-}
-
-fn hostAlive(ctx: sys.Ctx) bool {
-    const text = sys.readFile(ctx, desktop.runtimeFile(ctx, "agb-agent.pid") catch return false) orelse return false;
-    const pid = std.fmt.parseInt(i32, std.mem.trim(u8, text, " \n"), 10) catch return false;
-    const stat = sys.readFile(ctx, ctx.fmt("/proc/{d}/cmdline", .{pid}) catch return false) orelse return false;
-    return std.mem.indexOf(u8, stat, "_agent-panel") != null;
 }
 
 /// A subprocess run off the UI loop (`agb _intent`, `agb _summary`).
@@ -262,7 +256,9 @@ fn host(ctx: sys.Ctx) !u8 {
         desktop.notify(ctx, "Agent Belt", "the new agent panel needs Quickshell (Omarchy ships it)", 5000);
         return 1;
     }
-    try sys.writeFileAtomic(ctx, try desktop.runtimeFile(ctx, "agb-agent.pid"), try ctx.fmt("{d}", .{std.os.linux.getpid()}));
+    // One panel: a second press while it is open adds to it (agb-agent.rec).
+    const lock = sys.lockInstance(ctx, try desktop.runtimeFile(ctx, "agb-agent.lock")) orelse return 0;
+    defer lock.close(ctx.io);
     // The repo index for detection, refreshed in the background.
     _ = std.process.spawn(ctx.io, .{ .argv = &.{ desktop.selfExe(ctx), "_repos-cache" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
     const reg = cli.loadRegistry(ctx) catch null;
@@ -278,10 +274,7 @@ fn host(ctx: sys.Ctx) !u8 {
     try ctx.env.put("AGB_PANEL_STATE", state_path);
     try ctx.env.put("AGB_PANEL_CMD", cmd_path);
     var shell = try std.process.spawn(ctx.io, .{ .argv = &.{ "quickshell", "-p", qml }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
-    defer {
-        shell.kill(ctx.io);
-        std.Io.Dir.cwd().deleteFile(ctx.io, desktop.runtimeFile(ctx, "agb-agent.pid") catch "") catch {};
-    }
+    defer shell.kill(ctx.io);
 
     const opened = self.now();
     while (self.now() - opened < 15 * std.time.ns_per_min) {

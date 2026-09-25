@@ -165,6 +165,13 @@ pub fn readFile(ctx: Ctx, path: []const u8) ?[]u8 {
     return std.Io.Dir.cwd().readFileAlloc(ctx.io, path, ctx.gpa, .limited(64 * 1024 * 1024)) catch null;
 }
 
+/// Holds an exclusive lock on `path` for as long as the returned file stays
+/// open (the process's life): null when another process holds it. One panel
+/// host however many times its key is pressed; the lock goes with the process.
+pub fn lockInstance(ctx: Ctx, path: []const u8) ?std.Io.File {
+    return std.Io.Dir.cwd().createFile(ctx.io, path, .{ .truncate = false, .lock = .exclusive, .lock_nonblocking = true }) catch null;
+}
+
 /// Writes through a temporary file and a rename, so a crash never leaves a
 /// half-written file behind.
 pub fn writeFileAtomic(ctx: Ctx, path: []const u8, bytes: []const u8) !void {
@@ -278,4 +285,19 @@ test "quoting, paths and slugs" {
     try std.testing.expect(validRepo("C:/dev/coreum"));
     try std.testing.expect(!validRepo("x; rm -rf ~"));
     try std.testing.expect(!validRepo("C:\\dev"));
+}
+
+test "one instance holds the lock" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fs.path.join(ctx.gpa, &.{ ".zig-cache", "tmp", &tmp.sub_path, "panel.lock" });
+    const first = lockInstance(ctx, path) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(lockInstance(ctx, path) == null);
+    first.close(ctx.io);
+    const again = lockInstance(ctx, path) orelse return error.TestUnexpectedResult;
+    again.close(ctx.io);
 }
