@@ -9,6 +9,7 @@ const deepgram = @import("../deepgram.zig");
 const config = @import("../config.zig");
 const audio_level = @import("../audio_level.zig");
 const history = @import("../history.zig");
+const wav_stream = @import("../wav_stream.zig");
 
 pub fn isCommand(name: []const u8) bool {
     for ([_][]const u8{ "menu", "waybar", "ptt", "install", "uninstall", "preview", "_overlay" }) |c| if (std.mem.eql(u8, name, c)) return true;
@@ -182,15 +183,14 @@ fn pttStart(ctx: sys.Ctx) !u8 {
         notify(ctx, "Agent Belt", "pw-record (PipeWire) is missing", 5000);
         return 1;
     }
+    for ([_][]const u8{ "agb-ptt.stream", "agb-ptt.final" }) |f| std.Io.Dir.cwd().deleteFile(ctx.io, try runtimeFile(ctx, f)) catch {};
     const wav = try runtimeFile(ctx, "agb-ptt.wav");
     const child = try std.process.spawn(ctx.io, .{ .argv = &.{ "pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", wav }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
     try sys.writeFileAtomic(ctx, try runtimeFile(ctx, "agb-ptt.pid"), try ctx.fmt("{d}", .{child.id.?}));
     setMode(ctx, 1);
-    if (sys.which(ctx, "quickshell") != null) {
-        _ = std.process.spawn(ctx.io, .{ .argv = &.{ selfExe(ctx), "_overlay" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
-    } else {
-        notify(ctx, "🎙️ Listening", "release the shortcut to transcribe", 60_000);
-    }
+    // The host streams the words while recording, and draws them if it can.
+    _ = std.process.spawn(ctx.io, .{ .argv = &.{ selfExe(ctx), "_overlay" }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch {};
+    if (sys.which(ctx, "quickshell") == null) notify(ctx, "🎙️ Listening", "release the shortcut to transcribe", 60_000);
     return 0;
 }
 
@@ -226,14 +226,16 @@ fn pttStop(ctx: sys.Ctx) !u8 {
         notify(ctx, "Agent Belt", "no Deepgram key: DEEPGRAM_API_KEY=… agb install", 6000);
         return 1;
     };
-    setMode(ctx, 2);
     defer setMode(ctx, 0);
-    if (sys.which(ctx, "quickshell") == null) notify(ctx, "🔐 Transcribing", "deciphering your voice…", 30_000);
-    const defaults = config.Config{};
-    const client = deepgram.Client{ .io = ctx.io, .allocator = ctx.gpa, .api_key = key, .model = defaults.deepgram_model, .language = defaults.deepgram_language, .smart_format = defaults.deepgram_smart_format, .mip_opt_out = defaults.deepgram_mip_opt_out };
-    const text = client.transcribe(wav) catch |err| {
-        notify(ctx, "Agent Belt", ctx.fmt("transcription failed: {s}", .{@errorName(err)}) catch "", 5000);
-        return 1;
+    const text = streamedText(ctx) orelse batch: {
+        setMode(ctx, 2);
+        if (sys.which(ctx, "quickshell") == null) notify(ctx, "🔐 Transcribing", "deciphering your voice…", 30_000);
+        const defaults = config.Config{};
+        const client = deepgram.Client{ .io = ctx.io, .allocator = ctx.gpa, .api_key = key, .model = defaults.deepgram_model, .language = defaults.deepgram_language, .smart_format = defaults.deepgram_smart_format, .mip_opt_out = defaults.deepgram_mip_opt_out };
+        break :batch client.transcribe(wav) catch |err| {
+            notify(ctx, "Agent Belt", ctx.fmt("transcription failed: {s}", .{@errorName(err)}) catch "", 5000);
+            return 1;
+        };
     };
     if (text.len == 0) {
         notify(ctx, "Agent Belt", "no speech detected", 1500);
@@ -257,17 +259,38 @@ fn pttStop(ctx: sys.Ctx) !u8 {
     return 0;
 }
 
+/// The words the overlay host streamed: it is told the recording ended (mode
+/// 3) and writes the final transcript. Null when the stream did not open.
+fn streamedText(ctx: sys.Ctx) ?[]const u8 {
+    const status_path = runtimeFile(ctx, "agb-ptt.stream") catch return null;
+    const final_path = runtimeFile(ctx, "agb-ptt.final") catch return null;
+    // A stream still opening gets a moment (TLS and the handshake).
+    var waited: usize = 0;
+    while (sys.readFile(ctx, status_path) == null and waited < 30) : (waited += 1) std.Io.sleep(ctx.io, .fromMilliseconds(50), .awake) catch {};
+    const status = sys.readFile(ctx, status_path) orelse return null;
+    if (!std.mem.eql(u8, status, "open")) return null;
+    setMode(ctx, 3);
+    waited = 0;
+    while (waited < 120) : (waited += 1) {
+        if (sys.readFile(ctx, final_path)) |text| return text;
+        if (std.mem.eql(u8, sys.readFile(ctx, status_path) orelse "", "failed")) return null;
+        std.Io.sleep(ctx.io, .fromMilliseconds(50), .awake) catch {};
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------- overlay
 
-/// ptt start/stop tell the overlay what is happening: 1 listening,
-/// 2 transcribing, 0 done.
+/// ptt start/stop tell the overlay host what is happening: 1 listening,
+/// 2 transcribing the whole recording, 3 recording ended while streaming (the
+/// host sends the rest and writes the final words), 0 done.
 fn setMode(ctx: sys.Ctx, mode: u8) void {
     sys.writeFileAtomic(ctx, runtimeFile(ctx, "agb-ptt.mode") catch return, &.{'0' + mode}) catch {};
 }
 
 fn readMode(ctx: sys.Ctx) u8 {
     const text = sys.readFile(ctx, runtimeFile(ctx, "agb-ptt.mode") catch return 0) orelse return 0;
-    return if (text.len > 0 and text[0] >= '0' and text[0] <= '2') text[0] - '0' else 0;
+    return if (text.len > 0 and text[0] >= '0' and text[0] <= '3') text[0] - '0' else 0;
 }
 
 /// The level of the last 20 ms pw-record wrote.
@@ -281,39 +304,78 @@ fn recordingLevel(ctx: sys.Ctx) f64 {
     return @as(f64, @floatFromInt(audio_level.permille(buf[0..n]))) / 1000.0;
 }
 
-/// Hosts the QML overlay (src/linux/overlay.qml) in Quickshell and feeds it
-/// the mode and microphone level about 30 times a second until dictation ends.
-/// `agb preview` plays it with a synthetic voice, as on the Mac.
+/// Hosts a recording: streams it to Deepgram (src/wav_stream.zig) and, with
+/// Quickshell, the QML overlay (src/linux/overlay.qml), fed the mode, the
+/// microphone level, the time and the words about 30 times a second until
+/// dictation ends. `agb preview` plays it with a synthetic voice, as on the Mac.
 fn overlayHost(ctx: sys.Ctx, demo: bool) !u8 {
-    if (sys.which(ctx, "quickshell") == null) {
+    const draws = sys.which(ctx, "quickshell") != null;
+    if (demo and !draws) {
         std.debug.print("the dictation overlay needs Quickshell (Omarchy ships it)\n", .{});
         return 1;
     }
-    const qml = try runtimeFile(ctx, "agb-overlay.qml");
+    var live: ?wav_stream.Live = null;
+    if (!demo) if (deepgramKey(ctx)) |key| {
+        live = .{
+            .io = ctx.io,
+            .env = ctx.env,
+            .key = key,
+            .wav_path = try runtimeFile(ctx, "agb-ptt.wav"),
+            .status_path = try runtimeFile(ctx, "agb-ptt.stream"),
+            .final_path = try runtimeFile(ctx, "agb-ptt.final"),
+        };
+        live.?.start() catch {
+            live = null;
+        };
+    };
     const state = try runtimeFile(ctx, "agb-overlay.state");
-    try sys.writeFileAtomic(ctx, qml, @embedFile("overlay.qml"));
-    try sys.writeFileAtomic(ctx, state, "0 0");
-    try ctx.env.put("AGB_OVERLAY_STATE", state);
-    var shell = try std.process.spawn(ctx.io, .{ .argv = &.{ "quickshell", "-p", qml }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
+    var shell: ?std.process.Child = null;
+    if (draws) {
+        const qml = try runtimeFile(ctx, "agb-overlay.qml");
+        try sys.writeFileAtomic(ctx, qml, @embedFile("overlay.qml"));
+        try sys.writeFileAtomic(ctx, state, "0 0 0");
+        try ctx.env.put("AGB_OVERLAY_STATE", state);
+        shell = try std.process.spawn(ctx.io, .{ .argv = &.{ "quickshell", "-p", qml }, .environ_map = ctx.env, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore });
+    }
     const started = std.Io.Clock.real.now(ctx.io).toNanoseconds();
+    var released: ?f64 = null;
     while (true) {
         const elapsed: f64 = @as(f64, @floatFromInt(std.Io.Clock.real.now(ctx.io).toNanoseconds() - started)) / 1e9;
-        const mode: u8 = if (demo) (if (elapsed < 3.5) 1 else if (elapsed < 6.5) 2 else 0) else readMode(ctx);
+        const mode: u8 = if (demo) (if (elapsed < 5) 1 else if (elapsed < 6.5) 3 else 0) else readMode(ctx);
         if (mode == 0 or elapsed > 180) break;
+        if (mode != 1 and released == null) released = elapsed;
+        if (mode == 3) if (live) |*l| l.finish();
+        if (!draws) {
+            try std.Io.sleep(ctx.io, .fromMilliseconds(33), .awake);
+            continue;
+        }
         // The preview voice: syllables that grow louder, like the macOS preview.
         const level = if (mode != 1) 0 else if (demo)
             0.04 + (0.25 + 0.6 * @min(1, elapsed / 3)) * std.math.pow(f64, @max(0, @sin(elapsed * 16)), 0.6)
         else
             recordingLevel(ctx);
-        try sys.writeFileAtomic(ctx, state, try ctx.fmt("{d} {d:.3}", .{ mode, level }));
+        const words = if (demo) demoWords(elapsed) else if (live) |*l| l.snapshot(ctx.gpa) else "";
+        // Streaming, the recording's end is not "Transcribing": the words are there.
+        const shown: u8 = if (mode == 3) 1 else mode;
+        try sys.writeFileAtomic(ctx, state, try ctx.fmt("{d} {d:.3} {d:.1}\n{s}", .{ shown, level, released orelse elapsed, words }));
         try std.Io.sleep(ctx.io, .fromMilliseconds(33), .awake);
     }
-    try sys.writeFileAtomic(ctx, state, "0 0");
-    try std.Io.sleep(ctx.io, .fromMilliseconds(220), .awake); // the fade out
-    try sys.writeFileAtomic(ctx, state, "-1 0");
-    try std.Io.sleep(ctx.io, .fromMilliseconds(150), .awake);
-    shell.kill(ctx.io);
+    if (shell) |*sh| {
+        try sys.writeFileAtomic(ctx, state, "0 0 0");
+        try std.Io.sleep(ctx.io, .fromMilliseconds(220), .awake); // the fade out
+        try sys.writeFileAtomic(ctx, state, "-1 0 0");
+        try std.Io.sleep(ctx.io, .fromMilliseconds(150), .awake);
+        sh.kill(ctx.io);
+    }
     return 0;
+}
+
+/// The preview's words, arriving as if spoken.
+fn demoWords(elapsed: f64) []const u8 {
+    const phrase = "Agent Belt types what you say while you are still saying it, then pastes it where you are.";
+    var end: usize = @intFromFloat(@min(@as(f64, @floatFromInt(phrase.len)), elapsed * 22));
+    while (end < phrase.len and phrase[end] != ' ') end += 1;
+    return phrase[0..end];
 }
 
 // ---------------------------------------------------------------- install

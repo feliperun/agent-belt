@@ -5,12 +5,12 @@ leaves this file (the CHANGELOG records it).
 
 ## Next
 
-### Real-time dictation on Windows and Linux
+### Real-time dictation on Windows
 
-On the Mac the words stream into the overlay while the key is held and are typed on release
-(`src/live_recording.zig` over `src/transcribe_stream.zig`). The Windows tray and the Linux
-bindings still send the recording whole on release; the streaming client is portable, so
-they can show the words live the same way.
+On the Mac and on Linux the words stream into the overlay while the key is held and are
+typed on release (`src/live_recording.zig`, `src/wav_stream.zig`, both over
+`src/transcribe_stream.zig`). The Windows tray still sends the recording whole on release;
+the streaming client is portable, so it can show the words live the same way.
 
 ### Quota and reset watch
 

@@ -1,8 +1,10 @@
 // Agent Belt's dictation overlay on Linux, drawn like the macOS one
 // (src/status_item.m): a core that breathes with the voice, ribbons that follow
-// it, and a phrase that keeps deciphering while the text is on its way.
-// agb writes "<mode> <level>" to $AGB_OVERLAY_STATE: mode 1 listening,
-// 2 transcribing, 0 hidden, -1 quit; level 0..1.
+// it across the pill, the words as they stream in below, a discreet timer, and
+// a phrase that keeps deciphering while a whole recording is transcribed.
+// agb writes "<mode> <level> <seconds>" and then the words to
+// $AGB_OVERLAY_STATE: mode 1 listening, 2 transcribing, 0 hidden, -1 quit;
+// level 0..1.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -12,6 +14,8 @@ ShellRoot {
     id: root
     property int mode: 0
     property real level: 0
+    property real seconds: 0
+    property string words: ""
     property real releaseLevel: 0
     property real motion: 0
     property real previousTarget: 0
@@ -29,8 +33,11 @@ ShellRoot {
         interval: 16; running: true; repeat: true
         onTriggered: {
             state.reload()
-            const parts = state.text().trim().split(" ")
+            const all = state.text()
+            const nl = all.indexOf("\n")
+            const parts = (nl < 0 ? all : all.slice(0, nl)).trim().split(" ")
             const m = parseInt(parts[0]) || 0
+            if (m > 0) { root.seconds = parseFloat(parts[2]) || 0; root.words = nl < 0 ? "" : all.slice(nl + 1) }
             if (m === -1) { Qt.quit(); return }
             const now = Date.now() / 1000
             const dt = Math.min(0.1, now - root.lastTick)
@@ -52,8 +59,9 @@ ShellRoot {
         visible: root.mode > 0
         anchors { top: true; right: true }
         margins { top: 14; right: 18 }
-        implicitWidth: 252
-        implicitHeight: 78
+        // Born at full size: the words have room to arrive without it growing.
+        implicitWidth: 380
+        implicitHeight: 78 + 7 * 17 + 12
         color: "transparent"
         exclusionMode: ExclusionMode.Normal // below the bar, as on the Mac
         WlrLayershell.layer: WlrLayer.Overlay
@@ -61,11 +69,14 @@ ShellRoot {
         WlrLayershell.namespace: "agent-belt"
         mask: Region {}
 
-        Canvas {
-            id: canvas
+        Item {
             anchors.fill: parent
             opacity: root.mode > 0 ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.InOutQuad } }
+
+        Canvas {
+            id: canvas
+            anchors.fill: parent
 
             onPaint: {
                 const ctx = getContext("2d")
@@ -90,6 +101,12 @@ ShellRoot {
                 ctx.fillStyle = root.ink(0.92)
                 ctx.font = "500 12px sans-serif"
                 ctx.fillText(root.mode === 1 ? "Listening" : "Transcribing", 65, 30)
+                // How long the recording is: small, quiet, at the right of the label.
+                const s = Math.floor(root.seconds)
+                const clock = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
+                ctx.font = "400 10.5px monospace"
+                ctx.fillStyle = root.ink(0.42)
+                ctx.fillText(clock, width - 26 - ctx.measureText(clock).width, 30)
                 drawSignal(ctx, t, morph)
             }
 
@@ -142,7 +159,9 @@ ShellRoot {
                         const y = 50 - amplitude * (Math.sin(u * (4 + detail * 2) * Math.PI - travel + layer * 0.6) * 0.72 +
                                                     Math.sin(u * 9 * Math.PI + travel * 0.6) * 0.28)
                         const inset = 28 * root.ease(morph * 2)
-                        const x = 66 + inset + u * (160 - inset)
+                        // Across the pill, whatever its width.
+                        const span = width - 66 - 26
+                        const x = 66 + inset + u * (span - inset)
                         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
                     }
                     ctx.strokeStyle = root.ink((0.7 - layer * 0.19) * (1 - morph))
@@ -173,6 +192,25 @@ ShellRoot {
                     ctx.fillText(glyph, 66 + i * 7.4, 57)
                 }
             }
+        }
+
+        // The words so far, under the waveform; when they overflow, the latest lines.
+        Item {
+            x: 22; y: 74
+            width: parent.width - 44
+            height: 7 * 17
+            clip: true
+            Text {
+                width: parent.width
+                y: Math.min(0, parent.height - implicitHeight)
+                text: root.words
+                wrapMode: Text.Wrap
+                color: Qt.rgba(184 / 255, 201 / 255, 245 / 255, 0.86)
+                font.pixelSize: 13
+                lineHeight: 17
+                lineHeightMode: Text.FixedHeight
+            }
+        }
         }
     }
 }

@@ -110,7 +110,7 @@ installs it; then, with `DEEPGRAM_API_KEY` set, `agb install` saves the key
 
 | Shortcut | Action |
 |---|---|
-| hold `Ctrl+Alt+D` | dictation: `pw-record` while held, Deepgram, typed with `wtype`, with the Mac's overlay (drawn by Quickshell; notifications without it) |
+| hold `Ctrl+Alt+D` | dictation: `pw-record` while held, the words streaming from Deepgram into the Mac's overlay (drawn by Quickshell; notifications without it), typed with `wtype` on release |
 | `Ctrl+Alt+Space` | `agb menu`: the sessions of every machine and **New agent…** in walker (or fuzzel, wofi, rofi) |
 | `Ctrl+Alt+↑` | `agb sessions` in a terminal |
 
