@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.0](https://github.com/feliperun/agent-belt/compare/v0.4.1...v0.5.0) (2026-09-25)
+
+
+### Features
+
+* **linux:** the belt with the agent count in Omarchy's bar, and the full menu ([c4e0b79](https://github.com/feliperun/agent-belt/commit/c4e0b7981f49e74eef840c01f303865c738c7198))
+* **macos:** light the keys for other machines' agents and open each session once ([6775c30](https://github.com/feliperun/agent-belt/commit/6775c3046a0805ccfadbbbe224d9fe53c0713a8b))
+* **macos:** list every machine's sessions and show the agent count ([9f2cce8](https://github.com/feliperun/agent-belt/commit/9f2cce80e64b20fb7c0ba2256596eb956ecef731))
+* **sessions:** add the deepseek, zcode and fx harnesses ([3140190](https://github.com/feliperun/agent-belt/commit/31401908f82f91dedfefc529fdf36a7816d7ad95))
+* **sessions:** report whether each session's agent is working ([1739c21](https://github.com/feliperun/agent-belt/commit/1739c21ead772693bd49bdcecdd35e5ede65d93b))
+* **windows:** bring the create-agent panel and the tray to the other platforms' design ([15758ee](https://github.com/feliperun/agent-belt/commit/15758ee6b6fe164bc51b6a1c9e9bf813d1e5a7ac))
+
+
+### Bug Fixes
+
+* light the keys again for finished and waiting agents ([4bc5568](https://github.com/feliperun/agent-belt/commit/4bc556846d6bbca15d79ffdd3f6265fc003ab8e8))
+* **sessions:** find repositories one folder down under the repo roots ([abc5b56](https://github.com/feliperun/agent-belt/commit/abc5b56d995a6d8f8302b779d84179ea55df34ad))
+* **sessions:** stop Windows sessions from stuttering ([b83b9e4](https://github.com/feliperun/agent-belt/commit/b83b9e4a95f1f6c3677175e2705f08d77f32ce13))
+
 ## [0.4.1](https://github.com/feliperun/agent-belt/compare/v0.4.0...v0.4.1) (2026-09-25)
 
 
