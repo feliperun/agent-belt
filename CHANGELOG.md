@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/feliperun/agent-belt/compare/v0.4.0...v0.4.1) (2026-09-25)
+
+
+### Documentation
+
+* license the project under MIT ([fa77cdb](https://github.com/feliperun/agent-belt/commit/fa77cdb6de79ad03583fec956f4245e73c8bc380))
+
 ## [0.4.0](https://github.com/feliperun/agent-belt/compare/v0.3.0...v0.4.0) (2026-09-25)
 
 
