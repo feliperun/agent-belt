@@ -186,15 +186,21 @@ Scope of this pass: `src/history.zig`, `src/linux/`, `src/windows/`,
   `/proc/<pid>/cmdline` on Linux, and on macOS `ps -axo args` shows other
   users' command lines, so any local account polling `ps` collects what was
   dictated.
-- **fix:** not changed in this pass. The right shape exists in the codebase
-  already: `src/sessions/intent.zig` passes the same request to the agent CLIs
-  through `AGB_TASK`/`AGB_REQUEST`, and `/proc/<pid>/environ` is readable only
-  by its owner. Moving `_intent`, `_summary` and `new --prompt` to that pattern
-  needs the reading side, `src/sessions/cli.zig`, which is outside this node's
-  write roots; `wtype` accepts the text only as an argument, so Linux typing
-  cannot avoid it without dropping the feature.
+- **fix:** not changed. Two halves, and they are accepted for different reasons.
+  Linux typing is unavoidable: `wtype` and `ydotool type` take the text only as
+  an argument, so the only way to keep it out of `ps` is to drop dictation on
+  Linux. The `_intent`, `_summary` and `new --prompt` calls could move to the
+  shape `src/sessions/intent.zig` already uses — the request in `AGB_TASK`/
+  `AGB_REQUEST`, since `/proc/<pid>/environ` is readable only by its owner —
+  but that rewrites the panel↔CLI protocol across `src/create_panel.m`
+  (AppKit), `src/linux/agent_panel.zig` (Quickshell) and `src/sessions/cli.zig`
+  at once. Neither panel has a test and neither can be driven from a review
+  run, so a silent mistake there stops agent creation, the product's headline
+  feature, for every user. **This half is deferred, not resolved**: it wants a
+  node that owns the panels and can exercise them end to end. Until then the
+  window is a local account polling `ps` while someone dictates.
 - **status:** accepted
-- **proof:** command: `bash -c 'grep -q "AGB_REQUEST" src/sessions/intent.zig'` (the pattern the fix should follow; the exposure itself stands until cli.zig changes)
+- **proof:** command: `grep -q '"wtype", "-s", "120", "--", text' src/linux/desktop.zig`
 
 ### LDS-13. The last spoken request kept for ever in ~/Library/Caches, mode 0755
 - **severity:** medium
@@ -206,11 +212,14 @@ Scope of this pass: `src/history.zig`, `src/linux/`, `src/windows/`,
   outside the 60-day store, and readable by anyone who can reach that directory
   (today only the owner, because `~/Library` is 0700 — the file's own mode
   does not protect it).
-- **fix:** not changed in this pass: `src/agent_switcher.m` is outside this
-  node's write roots. It should be written 0700 and deleted after the terminal
-  opens.
-- **status:** accepted
-- **proof:** command: `bash -c 'grep -q "NSFilePosixPermissions: @0755" src/agent_switcher.m'` (exits 0 while the defect stands; the fix inverts it)
+- **fix:** fixed in the consolidation pass, which owns `src/`. The cache
+  directory is created `0700`, the script is written `0700` instead of `0755`,
+  and its first line is `rm -f "$0"`, so the request is gone from disk the
+  moment Terminal runs it — zsh buffers a two-line script whole before the
+  first command executes, so the later lines still run. Verified with a
+  throwaway script under `/bin/zsh -l`.
+- **status:** fixed
+- **proof:** command: `! grep -q 'NSFilePosixPermissions: @0755' src/agent_switcher.m && grep -q 'zsh -l\\nrm -f' src/agent_switcher.m && [ "$(grep -c 'NSFilePosixPermissions: @0700' src/agent_switcher.m)" = 2 ]`
 
 ## Checked, no finding
 

@@ -933,11 +933,15 @@ static void MKOpenTerminal(NSString *command, NSString *title) {
         MKBringToFront(orca);
         return;
     }
-    // No Orca: a .command file opens in Terminal.
+    // No Orca: a .command file opens in Terminal. It carries what was dictated,
+    // so it is the owner's alone and removes itself the moment it runs — zsh has
+    // a two-line script buffered whole before the first command executes.
     NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES
+                                             attributes:@{NSFilePosixPermissions: @0700} error:nil];
     NSString *script = [dir stringByAppendingPathComponent:@"new-agent.command"];
-    [[NSString stringWithFormat:@"#!/bin/zsh -l\n%@\n", command] writeToFile:script atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:script error:nil];
+    [[NSString stringWithFormat:@"#!/bin/zsh -l\nrm -f \"$0\"\n%@\n", command] writeToFile:script atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [NSFileManager.defaultManager setAttributes:@{NSFilePosixPermissions: @0700} ofItemAtPath:script error:nil];
     [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:script]];
 }
 
