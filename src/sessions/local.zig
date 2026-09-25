@@ -99,30 +99,46 @@ pub fn repoRoots(ctx: sys.Ctx) ![]const []const u8 {
     return roots.items;
 }
 
-/// Git repositories directly under the repo roots.
-pub fn listRepos(ctx: sys.Ctx) ![]const []const u8 {
-    var names: std.ArrayList([]const u8) = .empty;
-    for (try repoRoots(ctx)) |root| {
-        var dir = std.Io.Dir.cwd().openDir(ctx.io, root, .{ .iterate = true }) catch continue;
-        defer dir.close(ctx.io);
-        var it = dir.iterate();
-        while (it.next(ctx.io) catch null) |entry| {
-            if (entry.kind != .directory and entry.kind != .sym_link) continue;
-            // A directory .git: a repository. A worktree (a session's) has a .git file.
-            if (!sys.isDir(ctx, try ctx.join(&.{ root, entry.name, ".git" }))) continue;
-            var seen = false;
-            for (names.items) |n| if (std.mem.eql(u8, n, entry.name)) {
-                seen = true;
-            };
-            if (!seen) try names.append(ctx.gpa, try ctx.gpa.dupe(u8, entry.name));
-        }
-    }
-    std.mem.sort([]const u8, names.items, {}, lessThan);
-    return names.items;
+pub const Repo = struct { name: []const u8, path: []const u8 };
+
+/// Git repositories under the repo roots: directly inside one, or one folder
+/// down, where people group them by owner or client (~/dev/work/api). The
+/// first repository with a name wins.
+pub fn findRepos(ctx: sys.Ctx) ![]Repo {
+    var repos: std.ArrayList(Repo) = .empty;
+    for (try repoRoots(ctx)) |root| try scanRepos(ctx, root, 2, &repos);
+    std.mem.sort(Repo, repos.items, {}, byName);
+    return repos.items;
 }
 
-fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.lessThan(u8, a, b);
+fn scanRepos(ctx: sys.Ctx, path: []const u8, depth: u8, repos: *std.ArrayList(Repo)) !void {
+    var dir = std.Io.Dir.cwd().openDir(ctx.io, path, .{ .iterate = true }) catch return;
+    defer dir.close(ctx.io);
+    var it = dir.iterate();
+    while (it.next(ctx.io) catch null) |entry| {
+        if (entry.kind != .directory and entry.kind != .sym_link) continue;
+        if (entry.name[0] == '.') continue;
+        const child = try ctx.join(&.{ path, entry.name });
+        const git = try ctx.join(&.{ child, ".git" });
+        // A directory .git: a repository. A worktree (a session's) has a .git file.
+        if (sys.isDir(ctx, git)) {
+            for (repos.items) |r| {
+                if (std.mem.eql(u8, r.name, entry.name)) break;
+            } else try repos.append(ctx.gpa, .{ .name = try ctx.gpa.dupe(u8, entry.name), .path = child });
+        } else if (depth > 1 and !sys.exists(ctx, git)) try scanRepos(ctx, child, depth - 1, repos);
+    }
+}
+
+fn byName(_: void, a: Repo, b: Repo) bool {
+    return std.mem.lessThan(u8, a.name, b.name);
+}
+
+/// The names `agb new` accepts as a repo on this machine.
+pub fn listRepos(ctx: sys.Ctx) ![]const []const u8 {
+    const repos = try findRepos(ctx);
+    const names = try ctx.gpa.alloc([]const u8, repos.len);
+    for (repos, names) |r, *n| n.* = r.name;
+    return names;
 }
 
 fn gitBin(ctx: sys.Ctx) []const u8 {
@@ -144,6 +160,7 @@ pub fn resolveRepo(ctx: sys.Ctx, arg: []const u8) !?[]const u8 {
     const as_path = if (sys.platform == .windows) try sys.fromMsys(ctx, arg) else arg;
     if (gitTop(ctx, as_path)) |top| return top;
     for (try repoRoots(ctx)) |root| if (gitTop(ctx, try ctx.join(&.{ root, arg }))) |top| return top;
+    for (try findRepos(ctx)) |r| if (std.mem.eql(u8, r.name, arg)) return r.path;
     return null;
 }
 
@@ -837,4 +854,27 @@ test "a worktree path cannot write its own Codex trust entry" {
     try std.testing.expectEqualStrings("C:\\\\dev\\\\x", try tomlQuote(ctx, "C:\\dev\\x"));
     try std.testing.expectEqualStrings("a\\\"]\\n[projects.\\\"/\\\"", try tomlQuote(ctx, "a\"]\n[projects.\"/\""));
     try std.testing.expectEqualStrings("/home/alice/dev/web-app", try tomlQuote(ctx, "/home/alice/dev/web-app"));
+}
+
+test "repositories one folder down are found, worktrees are not" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fs.path.join(gpa, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    for ([_][]const u8{ "dev/api/.git", "dev/work/web-app/.git", "dev/work/deep/nested/.git", "dev/.hidden/.git" }) |d|
+        try std.Io.Dir.cwd().createDirPath(std.testing.io, try std.fs.path.join(gpa, &.{ root, d }));
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, try std.fs.path.join(gpa, &.{ root, "dev/api-login" }));
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = try std.fs.path.join(gpa, &.{ root, "dev/api-login/.git" }), .data = "gitdir: x" });
+    var env = std.process.Environ.Map.init(gpa);
+    try env.put("HOME", root);
+    try env.put("USERPROFILE", root);
+    try env.put("WORK_REPOS_DIR", try std.fs.path.join(gpa, &.{ root, "dev" }));
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = gpa, .env = &env };
+    const names = try listRepos(ctx);
+    try std.testing.expectEqual(@as(usize, 2), names.len);
+    try std.testing.expectEqualStrings("api", names[0]);
+    try std.testing.expectEqualStrings("web-app", names[1]);
+    try std.testing.expect(std.mem.endsWith(u8, (try findRepos(ctx))[1].path, "web-app"));
 }
