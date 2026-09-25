@@ -67,6 +67,7 @@ pub fn tmuxSetup(ctx: sys.Ctx) void {
 }
 
 pub fn hasSession(ctx: sys.Ctx, name: []const u8) bool {
+    if (!sys.validTarget(name)) return false;
     return tmux(ctx, &.{ "has-session", "-t", ctx.fmt("={s}", .{name}) catch return false }).ok;
 }
 
@@ -177,12 +178,29 @@ fn trustClaude(ctx: sys.Ctx, dir: []const u8) void {
     sys.writeFileAtomic(ctx, file, out) catch {};
 }
 
+/// A path inside a TOML basic string. A Windows path is all backslashes (an
+/// invalid escape that makes Codex reject its own config), and a quote or a
+/// newline in a directory name would close the key and let the rest of the path
+/// open a table of its own — trusting a directory nobody chose.
+fn tomlQuote(ctx: sys.Ctx, value: []const u8) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    for (value) |c| switch (c) {
+        '"' => try out.appendSlice(ctx.gpa, "\\\""),
+        '\\' => try out.appendSlice(ctx.gpa, "\\\\"),
+        '\n' => try out.appendSlice(ctx.gpa, "\\n"),
+        '\r' => try out.appendSlice(ctx.gpa, "\\r"),
+        '\t' => try out.appendSlice(ctx.gpa, "\\t"),
+        else => try out.append(ctx.gpa, c),
+    };
+    return out.items;
+}
+
 fn trustCodex(ctx: sys.Ctx, project: []const u8) void {
     const codex_home = ctx.getenv("CODEX_HOME") orelse (ctx.join(&.{ ctx.home(), ".codex" }) catch return);
     if (!sys.isDir(ctx, codex_home)) return;
     const file = ctx.join(&.{ codex_home, "config.toml" }) catch return;
     const current = sys.readFile(ctx, file) orelse "";
-    const section = ctx.fmt("[projects.\"{s}\"]", .{project}) catch return;
+    const section = ctx.fmt("[projects.\"{s}\"]", .{tomlQuote(ctx, project) catch return}) catch return;
     if (std.mem.indexOf(u8, current, section) != null) return;
     const backup = ctx.fmt("{s}.pre-agb.bak", .{file}) catch return;
     if (!sys.exists(ctx, backup)) sys.writeFileAtomic(ctx, backup, current) catch return;
@@ -257,20 +275,23 @@ fn agentCommand(ctx: sys.Ctx, opts: CreateOptions, worktree: []const u8) ![]cons
             // through a file: tmux caps a command at 16 KB, and a long spoken
             // request is longer.
             if (opts.prompt) |p| if (p.len > 0) {
+                // A spoken request is private: the file is the owner's, and so
+                // is the directory, whose entries are the task names.
                 const dir = try ctx.join(&.{ ctx.home(), ".cache", "agent-belt", "prompts" });
-                std.Io.Dir.cwd().createDirPath(ctx.io, dir) catch {};
+                sys.createPrivateDir(ctx.io, dir) catch {};
                 const file = try ctx.join(&.{ dir, try ctx.fmt("{s}.txt", .{opts.task}) });
                 sys.writeFileAtomic(ctx, file, p) catch return error.WorktreeFailed;
                 const shown = if (sys.platform == .windows) try sys.toMsys(ctx, file) else file;
                 try cmd.appendSlice(ctx.gpa, try ctx.fmt(" \"$(cat {s})\"", .{try sys.shQuote(ctx, shown)}));
             };
         },
-        .shell => try cmd.appendSlice(ctx.gpa, if (sys.platform == .windows) "bash -l" else ctx.getenv("SHELL") orelse "/bin/sh"),
+        // tmux hands this line to /bin/sh: $SHELL is a path, not a command.
+        .shell => try cmd.appendSlice(ctx.gpa, if (sys.platform == .windows) "bash -l" else try sys.shQuote(ctx, ctx.getenv("SHELL") orelse "/bin/sh")),
     }
     return cmd.items;
 }
 
-pub const CreateError = error{ NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, InvalidTask } || std.mem.Allocator.Error;
+pub const CreateError = error{ NotARepo, WorktreeClash, WorktreeFailed, TmuxFailed, AgentNotFound, InvalidTask, InvalidTarget } || std.mem.Allocator.Error;
 
 /// Creates (or reuses) the task's session and attaches this terminal to it, or,
 /// with no_attach, returns its name.
@@ -357,8 +378,10 @@ fn startAgent(ctx: sys.Ctx, opts: CreateOptions, session: []const u8, dir: []con
 }
 
 /// A pane target for a session: "=name:" (its current window). Plain "=name"
-/// is a session target that pane commands reject on tmux 3.5.
+/// is a session target that pane commands reject on tmux 3.5. A name holding
+/// ":" would name a different session, so it is not a target at all.
 fn paneTarget(ctx: sys.Ctx, name: []const u8) ![]const u8 {
+    if (!sys.validTarget(name)) return error.InvalidTarget;
     return ctx.fmt("={s}:", .{name});
 }
 
@@ -380,6 +403,7 @@ pub fn peek(ctx: sys.Ctx, name: []const u8, lines: usize) ?[]const u8 {
 }
 
 pub fn stop(ctx: sys.Ctx, name: []const u8) bool {
+    if (!sys.validTarget(name)) return false;
     return tmux(ctx, &.{ "kill-session", "-t", ctx.fmt("={s}", .{name}) catch return false }).ok;
 }
 
@@ -576,6 +600,18 @@ fn windowsAgentPids(ctx: sys.Ctx) [][]const u8 {
     return pids.items;
 }
 
+/// A value inside the "|"-separated answer. tmux allows "|" in a session name
+/// and a path can hold anything: unescaped, one such session shifts every column
+/// for the machine reading the answer, so its rows name the wrong session.
+fn field(ctx: sys.Ctx, value: []const u8) ![]const u8 {
+    if (std.mem.indexOfAny(u8, value, "|\r\n") == null) return value;
+    const copy = try ctx.gpa.dupe(u8, value);
+    for (copy) |*c| if (c.* == '|' or c.* == '\r' or c.* == '\n') {
+        c.* = ' ';
+    };
+    return copy;
+}
+
 /// `agb _ls-raw`: one line per session, name|windows|created|attached|agent|path,
 /// then #outside|<count>, which also marks the answer as complete.
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
@@ -599,7 +635,7 @@ pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
         const title = f.rest();
         if (agent.len == 0) agent = inferAgent(ctx, tty, command);
         if (syncName(ctx, name, agent, task, title)) |renamed| name = renamed;
-        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}\n", .{ name, windows, created, attached, agent, path }));
+        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path) }));
     }
     try out.appendSlice(ctx.gpa, try ctx.fmt("#outside|{d}\n", .{agentsOutside(ctx)}));
     return out.items;
@@ -701,10 +737,12 @@ pub fn adoptDo(ctx: sys.Ctx, pid: []const u8) ![]const u8 {
             try ctx.fmt("{s} --dangerously-skip-permissions --resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation })
         else
             try ctx.fmt("{s} --dangerously-bypass-approvals-and-sandbox resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation });
-        const base = try ctx.gpa.dupe(u8, std.fs.path.basename(a.dir));
-        for (base) |*c| if (!(std.ascii.isAlphanumeric(c.*) or c.* == '.' or c.* == '_' or c.* == '-')) {
+        const cleaned = try ctx.gpa.dupe(u8, std.fs.path.basename(a.dir));
+        for (cleaned) |*c| if (!(std.ascii.isAlphanumeric(c.*) or c.* == '.' or c.* == '_' or c.* == '-')) {
             c.* = '-';
         };
+        // "/" and ".." leave nothing usable, and tmux would take an empty -s.
+        const base: []const u8 = if (sys.validSlug(cleaned)) cleaned else a.agent;
         var name: []const u8 = base;
         var n: usize = 2;
         while (hasSession(ctx, name)) : (n += 1) name = try ctx.fmt("{s}-{d}", .{ base, n });
@@ -780,4 +818,28 @@ test "the exact conversation of a running agent" {
     try std.testing.expect(!isAgentCommand("ssh -t w agb new --agent claude"));
     // A name after --resume is not an id.
     try std.testing.expectEqualStrings("", conversationId("claude --resume fx-deepseek"));
+}
+
+test "the listing answer keeps its columns whatever a session is called" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    // `tmux new -s 'a|b'` is legal: unescaped it shifts every later column, so
+    // the machine reading the answer shows the wrong agent and path for the row.
+    try std.testing.expectEqualStrings("a b", try field(ctx, "a|b"));
+    try std.testing.expectEqualStrings("a b c", try field(ctx, "a\nb\rc"));
+    try std.testing.expectEqualStrings("coreum-login", try field(ctx, "coreum-login"));
+}
+
+test "a worktree path cannot write its own Codex trust entry" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    // A backslash is an invalid TOML escape, and a quote would close the key and
+    // let the rest of the path open a table that trusts a directory nobody chose.
+    try std.testing.expectEqualStrings("C:\\\\dev\\\\x", try tomlQuote(ctx, "C:\\dev\\x"));
+    try std.testing.expectEqualStrings("a\\\"]\\n[projects.\\\"/\\\"", try tomlQuote(ctx, "a\"]\n[projects.\"/\""));
+    try std.testing.expectEqualStrings("/home/frb/dev/coreum", try tomlQuote(ctx, "/home/frb/dev/coreum"));
 }

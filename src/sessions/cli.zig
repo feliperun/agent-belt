@@ -138,16 +138,22 @@ fn remoteArgv(ctx: sys.Ctx, host: hosts.Host, tty: bool, args: []const []const u
     try argv.appendSlice(ctx.gpa, &.{ "-o", "ConnectTimeout=6", "-o", "StrictHostKeyChecking=accept-new", host.target });
     switch (host.kind) {
         .posix => try argv.append(ctx.gpa, "$HOME/.local/bin/agb"),
-        .msys => {
-            const user = host.target[0 .. std.mem.indexOfScalar(u8, host.target, '@') orelse 0];
-            try argv.append(ctx.gpa, try ctx.fmt("C:\\Users\\{s}\\.local\\bin\\agb.exe", .{user}));
-        },
+        .msys => try argv.append(ctx.gpa, try ctx.fmt("C:\\Users\\{s}\\.local\\bin\\agb.exe", .{try hostUser(host)})),
     }
     for (args) |arg| try argv.append(ctx.gpa, switch (host.kind) {
         .posix => try sys.shQuote(ctx, arg),
         .msys => try sys.psQuote(ctx, arg),
     });
     return argv.items;
+}
+
+/// The user part of an ssh destination ("Micromed@felipe-windows"). On a Windows
+/// machine it becomes a path and part of a PowerShell command line, and with no
+/// "@" the old code silently used the empty string and wrote to C:\\Users\\.
+/// `hosts.load` has already restricted it to a name's characters.
+fn hostUser(host: hosts.Host) ![]const u8 {
+    const at = std.mem.indexOfScalar(u8, host.target, '@') orelse return error.TargetWithoutUser;
+    return if (at > 0) host.target[0..at] else error.TargetWithoutUser;
 }
 
 fn remote(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) sys.Output {
@@ -360,6 +366,7 @@ fn runLocal(env: Env, plan: Plan) !u8 {
             error.WorktreeClash => say("agb: the worktree path exists and is not a worktree of this repo; pick another task name", .{}),
             error.AgentNotFound => say("agb: {s} is not installed on this machine", .{@tagName(plan.agent)}),
             error.InvalidTask => say("agb: task names are letters, digits, . _ - ({s})", .{plan.task.?}),
+            error.InvalidTarget => say("agb: a session name tmux cannot address (no ':'); pick another task name", .{}),
             else => say("agb: {s}", .{@errorName(err)}),
         }
         return 1;
@@ -691,6 +698,7 @@ fn cmdHosts(env: Env, args: []const []const u8) !u8 {
         try out.appendSlice(ctx.gpa, try ctx.fmt("{s}  {s}  {s}\n", .{ try pad(ctx, "MACHINE", 18), try pad(ctx, "SSH TARGET", 28), "KIND" }));
         for (reg.hosts) |h| try out.appendSlice(ctx.gpa, try ctx.fmt("{s}  {s}  {s}{s}\n", .{ try pad(ctx, h.name, 18), try pad(ctx, h.target, 28), try pad(ctx, @tagName(h.kind), 6), if (reg.isSelf(h)) "  <- this machine" else "" }));
         try out.appendSlice(ctx.gpa, try ctx.fmt("\nregistry: {s}\n", .{reg.path}));
+        if (reg.dropped > 0) try out.appendSlice(ctx.gpa, try ctx.fmt("{d} entries ignored: a machine is a name and a user@machine destination\n", .{reg.dropped}));
         _ = print(ctx, out.items);
         return 0;
     }
@@ -700,6 +708,10 @@ fn cmdHosts(env: Env, args: []const []const u8) !u8 {
             return 2;
         }
         if (!sys.validSlug(args[1])) return 2;
+        if (!sys.validSshTarget(args[2])) {
+            say("agb: '{s}' is not an ssh destination (user@machine)", .{args[2]});
+            return 2;
+        }
         if (reg.find(args[1]) != null and std.mem.eql(u8, reg.find(args[1]).?.name, args[1])) {
             say("{s} is already registered", .{args[1]});
             return 0;
@@ -723,6 +735,12 @@ fn cmdHosts(env: Env, args: []const []const u8) !u8 {
     }
     if (std.mem.eql(u8, sub, "self")) {
         if (args.len < 2) return 2;
+        // It becomes a line of the registry: a name with a space or a newline
+        // would write an entry of its own there.
+        if (!sys.validSlug(args[1])) {
+            say("agb: '{s}' is not a machine name", .{args[1]});
+            return 2;
+        }
         try hosts.save(ctx, reg, args[1]);
         say("this machine is: {s}", .{args[1]});
         return 0;
@@ -743,7 +761,10 @@ fn cmdHosts(env: Env, args: []const []const u8) !u8 {
             };
             if (known) continue;
             const user = sshUser(ctx, p.name);
-            try list.append(ctx.gpa, .{ .name = p.name, .target = try ctx.fmt("{s}@{s}", .{ user, p.name }), .kind = if (std.mem.eql(u8, p.os, "windows")) .msys else .posix });
+            const target = try ctx.fmt("{s}@{s}", .{ user, p.name });
+            // A peer name and an ~/.ssh/config user are other people's text.
+            if (!sys.validSlug(p.name) or !sys.validSshTarget(target)) continue;
+            try list.append(ctx.gpa, .{ .name = p.name, .target = target, .kind = if (std.mem.eql(u8, p.os, "windows")) .msys else .posix });
             say("registered: {s} ({s})", .{ p.name, p.os });
             added += 1;
         }
@@ -770,6 +791,7 @@ fn cmdDoctor(env: Env) !u8 {
     const ctx = env.ctx;
     const reg = try loadRegistry(ctx);
     _ = print(ctx, try ctx.fmt("registry: {s}\nthis machine: {s}\n\n", .{ reg.path, reg.self orelse "<not identified: agb hosts self <name>>" }));
+    if (reg.dropped > 0) _ = print(ctx, try ctx.fmt("{d} entries ignored: a machine is a name and a user@machine destination\n\n", .{reg.dropped}));
     for (reg.hosts) |h| {
         _ = print(ctx, try ctx.fmt("== {s} {s}\n", .{ try pad(ctx, h.name, 18), h.target }));
         if (reg.isSelf(h)) {
@@ -898,7 +920,7 @@ fn deployOne(env: Env, reg: hosts.Registry, h: hosts.Host) !void {
     const exe = if (h.kind == .msys) "agb.exe" else "agb";
     const built = try ctx.fmt("{s}/bin/{s}", .{ prefix, exe });
     const config = try hosts.renderFor(ctx, reg, h.name);
-    const user = h.target[0 .. std.mem.indexOfScalar(u8, h.target, '@') orelse 0];
+    const user = try hostUser(h);
     var mk: std.ArrayList([]const u8) = .empty;
     try mk.append(ctx.gpa, "ssh");
     try mk.appendSlice(ctx.gpa, &ssh_opts);

