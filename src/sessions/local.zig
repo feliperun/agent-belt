@@ -38,17 +38,22 @@ fn failed() sys.Output {
 
 /// Replaces this process with tmux on the user's terminal (attach, tm).
 pub fn tmuxHandOver(ctx: sys.Ctx, args: []const []const u8) noreturn {
+    const full = clientArgs(ctx, args) catch unreachable;
     if (sys.platform == .windows) {
         // MSYS2's tmux refuses a native console ("not a terminal"); script(1)
         // gives it a pty, in Windows Terminal and over ssh alike.
-        const cmd = std.mem.concat(ctx.gpa, u8, &.{ "tmux ", sys.shJoin(ctx, args) catch unreachable }) catch unreachable;
+        const cmd = std.mem.concat(ctx.gpa, u8, &.{ "tmux ", sys.shJoin(ctx, full) catch unreachable }) catch unreachable;
         const line = std.mem.concat(ctx.gpa, u8, &.{ "exec script -qfc ", sys.shQuote(ctx, cmd) catch unreachable, " /dev/null" }) catch unreachable;
         sys.handOver(ctx, &.{ sys.msys_bash, "-lc", line });
     }
-    var argv: std.ArrayList([]const u8) = .empty;
-    argv.append(ctx.gpa, tmuxBin(ctx)) catch unreachable;
-    argv.appendSlice(ctx.gpa, args) catch unreachable;
-    sys.handOver(ctx, argv.items);
+    sys.handOver(ctx, std.mem.concat(ctx.gpa, []const u8, &.{ &.{tmuxBin(ctx)}, full }) catch unreachable);
+}
+
+/// A tmux client's arguments. `-u`: the terminal takes UTF-8 even without a
+/// locale; an ssh session has no LANG, and tmux would draw every accent and
+/// symbol as "_".
+fn clientArgs(ctx: sys.Ctx, args: []const []const u8) ![]const []const u8 {
+    return std.mem.concat(ctx.gpa, []const u8, &.{ &.{"-u"}, args });
 }
 
 /// The target tmux server forwards the clipboard over OSC 52 (remote attaches
@@ -692,4 +697,14 @@ test "word match, conversation ids and tty normalization" {
     try std.testing.expectEqualStrings("", conversationId("claude --continue"));
     try std.testing.expectEqualStrings("s001", normTty("/dev/ttys001"));
     try std.testing.expectEqualStrings("s001", normTty("s001"));
+}
+
+test "a tmux client draws UTF-8 without a locale" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env_map = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env_map };
+    const got = try clientArgs(ctx, &.{ "attach", "-t", "$1" });
+    try std.testing.expectEqualStrings("-u", got[0]);
+    try std.testing.expectEqualStrings("attach", got[1]);
 }
