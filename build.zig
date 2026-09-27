@@ -106,7 +106,8 @@ pub fn build(b: *std.Build) void {
     // Every module with tests is listed: a file only imported by one of these is
     // compiled, but its own `test` blocks are not collected, so the clients below
     // would keep their regression tests and never run them.
-    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/sessions/local.zig", "src/sessions/intent.zig", "src/audio_level.zig", "src/history.zig", "src/wav_stream.zig", "src/deepgram.zig", "src/transcribe_stream.zig", "src/sessions/jev.zig", "src/sessions/deepseek.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/sessions/local.zig",
+        "src/sessions/orca.zig", "src/sessions/intent.zig", "src/audio_level.zig", "src/history.zig", "src/wav_stream.zig", "src/deepgram.zig", "src/transcribe_stream.zig", "src/sessions/jev.zig", "src/sessions/deepseek.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(path), .target = target, .optimize = optimize,
