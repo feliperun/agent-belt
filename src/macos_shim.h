@@ -85,6 +85,7 @@ mk_recorder *mk_recorder_create(void);
 typedef void (*mk_pcm_callback)(void *context, const void *pcm, size_t length);
 void mk_recorder_set_pcm_handler(mk_recorder *recorder, mk_pcm_callback handler, void *context);
 int mk_recorder_start(mk_recorder *recorder);
+void mk_recorder_push(mk_recorder *recorder, const void *pcm, size_t length);
 int mk_recorder_finish(mk_recorder *recorder, uint8_t **wav, size_t *wav_size);
 uint32_t mk_audio_level_permille(void);
 void mk_recorder_destroy(mk_recorder *recorder);

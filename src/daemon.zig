@@ -23,6 +23,38 @@ const Daemon = struct {
     history_dir: []const u8 = "",
     /// Key 5: speak a new agent into the create panel.
     create: @import("create_agent.zig").Controller = undefined,
+    /// The session an external microphone is feeding (never the keypad's).
+    external: ?*live_recording.Live = null,
+
+    /// Push-to-talk index of the external microphone: no binding uses it.
+    const external_key = 7;
+
+    /// An external microphone (a Fordita stick) holds push-to-talk while its
+    /// socket connection is open (src/ext_mic.c): same dictation, its audio.
+    fn onExtStart(context: ?*anyopaque) callconv(.c) void {
+        const daemon: *Daemon = @ptrCast(@alignCast(context.?));
+        daemon.startPushToTalk(external_key, .external) catch |err| {
+            macos.setStatus(.failed);
+            std.debug.print("[agent-belt] error: {s}\n", .{@errorName(err)});
+        };
+    }
+
+    fn onExtPcm(context: ?*anyopaque, pcm: ?*const anyopaque, len: usize) callconv(.c) void {
+        const daemon: *Daemon = @ptrCast(@alignCast(context.?));
+        const live = daemon.external orelse return; // the key was busy: dropped
+        const bytes: [*]const u8 = @ptrCast(pcm.?);
+        live.push(bytes[0..len]);
+    }
+
+    fn onExtStop(context: ?*anyopaque) callconv(.c) void {
+        const daemon: *Daemon = @ptrCast(@alignCast(context.?));
+        if (daemon.external == null) return;
+        daemon.external = null;
+        daemon.handlePushToTalk(.{ .key = external_key, .pressed = false }) catch |err| {
+            macos.setStatus(.failed);
+            std.debug.print("[agent-belt] error: {s}\n", .{@errorName(err)});
+        };
+    }
 
     /// F5 (fn+F5 on a Mac keyboard) records like the push-to-talk key, under a
     /// key index no binding uses. Runs on its own queue, not the event tap.
@@ -73,22 +105,29 @@ const Daemon = struct {
     }
 
     fn handlePushToTalk(self: *Daemon, event: macos.HidEvent) !void {
+        if (event.pressed) return self.startPushToTalk(event.key, .mic);
         self.ptt_lock.lockUncancelable(self.io);
         defer self.ptt_lock.unlock(self.io);
-        if (event.pressed) {
-            if (self.recording != null or self.busy) return;
-            // Transcribed while speaking: the words show in the overlay as they come.
-            self.recording = try live_recording.Live.start(self.allocator, self.io, &self.config, &.{}, onLiveText, self);
-            self.recording_key = event.key;
-            self.command = macos.agentsMenuVisible();
-            if (self.command) macos.agentsMenuClose();
-            macos.setStatus(if (self.command) .command else .recording);
-            if (self.config.sounds) macos.playCue(.start);
-            std.debug.print("[agent-belt] RECORDING, release the key to transcribe\n", .{});
-            return;
-        }
+        try self.finishPushToTalk(event.key);
+    }
 
-        if (self.recording_key != event.key) return;
+    fn startPushToTalk(self: *Daemon, key: usize, source: live_recording.Live.Source) !void {
+        self.ptt_lock.lockUncancelable(self.io);
+        defer self.ptt_lock.unlock(self.io);
+        if (self.recording != null or self.busy) return;
+        // Transcribed while speaking: the words show in the overlay as they come.
+        self.recording = try live_recording.Live.start(self.allocator, self.io, &self.config, &.{}, onLiveText, self, source);
+        self.recording_key = key;
+        if (source == .external) self.external = self.recording;
+        self.command = macos.agentsMenuVisible();
+        if (self.command) macos.agentsMenuClose();
+        macos.setStatus(if (self.command) .command else .recording);
+        if (self.config.sounds) macos.playCue(.start);
+        std.debug.print("[agent-belt] RECORDING, release the key to transcribe\n", .{});
+    }
+
+    fn finishPushToTalk(self: *Daemon, key: usize) !void {
+        if (self.recording_key != key) return;
         const live = self.recording orelse return;
         self.recording = null;
         self.recording_key = null;
@@ -158,6 +197,12 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config, history_dir
         .on_f5 = if (config.f5_push_to_talk) Daemon.onF5 else null,
         .context = @ptrCast(&daemon),
     };
+    const mic_path = try std.fs.path.joinZ(allocator, &.{ std.fs.path.dirname(history_dir) orelse "/tmp", "mic.sock" });
+    macos.extMicListen(mic_path, .{
+        .on_start = Daemon.onExtStart,
+        .on_pcm = Daemon.onExtPcm,
+        .on_stop = Daemon.onExtStop,
+    }, @ptrCast(&daemon)) catch |err| std.debug.print("[agent-belt] external microphone off: {s}\n", .{@errorName(err)});
     try listener.run();
 }
 

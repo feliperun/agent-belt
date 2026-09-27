@@ -71,7 +71,7 @@ const Recording = struct {
         macos.createPanelRecording(true);
         if (owner.config.sounds) macos.playCue(.start);
         const terms = keyterms(owner.gpa, owner.io) catch &.{};
-        self.* = .{ .owner = owner, .live = try live_recording.Live.start(owner.gpa, owner.io, owner.config, terms, onText, owner) };
+        self.* = .{ .owner = owner, .live = try live_recording.Live.start(owner.gpa, owner.io, owner.config, terms, onText, owner, .mic) };
         std.debug.print("[agent-belt] NEW AGENT: recording, release 5 to review\n", .{});
         return self;
     }
