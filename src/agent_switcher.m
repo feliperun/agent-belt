@@ -1073,5 +1073,21 @@ static void MKOpenTerminal(NSString *command, NSString *title) {
 // The create-agent panel (src/create_panel.m) opens its `agb new` the same way.
 void mk_open_terminal(NSString *command, NSString *title) { MKOpenTerminal(command, title); }
 
+// A new agent from the panel: with Orca open, its tab goes in its repository's
+// project (`agb _orca-open`, src/sessions/orca.zig: a new workspace for an agent
+// here, the local clone's project for another machine). Without a project for
+// it, or without Orca, `agb new` runs in a new terminal as before; it attaches
+// to the session if the first attempt already created it.
+void mk_open_agent(NSArray<NSString *> *arguments, NSString *command, NSString *title) {
+    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
+    if (orca && MKRunFor(NSBundle.mainBundle.executablePath, [@[@"_orca-open"] arrayByAddingObjectsFromArray:arguments], 60)) {
+        fprintf(stderr, "[agent-belt] new agent in its Orca project: %s\n", title.UTF8String);
+        MKRestoreWindows(orca);
+        MKBringToFront(orca);
+        return;
+    }
+    MKOpenTerminal(command, title);
+}
+
 // Push-to-talk with the agent menu open: the words go to the create panel.
 void mk_agents_voice_command(const char *text) { mk_create_panel_show(text); }

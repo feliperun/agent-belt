@@ -175,7 +175,10 @@ the dictation overlay's sibling, opens at the center of the screen with the word
 as you speak and what they mean: **agent**, **machine**, **repo** and the **intent** the agent
 will get as its first prompt. Release to review. Hold again to add or correct, type to fix a
 word, or click a field to pick another option; tap 5 (or press Return) to create the agent,
-Esc to cancel. A new Orca terminal runs `agb new` on the chosen machine.
+Esc to cancel. With Orca open, the agent opens in its repository's Orca project: an
+agent here gets a workspace of its own (its worktree), one on another machine a tab in the
+project of your clone of the same repo, and a repository Orca does not know yet is added to
+it. Research agents, and repos you have no clone of, open in a new terminal as before.
 
 Requests are understood in **English and Portuguese** — `create`, `crie`, `open`, `abra`,
 `start` and `inicie` all open one — so the Portuguese examples below work as written. Set

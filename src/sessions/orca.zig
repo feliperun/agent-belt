@@ -95,12 +95,39 @@ pub fn open(env: cli.Env, args: []const []const u8) !u8 {
     }
 }
 
+/// A tab in `dir`'s workspace, brought forward. `--focus` on a workspace Orca
+/// keeps hidden (its repo hides worktrees it did not create) times out, so the
+/// tab is created in the background and switched to. A worktree created a
+/// moment ago may not be adopted yet: one more try after a second.
 fn createTab(ctx: sys.Ctx, cli_bin: []const u8, dir: []const u8, title: []const u8, command: []const u8) u8 {
     const selector = ctx.fmt("path:{s}", .{dir}) catch return 1;
-    const out = orca(ctx, cli_bin, &.{ "terminal", "create", "--worktree", selector, "--title", title, "--command", command, "--focus" });
-    if (succeeded(out)) return 0;
-    std.debug.print("agb: Orca did not open the tab: {s}\n", .{std.mem.trim(u8, out.stdout, " \r\n")});
-    return not_placed;
+    // The shell titles the tab with the command it runs: the line names it first.
+    const line = titled(ctx, title, command) catch return 1;
+    var out = orca(ctx, cli_bin, &.{ "terminal", "create", "--worktree", selector, "--title", title, "--command", line });
+    if (!succeeded(out)) {
+        std.Io.sleep(ctx.io, .fromSeconds(1), .awake) catch {};
+        out = orca(ctx, cli_bin, &.{ "terminal", "create", "--worktree", selector, "--title", title, "--command", line });
+    }
+    const handle = handleOf(ctx.gpa, out.stdout) orelse {
+        std.debug.print("agb: Orca did not open the tab: {s}\n", .{std.mem.trim(u8, out.stdout, " \r\n")});
+        return not_placed;
+    };
+    _ = orca(ctx, cli_bin, &.{ "terminal", "switch", "--terminal", handle });
+    return 0;
+}
+
+/// A shell line that sets the terminal's title, then runs `command`.
+fn titled(ctx: sys.Ctx, title: []const u8, command: []const u8) ![]const u8 {
+    return ctx.fmt("printf '\\033]0;%s\\007' {s}; {s}", .{ try sys.shQuote(ctx, title), command });
+}
+
+/// The new terminal's handle in a successful `terminal create` answer.
+fn handleOf(gpa: std.mem.Allocator, answer: []const u8) ?[]const u8 {
+    const Answer = struct { ok: bool = false, result: ?struct { terminal: ?struct { handle: []const u8 = "" } = null } = null };
+    const a = std.json.parseFromSliceLeaky(Answer, gpa, answer, .{ .ignore_unknown_fields = true }) catch return null;
+    if (!a.ok) return null;
+    const handle = (a.result orelse return null).terminal orelse return null;
+    return if (handle.handle.len > 0) handle.handle else null;
 }
 
 fn trustRepo(_: sys.Ctx, _: ?hosts.Host, _: []const u8) bool {
@@ -126,6 +153,16 @@ test "where a new agent's tab goes" {
     // The tab's command survives the app path's space and a quote in the prompt.
     try std.testing.expectEqualStrings("'/Applications/Agent Belt.app/Contents/MacOS/agb' 'attach' 'api-fix'", try commandLine(ctx, "/Applications/Agent Belt.app/Contents/MacOS/agb", &.{ "attach", "api-fix" }));
     try std.testing.expectEqualStrings("'agb' 'new' '--prompt' 'it'\\''s broken'", try commandLine(ctx, "agb", &.{ "new", "--prompt", "it's broken" }));
+    try std.testing.expectEqualStrings("printf '\\033]0;%s\\007' 'fix @ windows-pc'; 'agb' 'attach' 'api-fix'", try titled(ctx, "fix @ windows-pc", "'agb' 'attach' 'api-fix'"));
+}
+
+test "the new tab's handle, only from a successful answer" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    try std.testing.expectEqualStrings("term_1", handleOf(gpa, "{\"ok\": true, \"result\": {\"terminal\": {\"handle\": \"term_1\", \"surface\": \"visible\"}}}").?);
+    try std.testing.expect(handleOf(gpa, "{\"ok\": false, \"error\": {\"message\": \"Timed out waiting for terminal handle after creation\"}}") == null);
+    try std.testing.expect(handleOf(gpa, "not json") == null);
 }
 
 test "an Orca answer is a success only when it says so" {
