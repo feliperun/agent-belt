@@ -178,6 +178,19 @@ pub fn listRepos(ctx: sys.Ctx) ![]const []const u8 {
     return names;
 }
 
+/// The directory a tmux session runs in.
+pub fn sessionPath(ctx: sys.Ctx, session: []const u8) ?[]const u8 {
+    const out = tmux(ctx, &.{ "display-message", "-p", "-t", ctx.fmt("={s}:", .{session}) catch return null, "#{session_path}" });
+    const path = std.mem.trim(u8, out.stdout, " \r\n");
+    return if (out.ok and path.len > 0) path else null;
+}
+
+/// The main checkout of the repository a worktree belongs to.
+pub fn repoRootOf(ctx: sys.Ctx, worktree: []const u8) ?[]const u8 {
+    const common = gitCommon(ctx, worktree) orelse return null;
+    return std.fs.path.dirname(common);
+}
+
 fn gitBin(ctx: sys.Ctx) []const u8 {
     return sys.which(ctx, "git") orelse "git";
 }
