@@ -10,6 +10,7 @@
 
 extern void mk_draw_core(NSPoint center, double level, double t, double morph, BOOL fast);
 extern void mk_open_terminal(NSString *command, NSString *title);
+extern void mk_open_agent(NSArray<NSString *> *arguments, NSString *command, NSString *title);
 
 static const CGFloat mk_panel_width = 600;
 static NSColor *MKInk(CGFloat alpha) { return [NSColor colorWithSRGBRed:0.72 green:0.79 blue:0.96 alpha:alpha]; }
@@ -396,13 +397,17 @@ static NSData *MKRunAgb(NSArray<NSString *> *arguments, double timeout) {
     // claude in repo xyz that…") removed by `agb _summary`; the panel's text otherwise.
     NSString *agentPrompt = [self.summary[@"prompt"] length] ? self.summary[@"prompt"] : text;
     [command appendFormat:@" --prompt %@", q(agentPrompt)];
+    NSMutableArray<NSString *> *arguments = [NSMutableArray arrayWithObjects:@"new", @"--agent", agent, @"--host", host, nil];
+    if (hasRepo) [arguments addObjectsFromArray:@[@"--repo", repo]];
+    else [arguments addObject:@"--no-repo"];
+    [arguments addObjectsFromArray:@[@"--task", task, @"--prompt", agentPrompt]];
     NSString *title = [NSString stringWithFormat:@"%@ · %@ @ %@", task, agent, host];
     // The session, not the request: the prompt is what was dictated, and the
     // log lives as long as the install does (`agb history` keeps the words).
     fprintf(stderr, "[agent-belt] new agent: %s\n", title.UTF8String);
     mk_previous_app = nil; // the terminal takes the focus
     mk_create_panel_show(NULL);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ mk_open_terminal(command, title); });
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ mk_open_agent(arguments, command, title); });
 }
 @end
 

@@ -51,3 +51,4 @@ proposed → active → superseded
 | [0002](0002-root-managed-ai-guidance.md) | Root-managed AI guidance files | active |
 | [0003](0003-sentrux-structural-quality-gates.md) | Sentrux structural quality gates | active |
 | [0004](0004-agent-harnesses-and-typed-first-prompt.md) | Agent harnesses and the typed first prompt | active |
+| [0005](0005-new-agents-in-their-orca-project.md) | New agents open in their repository's Orca project | active |

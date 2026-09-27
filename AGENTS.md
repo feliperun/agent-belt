@@ -211,6 +211,11 @@ file — keep appending.
   parent dies, the client does not). tmux draws for every client, each at its own size,
   and the window flickers; the listing detaches clients whose parent is gone
   (`dropOrphanClients`).
+- **Orca: `terminal create --focus` times out on a hidden workspace** ("Timed out waiting
+  for terminal handle after creation"): a repo that hides worktrees Orca did not create
+  hides agb's. Create without `--focus`, then `terminal switch`; retry once, since a
+  worktree created a moment ago may not be adopted yet. The shell retitles the tab with
+  the command it runs, so the command sets the title itself (`src/sessions/orca.zig`).
 
 ---
 
