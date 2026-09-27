@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/macos_shim.c"),
             .flags = &.{"-fblocks"},
         });
+        exe.root_module.addCSourceFile(.{ .file = b.path("src/ext_mic.c") });
         exe.root_module.addCSourceFile(.{
             .file = b.path("src/status_item.m"),
             .flags = &.{"-fobjc-arc"},
@@ -145,4 +146,13 @@ pub fn build(b: *std.Build) void {
     agent_test.root_module.linkFramework("AppKit", .{});
     agent_test.root_module.linkFramework("ApplicationServices", .{});
     test_step.dependOn(&b.addRunArtifact(agent_test).step);
+    const ext_mic_test = b.addExecutable(.{
+        .name = "ext-mic-test",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    ext_mic_test.root_module.addCSourceFile(.{ .file = b.path("tests/ext_mic_test.c"), .flags = &.{"-UNDEBUG"} });
+    ext_mic_test.root_module.addCSourceFile(.{ .file = b.path("src/ext_mic.c") });
+    ext_mic_test.root_module.addIncludePath(b.path("src"));
+    ext_mic_test.root_module.link_libc = true;
+    test_step.dependOn(&b.addRunArtifact(ext_mic_test).step);
 }

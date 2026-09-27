@@ -35,15 +35,24 @@ pub const Live = struct {
     /// The live stream is open: words arrive while speaking.
     streaming: std.atomic.Value(bool) = .init(false),
 
-    pub fn start(gpa: std.mem.Allocator, io: std.Io, config: *const Config, keyterms: []const []const u8, on_text: OnText, context: ?*anyopaque) !*Live {
+    /// Where the audio comes from: the Mac's microphone, or an external one
+    /// that `push`es its PCM (src/ext_mic.c).
+    pub const Source = enum { mic, external };
+
+    pub fn start(gpa: std.mem.Allocator, io: std.Io, config: *const Config, keyterms: []const []const u8, on_text: OnText, context: ?*anyopaque, source: Source) !*Live {
         const self = try gpa.create(Live);
         errdefer gpa.destroy(self);
         self.* = .{ .gpa = gpa, .io = io, .config = config, .keyterms = keyterms, .on_text = on_text, .context = context, .recorder = macos.Recorder.init(gpa) };
         errdefer self.recorder.deinit();
         macos.recorderOnPcm(&self.recorder, onPcm, self);
-        try self.recorder.start();
+        if (source == .mic) try self.recorder.start();
         self.sender = try std.Thread.spawn(.{}, sendLoop, .{self});
         return self;
+    }
+
+    /// PCM from an external microphone (16 kHz mono PCM16).
+    pub fn push(self: *Live, pcm: []const u8) void {
+        self.recorder.push(pcm);
     }
 
     fn onPcm(context: ?*anyopaque, pcm: ?*const anyopaque, len: usize) callconv(.c) void {

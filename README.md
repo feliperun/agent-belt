@@ -48,6 +48,9 @@
 - **5, hold:** a new agent by voice (below); a tap is Return, or creates the agent while its
   panel is open.
 - **0, 2:** Esc and Delete, repeating while held.
+- **External microphone:** a program of yours can dictate through push-to-talk by
+  writing 16 kHz mono PCM16 to `~/Library/Application Support/agent-belt/mic.sock`;
+  the connection held open is the key held, closing it is the release.
 - **fn+F5 on the Mac keyboard:** push-to-talk too. A tap starts and the next tap stops;
   holding records until release. Plain F5, the microphone key, stays with macOS Dictation,
   which never lets it go; turn on "Use F1, F2, etc. keys as standard function keys" to swap

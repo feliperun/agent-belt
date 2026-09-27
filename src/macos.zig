@@ -2,6 +2,7 @@ const std = @import("std");
 
 const c = @cImport({
     @cInclude("macos_shim.h");
+    @cInclude("ext_mic.h");
 });
 
 pub fn selfExePath(allocator: std.mem.Allocator) ![]u8 {
@@ -300,6 +301,11 @@ pub const Recorder = struct {
         if (c.mk_recorder_start(self.handle.?) != 0) return error.AudioStartFailed;
     }
 
+    /// Audio from an external microphone instead of `start` (src/ext_mic.c).
+    pub fn push(self: *Recorder, pcm: []const u8) void {
+        if (self.handle) |h| c.mk_recorder_push(h, pcm.ptr, pcm.len);
+    }
+
     pub fn finish(self: *Recorder) ![]u8 {
         if (self.handle == null) return error.AudioInputUnavailable;
         var wav_ptr: [*c]u8 = undefined;
@@ -358,4 +364,18 @@ pub const PcmHandler = *const fn (?*anyopaque, ?*const anyopaque, usize) callcon
 
 pub fn recorderOnPcm(recorder: *Recorder, handler: PcmHandler, context: *anyopaque) void {
     if (recorder.handle) |h| c.mk_recorder_set_pcm_handler(h, handler, context);
+}
+
+// ---------------------------------------------------------------- external microphone
+
+pub const ExtMicHandlers = struct {
+    on_start: *const fn (?*anyopaque) callconv(.c) void,
+    on_pcm: *const fn (?*anyopaque, ?*const anyopaque, usize) callconv(.c) void,
+    on_stop: *const fn (?*anyopaque) callconv(.c) void,
+};
+
+/// Serves push-to-talk sessions from an external microphone on `path`.
+pub fn extMicListen(path: [:0]const u8, handlers: ExtMicHandlers, context: *anyopaque) !void {
+    const h = c.mk_ext_mic_handlers{ .on_start = handlers.on_start, .on_pcm = handlers.on_pcm, .on_stop = handlers.on_stop };
+    if (c.mk_ext_mic_listen(path.ptr, h, context) != 0) return error.ExternalMicUnavailable;
 }

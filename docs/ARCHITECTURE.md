@@ -23,7 +23,8 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | Path | Responsibility |
 |---|---|
 | `src/main.zig` | CLI entry point: daemon, status, agents, sessions, LEDs, updates |
-| `src/daemon.zig` | key bindings, push-to-talk flow, knob, F5 |
+| `src/daemon.zig` | key bindings, push-to-talk flow, knob, F5, external microphone sessions |
+| `src/ext_mic.c` | the external microphone socket (`mic.sock`): a connection is push-to-talk held, its bytes are the audio ([ADR 0006](adr/0006-external-microphone-socket.md)) |
 | `src/macos_shim.c` | HID monitor, event tap (swallowing and global shortcuts), audio capture, key injection |
 | `src/status_item.m` | overlay, switch HUD, agent menu, menu bar icon and menu |
 | `src/agent_switcher.m` | agent discovery (Orca + tmux here, every machine's sessions through `agb _sessions`), states, priority, focus, voice commands |

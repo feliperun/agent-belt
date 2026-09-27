@@ -351,6 +351,17 @@ static void mk_audio_callback(
     if (recorder->started) AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
 }
 
+// An external microphone (src/ext_mic.c) feeds a recorder that was never
+// started: same buffer, level and live handler as the AudioQueue callback.
+void mk_recorder_push(mk_recorder *recorder, const void *pcm, size_t length) {
+    const size_t sample_count = length / sizeof(int16_t);
+    if (sample_count > 0) {
+        atomic_store_explicit(&mk_audio_level, mk_pcm_level_permille(pcm, sample_count), memory_order_relaxed);
+    }
+    mk_append_pcm(recorder, pcm, length);
+    if (recorder->on_pcm) recorder->on_pcm(recorder->pcm_context, pcm, length);
+}
+
 mk_recorder *mk_recorder_create(void) {
     return calloc(1, sizeof(struct mk_recorder));
 }
