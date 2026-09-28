@@ -85,7 +85,9 @@ pub fn runCaptured(ctx: Ctx, argv: []const []const u8) Output {
         defer out.close(ctx.io);
         const err = cwd.createFile(ctx.io, err_path, .{}) catch return failed;
         defer err.close(ctx.io);
-        var child = std.process.spawn(ctx.io, .{ .argv = argv, .environ_map = ctx.env, .stdin = .ignore, .stdout = .{ .file = out }, .stderr = .{ .file = err } }) catch return failed;
+        // No console of its own: the tray is a GUI program, and every ssh.exe it
+        // started to list sessions flashed a terminal window on the screen.
+        var child = std.process.spawn(ctx.io, .{ .argv = argv, .environ_map = ctx.env, .stdin = .ignore, .stdout = .{ .file = out }, .stderr = .{ .file = err }, .create_no_window = true }) catch return failed;
         const term = child.wait(ctx.io) catch return failed;
         break :blk switch (term) {
             .exited => |c| c,
