@@ -3,6 +3,7 @@
 //! make over ssh.
 const std = @import("std");
 const sys = @import("sys.zig");
+const stats = @import("stats.zig");
 
 pub const sep = "|";
 
@@ -689,7 +690,7 @@ fn freeName(ctx: sys.Ctx, base: []const u8) ![]const u8 {
     return name;
 }
 
-pub const Renamed = struct { name: []const u8, told_agent: bool };
+pub const Renamed = struct { name: []const u8, told_agent: bool, agent: []const u8 };
 
 /// `agb rename`: renames a session in tmux and, when its agent is idle at its
 /// prompt, in the agent too (`/rename`), so the two keep one name. A busy
@@ -720,7 +721,7 @@ pub fn rename(ctx: sys.Ctx, old: []const u8, wanted: []const u8) !Renamed {
     const idle = std.mem.eql(u8, paneState(states, pane, title), "idle");
     const told = idle and tellAgent(ctx, next, agent, wanted);
     if (told) _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", slug });
-    return .{ .name = next, .told_agent = told };
+    return .{ .name = next, .told_agent = told, .agent = agent };
 }
 
 /// Types `/rename` into Claude Code (the name inline) or Codex (a dialog asks
@@ -887,10 +888,10 @@ fn titleWorking(title: []const u8) bool {
 /// is busy, idle or waiting). Under tmux it keeps a static title, so the title
 /// alone no longer shows it working. A parked session's state is its
 /// background job's.
-const PaneState = struct { pane: []const u8, status: []const u8, name: []const u8 = "" };
+const PaneState = struct { pane: []const u8, status: []const u8, name: []const u8 = "", conversation: []const u8 = "" };
 
 fn claudeStates(ctx: sys.Ctx) []PaneState {
-    const Record = struct { pid: i64 = 0, tmux: []const u8 = "", status: []const u8 = "", kind: []const u8 = "", jobId: []const u8 = "", parkedJobId: []const u8 = "", name: []const u8 = "", nameSource: []const u8 = "" };
+    const Record = struct { pid: i64 = 0, tmux: []const u8 = "", status: []const u8 = "", kind: []const u8 = "", jobId: []const u8 = "", parkedJobId: []const u8 = "", name: []const u8 = "", nameSource: []const u8 = "", sessionId: []const u8 = "" };
     var records: std.ArrayList(Record) = .empty;
     const dir_path = ctx.join(&.{ ctx.home(), ".claude", "sessions" }) catch return &.{};
     var dir = std.Io.Dir.cwd().openDir(ctx.io, dir_path, .{ .iterate = true }) catch return &.{};
@@ -909,15 +910,35 @@ fn claudeStates(ctx: sys.Ctx) []PaneState {
         if (std.mem.eql(u8, r.kind, "bg")) continue;
         const dot = std.mem.lastIndexOfScalar(u8, r.tmux, '.') orelse continue;
         var status = r.status;
+        var conversation = r.sessionId;
         if (r.parkedJobId.len > 0) for (records.items) |job| {
-            if (std.mem.eql(u8, job.jobId, r.parkedJobId)) status = job.status;
+            if (std.mem.eql(u8, job.jobId, r.parkedJobId)) {
+                status = job.status;
+                conversation = job.sessionId;
+            }
         };
         // Only a name the user gave (`/rename`, `--name`): Claude also names
         // conversations on its own, and those change as the work goes.
         const name = if (std.mem.eql(u8, r.nameSource, "user")) r.name else "";
-        states.append(ctx.gpa, .{ .pane = r.tmux[dot + 1 ..], .status = status, .name = name }) catch break;
+        states.append(ctx.gpa, .{ .pane = r.tmux[dot + 1 ..], .status = status, .name = name, .conversation = conversation }) catch break;
     }
     return states.items;
+}
+
+const Work = struct { tokens: []const u8 = "", cost: []const u8 = "", summary: []const u8 = "" };
+
+/// Tokens, cost and a recap of a pane's Claude conversation (stats.zig);
+/// for other agents the name they gave it, when there is one.
+fn paneWork(ctx: sys.Ctx, states: []const PaneState, pane: []const u8, name: []const u8) Work {
+    for (states) |st| if (std.mem.eql(u8, st.pane, pane) and st.conversation.len > 0) {
+        const info = stats.claude(ctx, st.conversation) orelse break;
+        return .{
+            .tokens = ctx.fmt("{d}", .{info.tokens}) catch "",
+            .cost = if (info.cost_known and info.cost > 0) ctx.fmt("{d:.2}", .{info.cost}) catch "" else "",
+            .summary = stats.oneLine(ctx, if (info.recap.len > 0) info.recap else if (info.title.len > 0) info.title else name),
+        };
+    };
+    return .{ .summary = stats.oneLine(ctx, name) };
 }
 
 fn processAlive(pid: std.posix.pid_t) bool {
@@ -935,8 +956,11 @@ fn paneState(states: []const PaneState, pane: []const u8, title: []const u8) []c
     return if (titleWorking(title)) "working" else "idle";
 }
 
-/// `agb _ls-raw`: one line per session, name|windows|created|attached|agent|path|state
-/// (working, waiting or idle), then #outside|<count>, which also marks the answer as complete.
+/// `agb _ls-raw`: one line per session,
+/// name|windows|created|attached|agent|path|state|tokens|cost|summary (state:
+/// working, waiting or idle; tokens, cost and summary empty when unknown;
+/// the summary last, as free text), then #outside|<count>, which also marks
+/// the answer as complete. An older agb stops after state.
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     if (sys.platform == .windows) dropOrphanClients(ctx);
@@ -962,7 +986,8 @@ pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
         const title = f.rest();
         if (agent.len == 0) agent = inferAgent(ctx, tty, command);
         if (syncName(ctx, name, task, seen, harnessName(states, pane, agent, title))) |renamed| name = renamed;
-        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), paneState(states, pane, title) }));
+        const work = paneWork(ctx, states, pane, harnessName(states, pane, agent, title));
+        try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), paneState(states, pane, title), work.tokens, work.cost, work.summary }));
     }
     try out.appendSlice(ctx.gpa, try ctx.fmt("#outside|{d}\n", .{agentsOutside(ctx)}));
     return out.items;

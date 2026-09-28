@@ -30,7 +30,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
     const verb = args[0];
     const rest = args[1..];
     if (std.mem.eql(u8, verb, "new")) return cmdNew(env, rest);
-    if (std.mem.eql(u8, verb, "sessions")) return cmdSessions(env);
+    if (std.mem.eql(u8, verb, "sessions")) return cmdSessions(env, rest);
     if (std.mem.eql(u8, verb, "ls")) return cmdLs(env);
     if (std.mem.eql(u8, verb, "repos")) return cmdRepos(env, rest);
     if (std.mem.eql(u8, verb, "attach")) return cmdAttach(env, rest);
@@ -59,8 +59,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
             }}));
             return 1;
         };
-        const agent_note = if (done.told_agent) "the agent was renamed too" else "the agent keeps its own name until you /rename it there";
-        return print(ctx, try ctx.fmt("{s} -> {s} ({s})\n", .{ rest[0], done.name, agent_note }));
+        return print(ctx, try ctx.fmt("{s} -> {s}{s}\n", .{ rest[0], done.name, agentNote(done.agent, done.told_agent) }));
     }
     if (std.mem.eql(u8, verb, "tm")) local.tmuxHandOver(ctx, &.{ "new", "-A", "-s", if (rest.len > 0) rest[0] else "main" });
     // Machine-to-machine protocol.
@@ -500,7 +499,21 @@ pub fn planFromIntent(reg: hosts.Registry, detected: intent.Plan) !Plan {
 
 // ---------------------------------------------------------------- listing
 
-pub const Row = struct { host: hosts.Host, name: []const u8, windows: []const u8, created: []const u8, attached: bool, agent: []const u8, path: []const u8, state: []const u8 = "idle" };
+pub const Row = struct {
+    host: hosts.Host,
+    name: []const u8,
+    windows: []const u8,
+    created: []const u8,
+    attached: bool,
+    agent: []const u8,
+    path: []const u8,
+    state: []const u8 = "idle",
+    tokens: u64 = 0,
+    /// Dollars as the machine wrote them ("12.34"), empty when unknown.
+    cost: []const u8 = "",
+    /// The agent's recap of its work, its last prompt or its name.
+    summary: []const u8 = "",
+};
 pub const HostState = struct { ok: bool = false, outside: usize = 0, sessions: usize = 0 };
 
 pub const Collected = struct { rows: []Row, states: []HostState };
@@ -519,6 +532,12 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
         threads[i] = std.Thread.spawn(.{}, Worker.run, .{ ctx, reg, i, &outputs[i] }) catch null;
     }
     for (threads) |t| if (t) |thread| thread.join();
+    saveSnapshot(ctx, reg, outputs);
+    return parse(ctx, reg, outputs);
+}
+
+/// Every machine's answer, as `_ls-raw` wrote it.
+fn parse(ctx: sys.Ctx, reg: hosts.Registry, outputs: []const []const u8) !Collected {
     var rows: std.ArrayList(Row) = .empty;
     const states = try ctx.gpa.alloc(HostState, reg.hosts.len);
     for (reg.hosts, 0..) |h, i| {
@@ -535,11 +554,72 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
                 states[i].outside = std.fmt.parseInt(usize, f.next() orelse "0", 10) catch 0;
                 continue;
             }
-            try rows.append(ctx.gpa, .{ .host = h, .name = name, .windows = f.next() orelse "", .created = f.next() orelse "", .attached = std.mem.eql(u8, f.next() orelse "0", "1"), .agent = f.next() orelse "-", .path = f.next() orelse "", .state = f.next() orelse "idle" });
+            try rows.append(ctx.gpa, .{
+                .host = h,
+                .name = name,
+                .windows = f.next() orelse "",
+                .created = f.next() orelse "",
+                .attached = std.mem.eql(u8, f.next() orelse "0", "1"),
+                .agent = f.next() orelse "-",
+                .path = f.next() orelse "",
+                .state = f.next() orelse "idle",
+                .tokens = std.fmt.parseInt(u64, f.next() orelse "", 10) catch 0,
+                .cost = f.next() orelse "",
+                .summary = f.rest(),
+            });
             states[i].sessions += 1;
         }
     }
     return .{ .rows = rows.items, .states = states };
+}
+
+/// The last listing, kept for `agb sessions` to show at once: the daemon,
+/// the tray and the Omarchy bar list every machine every 15 s anyway.
+/// "@<machine>" opens each machine's answer; the first line is the time.
+fn saveSnapshot(ctx: sys.Ctx, reg: hosts.Registry, outputs: []const []const u8) void {
+    var text: std.ArrayList(u8) = .empty;
+    text.appendSlice(ctx.gpa, ctx.fmt("#at|{d}\n", .{std.Io.Clock.real.now(ctx.io).toSeconds()}) catch return) catch return;
+    for (reg.hosts, outputs) |h, out| {
+        text.appendSlice(ctx.gpa, ctx.fmt("@{s}\n", .{h.name}) catch return) catch return;
+        text.appendSlice(ctx.gpa, out) catch return;
+        if (out.len > 0 and out[out.len - 1] != '\n') text.append(ctx.gpa, '\n') catch return;
+    }
+    const path = snapshotPath(ctx) catch return;
+    std.Io.Dir.cwd().createDirPath(ctx.io, std.fs.path.dirname(path).?) catch {};
+    sys.writeFileAtomic(ctx, path, text.items) catch {};
+}
+
+fn snapshotPath(ctx: sys.Ctx) ![]const u8 {
+    return ctx.join(&.{ try sys.cacheDir(ctx), "sessions.snapshot" });
+}
+
+pub const Snapshot = struct { collected: Collected, at: i64 };
+
+/// The last listing on disk, if any.
+pub fn loadSnapshot(ctx: sys.Ctx, reg: hosts.Registry) ?Snapshot {
+    const text = sys.readFile(ctx, snapshotPath(ctx) catch return null) orelse return null;
+    var at: i64 = 0;
+    const outputs = ctx.gpa.alloc([]const u8, reg.hosts.len) catch return null;
+    @memset(outputs, "");
+    var current: ?usize = null;
+    var start: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |line| {
+        const end = lines.index orelse text.len;
+        if (std.mem.startsWith(u8, line, "#at|")) {
+            at = std.fmt.parseInt(i64, line[4..], 10) catch 0;
+        } else if (std.mem.startsWith(u8, line, "@")) {
+            if (current) |i| outputs[i] = text[start .. end - line.len - 1];
+            current = null;
+            for (reg.hosts, 0..) |h, i| if (std.mem.eql(u8, h.name, line[1..])) {
+                current = i;
+            };
+            start = end;
+        }
+    }
+    if (current) |i| outputs[i] = text[start..];
+    const c = parse(ctx, reg, outputs) catch return null;
+    return .{ .collected = c, .at = at };
 }
 
 /// `agb _sessions`: every machine's sessions as JSON, for the Mac's menus
@@ -547,9 +627,9 @@ pub fn collect(ctx: sys.Ctx, reg: hosts.Registry) !Collected {
 fn sessionsJson(ctx: sys.Ctx) ![]const u8 {
     const reg = try loadRegistry(ctx);
     const c = try collect(ctx, reg);
-    const Session = struct { host: []const u8, name: []const u8, agent: []const u8, attached: bool, here: bool, state: []const u8 };
+    const Session = struct { host: []const u8, name: []const u8, agent: []const u8, attached: bool, here: bool, state: []const u8, tokens: u64, cost: []const u8, summary: []const u8 };
     const list = try ctx.gpa.alloc(Session, c.rows.len);
-    for (c.rows, list) |r, *s| s.* = .{ .host = r.host.name, .name = r.name, .agent = r.agent, .attached = r.attached, .here = reg.isSelf(r.host), .state = r.state };
+    for (c.rows, list) |r, *s| s.* = .{ .host = r.host.name, .name = r.name, .agent = r.agent, .attached = r.attached, .here = reg.isSelf(r.host), .state = r.state, .tokens = r.tokens, .cost = r.cost, .summary = r.summary };
     var down: std.ArrayList([]const u8) = .empty;
     for (reg.hosts, c.states) |h, st| if (!st.ok) try down.append(ctx.gpa, h.name);
     return ctx.fmt("{f}\n", .{std.json.fmt(.{ .sessions = list, .unreachable_hosts = down.items }, .{})});
@@ -572,9 +652,13 @@ fn render(ctx: sys.Ctx, reg: hosts.Registry, c: Collected) !void {
         ws = @max(ws, r.name.len);
     }
     var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(ctx.gpa, try ctx.fmt("{s:>3}  {s}  {s}  {s:<8}  {s:>3}  {s:>5}\n", .{ "#", try pad(ctx, "MACHINE", wh), try pad(ctx, "SESSION", ws), "AGENT", "WIN", "AGE" }));
-    for (c.rows, 0..) |r, i|
-        try out.appendSlice(ctx.gpa, try ctx.fmt("{d:>3}  {s}  {s}  {s:<8}  {s:>3}  {s:>5}  {s}\n", .{ i + 1, try pad(ctx, r.host.name, wh), try pad(ctx, r.name, ws), r.agent, r.windows, age(ctx, r.created), if (r.attached) "attached" else "" }));
+    try out.appendSlice(ctx.gpa, try ctx.fmt("{s:>3}  {s}  {s}  {s:<8}  {s:<7}  {s:>5}  {s:>7}  {s:>8}  {s}\n", .{ "#", try pad(ctx, "MACHINE", wh), try pad(ctx, "SESSION", ws), "AGENT", "STATE", "AGE", "TOKENS", "COST", "SUMMARY" }));
+    for (c.rows, 0..) |r, i| {
+        const tokens: []const u8 = if (r.tokens >= 1_000_000) try ctx.fmt("{d:.1}M", .{@as(f64, @floatFromInt(r.tokens)) / 1e6}) else if (r.tokens > 0) try ctx.fmt("{d}k", .{r.tokens / 1000}) else "";
+        const cost: []const u8 = if (r.cost.len > 0) try ctx.fmt("${s}", .{r.cost}) else "";
+        const summary = if (r.summary.len > 60) try ctx.fmt("{s}...", .{utf8Prefix(r.summary, 57)}) else r.summary;
+        try out.appendSlice(ctx.gpa, try ctx.fmt("{d:>3}  {s}  {s}  {s:<8}  {s:<7}  {s:>5}  {s:>7}  {s:>8}  {s}{s}\n", .{ i + 1, try pad(ctx, r.host.name, wh), try pad(ctx, r.name, ws), r.agent, r.state, age(ctx, r.created), tokens, cost, if (r.attached) "(attached) " else "", summary }));
+    }
     var silent: std.ArrayList(u8) = .empty;
     var loose: std.ArrayList(u8) = .empty;
     var with: usize = 0;
@@ -597,6 +681,14 @@ fn render(ctx: sys.Ctx, reg: hosts.Registry, c: Collected) !void {
     try out.append(ctx.gpa, '\n');
     if (loose.items.len > 0) try out.appendSlice(ctx.gpa, try ctx.fmt("agents outside tmux (cannot attach; see agb adopt): {s}\n", .{loose.items}));
     _ = print(ctx, out.items);
+}
+
+/// At most `n` bytes of UTF-8 text, never cutting a character.
+fn utf8Prefix(text: []const u8, n: usize) []const u8 {
+    if (text.len <= n) return text;
+    var end = n;
+    while (end > 0 and text[end] & 0xC0 == 0x80) end -= 1;
+    return text[0..end];
 }
 
 fn pad(ctx: sys.Ctx, s: []const u8, width: usize) ![]const u8 {
@@ -642,28 +734,53 @@ fn readLine(ctx: sys.Ctx) ?[]const u8 {
     return ctx.gpa.dupe(u8, std.mem.trim(u8, line orelse return null, " \r\t")) catch null;
 }
 
-fn cmdSessions(env: Env) !u8 {
+/// `agb sessions`: the live list on a terminal (tui.zig), else the plain one;
+/// `list`, `open`, `close` and `rename` act without it.
+fn cmdSessions(env: Env, args: []const []const u8) !u8 {
     const ctx = env.ctx;
-    const reg = try loadRegistry(ctx);
-    const c = try collect(ctx, reg);
-    try render(ctx, reg, c);
-    if (c.rows.len == 0) {
-        say("\nno sessions yet: agb new [agent] [machine] [repo] [what to do]", .{});
-        return 0;
+    if (args.len > 0) {
+        const sub = args[0];
+        const rest = args[1..];
+        if (std.mem.eql(u8, sub, "list") or std.mem.eql(u8, sub, "ls")) return cmdLs(env);
+        if (std.mem.eql(u8, sub, "open") or std.mem.eql(u8, sub, "attach")) return cmdAttach(env, rest);
+        if (std.mem.eql(u8, sub, "close") or std.mem.eql(u8, sub, "stop")) return cmdSessionAction(env, "stop", rest);
+        if (std.mem.eql(u8, sub, "rename")) return cmdSessionAction(env, "rename", rest);
+        say("usage: agb sessions [list | open <session> [machine] | close <session> [machine] | rename <session> [machine] <new name…>]", .{});
+        return 2;
     }
-    std.debug.print("\nsession (number or name, empty to quit): ", .{});
-    const choice = readLine(ctx) orelse return 0;
-    if (choice.len == 0 or std.mem.eql(u8, choice, "q")) return 0;
-    const index = blk: {
-        if (std.fmt.parseInt(usize, choice, 10)) |n| {
-            if (n >= 1 and n <= c.rows.len) break :blk n - 1;
-        } else |_| {
-            for (c.rows, 0..) |r, i| if (std.mem.eql(u8, r.name, choice)) break :blk i;
-        }
-        say("agb: '{s}' is not on the list", .{choice});
-        return 1;
-    };
-    return attachRow(env, reg, c.rows[index], false);
+    const reg = try loadRegistry(ctx);
+    const tty = std.Io.File.stdout().isTty(ctx.io) catch false;
+    if (tty) if (@import("tui.zig").run(ctx, reg)) |code| return code;
+    return cmdLs(env);
+}
+
+/// What happened to the agent's own name, for agents that have one.
+fn agentNote(agent: []const u8, told: bool) []const u8 {
+    if (!std.mem.startsWith(u8, agent, "claude") and !std.mem.startsWith(u8, agent, "codex")) return "";
+    return if (told) " (the agent too)" else " (the agent keeps its own name until you /rename it there)";
+}
+
+/// The end of a session's screen, on whichever machine it runs.
+pub fn peekRow(ctx: sys.Ctx, row: Row, lines: usize) ?[]const u8 {
+    const reg = loadRegistry(ctx) catch return null;
+    if (reg.isSelf(row.host)) return local.peek(ctx, row.name, lines);
+    const out = remote(ctx, row.host, &.{ "_peek", row.name, ctx.fmt("{d}", .{lines}) catch return null });
+    return if (out.ok) out.stdout else null;
+}
+
+pub fn stopRow(ctx: sys.Ctx, reg: hosts.Registry, row: Row) bool {
+    if (reg.isSelf(row.host)) return local.stop(ctx, row.name);
+    return remote(ctx, row.host, &.{ "_stop", row.name }).ok;
+}
+
+/// Renames a session and its agent; returns what happened, in one line.
+pub fn renameRow(ctx: sys.Ctx, reg: hosts.Registry, row: Row, name: []const u8) []const u8 {
+    if (reg.isSelf(row.host)) {
+        const done = local.rename(ctx, row.name, name) catch |err| return ctx.fmt("could not rename {s}: {s}", .{ row.name, @errorName(err) }) catch "";
+        return ctx.fmt("{s} -> {s}{s}", .{ row.name, done.name, agentNote(row.agent, done.told_agent) }) catch "";
+    }
+    const out = remote(ctx, row.host, &.{ "_rename", row.name, name });
+    return std.mem.trim(u8, if (out.stdout.len > 0) out.stdout else out.stderr, " \r\n");
 }
 
 fn attachRow(env: Env, reg: hosts.Registry, row: Row, detach_others: bool) !u8 {
