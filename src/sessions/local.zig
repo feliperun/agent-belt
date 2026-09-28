@@ -523,19 +523,30 @@ fn orphanTtys(gpa: std.mem.Allocator, clients: []const u8, ps: []const u8) ![]co
         var parent: ?[]const u8 = null;
         var rows = std.mem.splitScalar(u8, ps, '\n');
         while (rows.next()) |row| {
-            var cols = std.mem.tokenizeAny(u8, row, " \r");
-            if (std.mem.eql(u8, cols.next() orelse continue, pid)) parent = cols.next();
+            const cols = psColumns(row) orelse continue;
+            if (std.mem.eql(u8, cols.pid, pid)) parent = cols.ppid;
         }
         const ppid = parent orelse continue; // not in the listing: leave it alone
         var alive = false;
         rows = std.mem.splitScalar(u8, ps, '\n');
         while (rows.next()) |row| {
-            var cols = std.mem.tokenizeAny(u8, row, " \r");
-            if (std.mem.eql(u8, cols.next() orelse continue, ppid)) alive = true;
+            const cols = psColumns(row) orelse continue;
+            if (std.mem.eql(u8, cols.pid, ppid)) alive = true;
         }
         if (!alive) try ttys.append(gpa, tty);
     }
     return ttys.toOwnedSlice(gpa);
+}
+
+/// PID and PPID of a `ps -e` row. MSYS2's ps puts a status flag before the PID
+/// (`O` while the process waits to write its output, `I`, `S`): a busy
+/// script(1) read as "O" looked dead, and its client was detached mid-session
+/// whenever the agent drew a lot.
+fn psColumns(row: []const u8) ?struct { pid: []const u8, ppid: []const u8 } {
+    var cols = std.mem.tokenizeAny(u8, row, " \r");
+    var first = cols.next() orelse return null;
+    if (first.len == 1 and !std.ascii.isDigit(first[0])) first = cols.next() orelse return null;
+    return .{ .pid = first, .ppid = cols.next() orelse return null };
 }
 
 /// Attaches this terminal to a local session (switching client inside tmux).
@@ -1103,8 +1114,10 @@ test "an orphan tmux client is found by its missing parent" {
         \\   330309  330279  330309     165648  pty3      197609 14:26:54 /usr/bin/tmux
         \\   348605       1  348605      70832  cons0     197609 15:58:47 /usr/bin/script
         \\   348623  348605  348623      90168  pty8      197609 15:58:49 /usr/bin/tmux
+        \\O    7611       1    7611       3320  cons0     197609 11:38:03 /usr/bin/script
+        \\     7649    7611    7649      15196  pty4      197609 11:38:05 /usr/bin/tmux
     ;
-    const ttys = try orphanTtys(std.testing.allocator, "330309 /dev/pty3\n348623 /dev/pty8\n999 /dev/pty9\n", ps);
+    const ttys = try orphanTtys(std.testing.allocator, "330309 /dev/pty3\n348623 /dev/pty8\n999 /dev/pty9\n7649 /dev/pty4\n", ps);
     defer std.testing.allocator.free(ttys);
     try std.testing.expectEqual(@as(usize, 1), ttys.len);
     try std.testing.expectEqualStrings("/dev/pty3", ttys[0]);
