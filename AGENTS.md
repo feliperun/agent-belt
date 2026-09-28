@@ -207,6 +207,20 @@ file — keep appending.
   native process, an MSYS2 program brace-expands its arguments (`#{session_name}` arrives
   as `#session_name`): set `MSYS=noglob`, and a UTF-8 `LANG` for the glyphs
   (`src/sessions/local.zig`).
+- **Windows' sshd stalls a tmux client for seconds while an agent draws** (its ConPTY
+  re-renders the screen): attaches go through MSYS2's sshd on loopback, reached with
+  `ssh -J` ([ADR 0007](docs/adr/0007-attach-to-windows-through-msys2-sshd.md),
+  `src/sessions/msys_ssh.zig`). sshd started from a GUI process needs real standard
+  handles and MSYS2's `usr\bin` on PATH, or its per-connection child dies at once
+  ("startup pipe … Connection reset", "error while loading shared libraries"). Paths
+  in its config are MSYS2 paths (`/c/Users/…`); `C:/…` is read as relative.
+- **Windows: a console program started by the tray flashes a terminal window**
+  unless it is created with `create_no_window` (`std.process.run` sets it,
+  `std.process.spawn` does not): `sys.runCaptured` ran one ssh.exe per machine
+  every 15 s.
+- **MSYS2's `ps` prints a status flag before the PID** (`O` while a process waits to
+  write): read as the PID, a busy `script(1)` looked dead and its tmux client was
+  detached mid-session (`psColumns` in `src/sessions/local.zig`).
 - **Windows: a dropped ssh connection leaves its tmux client attached** (its `script`
   parent dies, the client does not). tmux draws for every client, each at its own size,
   and the window flickers; the listing detaches clients whose parent is gone

@@ -53,3 +53,4 @@ proposed → active → superseded
 | [0004](0004-agent-harnesses-and-typed-first-prompt.md) | Agent harnesses and the typed first prompt | active |
 | [0005](0005-new-agents-in-their-orca-project.md) | New agents open in their repository's Orca project | active |
 | [0006](0006-external-microphone-socket.md) | External microphone over a local socket | active |
+| [0007](0007-attach-to-windows-through-msys2-sshd.md) | Attach to Windows sessions through MSYS2's sshd | active |
