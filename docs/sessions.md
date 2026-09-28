@@ -127,6 +127,13 @@ and `/c/…` as each tool expects, and native agents run under `winpty` inside t
 MSYS2's tmux does not accept a native console as a terminal, so `agb attach` runs it
 under `script`, which provides a pty.
 
+From another machine, `agb attach` reaches a Windows session through MSYS2's sshd,
+which the tray keeps running on `127.0.0.1:58022` and `agb deploy` sets up: the client
+jumps through Windows' sshd (`ssh -J`) and runs tmux on a real MSYS2 pty. Windows' own
+sshd re-renders the screen through a pseudo console and stalled typing for seconds
+while an agent drew; it stays the fallback when the MSYS2 sshd does not answer
+([ADR 0007](adr/0007-attach-to-windows-through-msys2-sshd.md)).
+
 `agb deploy` also installs `agent-belt.exe`, the tray daemon (see the README's Windows
 section): its menu lists these sessions and opens them in a terminal window.
 

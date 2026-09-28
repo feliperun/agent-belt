@@ -5,6 +5,7 @@
 const std = @import("std");
 const w = @import("win32.zig");
 const sys = @import("../sessions/sys.zig");
+const msys_ssh = @import("../sessions/msys_ssh.zig");
 const cli = @import("../sessions/cli.zig");
 const hosts = @import("../sessions/hosts.zig");
 const deepgram = @import("../deepgram.zig");
@@ -132,6 +133,7 @@ pub fn install(ctx: sys.Ctx) !u8 {
     const value = try w.wide(ctx.gpa, try ctx.fmt("\"{s}\"", .{daemon}));
     const rc = w.RegSetKeyValueW(w.HKEY_CURRENT_USER, w.L("Software\\Microsoft\\Windows\\CurrentVersion\\Run"), w.L("AgentBelt"), w.REG_SZ, value.ptr, @intCast((value.len + 1) * 2));
     std.debug.print("{s}\n", .{if (rc == 0) "starts at login (HKCU Run: AgentBelt)" else "could not register the login item"});
+    msys_ssh.setup(ctx);
     // Started on the logged-on user's desktop, also when installing over ssh.
     _ = sys.run(ctx, &.{ "taskkill", "/im", "agent-belt.exe", "/f" }, null);
     _ = sys.run(ctx, &.{ "schtasks", "/create", "/tn", "AgentBelt", "/tr", try ctx.fmt("\"{s}\"", .{daemon}), "/sc", "once", "/st", "00:00", "/it", "/f" }, null);
@@ -284,6 +286,10 @@ fn typeText(text: []const u8) void {
         }
         _ = w.SendInput(2, &inputs, @sizeOf(w.INPUT));
     }
+}
+
+fn logSshd(err: []const u8) void {
+    log("msys sshd: {s}", .{err});
 }
 
 // ---------------------------------------------------------------- sessions snapshot
@@ -618,6 +624,7 @@ pub fn run(ctx: sys.Ctx, version: []const u8) !u8 {
     g_hook = w.SetWindowsHookExW(w.WH_KEYBOARD_LL, hookProc, g_instance, 0);
     if (g_hook == null) log("keyboard hook unavailable: hotkeys disabled", .{});
     _ = std.Thread.spawn(.{}, refreshLoop, .{}) catch null;
+    _ = std.Thread.spawn(.{}, msys_ssh.serve, .{ ctx, &logSshd }) catch null;
     log("ready {s}: tray icon, Ctrl+Alt+D dictation, Ctrl+Alt+Space menu", .{version});
 
     var msg: w.MSG = undefined;

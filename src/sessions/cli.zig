@@ -8,6 +8,7 @@
 const std = @import("std");
 const sys = @import("sys.zig");
 const hosts = @import("hosts.zig");
+const msys_ssh = @import("msys_ssh.zig");
 const local = @import("local.zig");
 const intent = @import("intent.zig");
 
@@ -19,7 +20,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_orca-open" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_orca-open", "_sshd-setup" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -64,6 +65,10 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
     }
     if (std.mem.eql(u8, verb, "_sessions")) return print(ctx, try sessionsJson(ctx));
     if (std.mem.eql(u8, verb, "_orca-open")) return @import("orca.zig").open(env, rest);
+    if (std.mem.eql(u8, verb, "_sshd-setup")) {
+        if (sys.platform == .windows) msys_ssh.setup(ctx);
+        return 0;
+    }
     if (std.mem.eql(u8, verb, "_repos-cache")) {
         try intent.refreshCache(ctx, try loadRegistry(ctx), reposOf);
         return 0;
@@ -170,6 +175,21 @@ fn remoteHandOver(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) !u8 
     if (ctx.getenv("TERM")) |term| if (!knownTerm(term)) try ctx.env.put("TERM", "xterm-256color");
     const code = sys.interactive(ctx, try remoteArgv(ctx, host, true, args), null);
     if (code != 0) say("agb: {s} on {s} ended with code {d}", .{ args[0], host.name, code });
+    return code;
+}
+
+/// Attaches this terminal to a session on another machine. A Windows machine
+/// is reached through its MSYS2 sshd when it runs one (msys_ssh.zig): Windows'
+/// own sshd stalls the screen for seconds while an agent draws. An older agb
+/// there, or an sshd that is down, fails at once (ssh's 255 within seconds)
+/// and the attach goes the old way.
+fn remoteAttach(ctx: sys.Ctx, host: hosts.Host, name: []const u8, detach_others: bool) !u8 {
+    const slow: []const []const u8 = if (detach_others) &.{ "attach", "-d", name } else &.{ "attach", name };
+    if (host.kind != .msys or !sys.validTarget(name)) return remoteHandOver(ctx, host, slow);
+    if (ctx.getenv("TERM")) |term| if (!knownTerm(term)) try ctx.env.put("TERM", "xterm-256color");
+    const started = std.Io.Clock.awake.now(ctx.io);
+    const code = sys.interactive(ctx, try msys_ssh.attachArgv(ctx, host, name, detach_others), null);
+    if (code == 255 and started.durationTo(std.Io.Clock.awake.now(ctx.io)).toSeconds() < 8) return remoteHandOver(ctx, host, slow);
     return code;
 }
 
@@ -346,9 +366,20 @@ fn execute(env: Env, input: Plan) !u8 {
         try args.appendSlice(ctx.gpa, &.{ "_run", "--agent", @tagName(plan.agent) });
         if (plan.prompt) |p| try args.appendSlice(ctx.gpa, &.{ "--prompt", p });
         if (plan.detach_others) try args.append(ctx.gpa, "-d");
-        if (plan.no_attach) try args.append(ctx.gpa, "--detach");
+        // Windows: create it detached, then attach the fast way (remoteAttach).
+        const then_attach = h.kind == .msys and !plan.no_attach;
+        if (plan.no_attach or then_attach) try args.append(ctx.gpa, "--detach");
         try args.append(ctx.gpa, plan.task.?);
         if (plan.repo) |r| try args.append(ctx.gpa, r);
+        if (then_attach) {
+            const out = remote(ctx, h, args.items);
+            const name = std.mem.trim(u8, out.stdout, " \r\n");
+            if (!out.ok or name.len == 0) {
+                std.debug.print("{s}{s}", .{ out.stdout, out.stderr });
+                return if (out.ok) 1 else out.code;
+            }
+            return remoteAttach(ctx, h, name, plan.detach_others);
+        }
         if (plan.no_attach) {
             const out = remote(ctx, h, args.items);
             _ = print(ctx, out.stdout);
@@ -624,7 +655,7 @@ fn cmdSessions(env: Env) !u8 {
 
 fn attachRow(env: Env, reg: hosts.Registry, row: Row, detach_others: bool) !u8 {
     if (reg.isSelf(row.host)) local.attach(env.ctx, row.name, detach_others);
-    return remoteHandOver(env.ctx, row.host, if (detach_others) &.{ "attach", "-d", row.name } else &.{ "attach", row.name });
+    return remoteAttach(env.ctx, row.host, row.name, detach_others);
 }
 
 fn cmdAttach(env: Env, args: []const []const u8) !u8 {
@@ -646,7 +677,7 @@ fn cmdAttach(env: Env, args: []const []const u8) !u8 {
             return 1;
         };
         if (reg.isSelf(h)) local.attach(ctx, name, detach_others);
-        return remoteHandOver(ctx, h, if (detach_others) &.{ "attach", "-d", name } else &.{ "attach", name });
+        return remoteAttach(ctx, h, name, detach_others);
     }
     // Called over ssh by another machine: the session is here, skip the network scan.
     if (local.hasSession(ctx, name)) local.attach(ctx, name, detach_others);
@@ -874,7 +905,7 @@ fn cmdAdopt(env: Env, args: []const []const u8) !u8 {
         say("agb: {s}", .{reply});
         return 1;
     }
-    return remoteHandOver(ctx, it.host, &.{ "attach", reply[3..] });
+    return remoteAttach(ctx, it.host, reply[3..], false);
 }
 
 // ---------------------------------------------------------------- deploy
@@ -995,6 +1026,7 @@ fn deployTray(ctx: sys.Ctx, h: hosts.Host, user: []const u8, prefix: []const u8,
         "$b='{s}'; $run=[bool](Get-Process agent-belt -ErrorAction SilentlyContinue); " ++
             "Stop-Process -Name agent-belt -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; " ++
             "Move-Item -Force \"$b\\agent-belt.new.exe\" \"$b\\agent-belt.exe\"; " ++
+            "& \"$b\\agb.exe\" _sshd-setup 2>&1 | ForEach-Object {{ \"$_\" }}; " ++
             "if ($run) {{ schtasks /create /tn AgentBelt /tr \"$b\\agent-belt.exe\" /sc once /st 00:00 /it /f | Out-Null; schtasks /run /tn AgentBelt | Out-Null; 'tray restarted' }} else {{ 'tray installed (agb install starts it at login)' }}",
         .{bin},
     );
