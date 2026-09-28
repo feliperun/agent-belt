@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/feliperun/agent-belt/compare/v0.6.0...v0.7.0) (2026-09-28)
+
+
+### Features
+
+* **sessions:** a live session list with state, cost and recap ([6ff741f](https://github.com/feliperun/agent-belt/commit/6ff741fdab1810caccfde514da2231063fd8ae8a))
+* **sessions:** attach to Windows sessions through MSYS2's sshd ([6619bc4](https://github.com/feliperun/agent-belt/commit/6619bc4c3a28bb7992df4a889599f0d7e2cbc972))
+* **sessions:** one name per session, in tmux and in its agent ([6d971e6](https://github.com/feliperun/agent-belt/commit/6d971e6e397998ef38b44dcb9df6375f46c0ee05))
+
+
+### Bug Fixes
+
+* **sessions:** address the adversarial review of the session list and rename ([8647029](https://github.com/feliperun/agent-belt/commit/864702974b7e4a2dc43e8830d8dd5f1128e5a00d))
+* **windows:** keep a busy tmux client attached ([8a440e9](https://github.com/feliperun/agent-belt/commit/8a440e9053a0480b8dd2b69f9586d59557f46c47))
+* **windows:** stop the tray from flashing a terminal window per machine ([f791c2b](https://github.com/feliperun/agent-belt/commit/f791c2be5238f4073b98bbe3cb2b6dff38686155))
+
 ## [0.6.0](https://github.com/feliperun/agent-belt/compare/v0.5.0...v0.6.0) (2026-09-28)
 
 
