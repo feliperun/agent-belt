@@ -289,7 +289,7 @@ Deepgram's model training).
 agb status                        daemon, permissions, device, key, log
 agb agents list|next|bottom       agents with state and stats · next · back to the bottom
 agb new <words> | --task …        create an agent session (plain words or flags)
-agb sessions|ls|attach|hosts      agent sessions across machines
+agb sessions|ls|attach|hosts      agent sessions across machines (live list: open, close, rename)
 agb repos [machine]               the repository names agb new accepts there
 agb send|peek|stop                drive a session's agent (scripts, orchestrators)
 agb rename                        rename a session in tmux and in its agent

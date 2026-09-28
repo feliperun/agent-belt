@@ -13,8 +13,9 @@ tmux marks it wrote are still read.
 
 ```
 agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
-agb sessions                      interactive picker across all machines
-agb ls                            the same list, as text
+agb sessions                      live list across all machines: open, close, rename, screen
+agb sessions list|open|close|rename   the same actions without the list (list = agb ls)
+agb ls                            the list as text: state, age, tokens, cost, summary
 agb repos [machine]               the repository names agb new accepts there
 agb attach [-d] <session> [machine]
 agb send <session> [machine] <text…>     type an instruction into the agent
@@ -127,6 +128,30 @@ shows up as such in `agb ls`.
 checkout (static musl on Linux, `x86_64-windows-gnu` on Windows), copies it with the
 registry (its own `self` line) and, on Windows, adds `~\.local\bin` to the user's PATH.
 `scripts/mesh-keys.sh` makes every machine able to ssh into every other one.
+
+## The session list
+
+`agb sessions` opens at once on the last listing, which `agb` keeps in
+`<cache>/agent-belt/sessions.snapshot` whenever any listing runs (the Mac daemon, the
+Windows tray and the Omarchy bar list every machine every 15 s), then refreshes every
+5 s in the background. Each row shows the machine, session, agent, state (working,
+waiting for you, idle), age, and for Claude Code the tokens and cost of the
+conversation, its subagents included; below the list, the selected session's folder and
+recap (the summary Claude writes when you step away, else your last prompt).
+
+| Key | Action |
+|---|---|
+| ↑ ↓ (j k), Home End (g G) | select |
+| Enter | open it; detaching comes back to the list |
+| x | close it (asks first) |
+| r | rename it, in tmux and in the agent |
+| p | show the end of its screen |
+| R, q | refresh now, quit |
+
+Tokens and cost come from the transcript (`~/.claude/projects/*/<id>.jsonl`), read
+once and then only from where the last reading stopped: the position and the sums are
+cached in `<cache>/agent-belt/transcripts/`, so a transcript of hundreds of megabytes
+costs its new lines only. Prices are the same table as the Mac menu's.
 
 ## Windows
 

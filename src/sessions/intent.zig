@@ -30,11 +30,7 @@ pub const Plan = struct {
 // ---------------------------------------------------------------- repo index
 
 fn cacheDir(ctx: sys.Ctx) ![]const u8 {
-    const base = if (sys.platform == .windows)
-        ctx.getenv("LOCALAPPDATA") orelse ctx.home()
-    else
-        ctx.getenv("XDG_CACHE_HOME") orelse try ctx.join(&.{ ctx.home(), ".cache" });
-    return ctx.join(&.{ base, "agent-belt", "repos" });
+    return ctx.join(&.{ try sys.cacheDir(ctx), "repos" });
 }
 
 /// The repos of a machine from the index, without touching the network.

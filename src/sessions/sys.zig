@@ -48,6 +48,16 @@ pub const Output = struct {
     }
 };
 
+/// agb's cache: %LOCALAPPDATA%\agent-belt on Windows, else
+/// $XDG_CACHE_HOME/agent-belt or ~/.cache/agent-belt.
+pub fn cacheDir(ctx: Ctx) ![]const u8 {
+    const base = if (platform == .windows)
+        ctx.getenv("LOCALAPPDATA") orelse ctx.home()
+    else
+        ctx.getenv("XDG_CACHE_HOME") orelse try ctx.join(&.{ ctx.home(), ".cache" });
+    return ctx.join(&.{ base, "agent-belt" });
+}
+
 /// Runs a program and captures its output. A missing program is a failed run,
 /// not an error: callers treat "not installed" like "said no".
 pub fn run(ctx: Ctx, argv: []const []const u8, cwd: ?[]const u8) Output {
