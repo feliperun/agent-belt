@@ -47,8 +47,11 @@ pub fn tmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
         const line = std.mem.concat(ctx.gpa, u8, &.{ "tmux ", sys.shJoin(ctx, args) catch return failed() }) catch return failed();
         return sys.run(ctx, &.{ sys.msys_bash, "-lc", line }, null);
     }
+    // -u: without a UTF-8 locale (the Mac daemon has none) tmux prints every
+    // non-ASCII character of a title or name as "_", and the daemon and a
+    // terminal would rename a session back and forth ("An_lise", "Análise").
     var argv: std.ArrayList([]const u8) = .empty;
-    argv.append(ctx.gpa, tmuxBin(ctx)) catch return failed();
+    argv.appendSlice(ctx.gpa, &.{ tmuxBin(ctx), "-u" }) catch return failed();
     argv.appendSlice(ctx.gpa, args) catch return failed();
     return sys.run(ctx, argv.items, null);
 }
@@ -60,7 +63,7 @@ pub fn tmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
 fn windowsTmux(ctx: sys.Ctx, args: []const []const u8) sys.Output {
     ctx.env.put("MSYS", "noglob") catch return failed();
     if (ctx.getenv("LANG") == null) ctx.env.put("LANG", "C.UTF-8") catch return failed();
-    const argv = std.mem.concat(ctx.gpa, []const u8, &.{ &.{"C:\\msys64\\usr\\bin\\tmux.exe"}, args }) catch return failed();
+    const argv = std.mem.concat(ctx.gpa, []const u8, &.{ &.{ "C:\\msys64\\usr\\bin\\tmux.exe", "-u" }, args }) catch return failed();
     return sys.run(ctx, argv, null);
 }
 
@@ -101,6 +104,19 @@ pub fn tmuxSetup(ctx: sys.Ctx) void {
     const features = tmux(ctx, &.{ "set-option", "-g", "set-clipboard", "on", ";", "set-option", "-g", "allow-passthrough", "on", ";", "set-option", "-g", "mouse", "on", ";", "show-options", "-gqv", "terminal-features" });
     if (features.ok and std.mem.indexOf(u8, features.stdout, "*:clipboard") == null)
         _ = tmux(ctx, &.{ "set-option", "-as", "terminal-features", ",*:clipboard" });
+}
+
+/// A session by its name, or by the name it had before a rename (`@work_task`).
+pub fn resolveSession(ctx: sys.Ctx, name: []const u8) ?[]const u8 {
+    if (hasSession(ctx, name)) return name;
+    const list = tmux(ctx, &.{ "list-sessions", "-F", "#{session_name}|#{?@work_task,#{@work_task},}" });
+    var lines = std.mem.splitScalar(u8, list.stdout, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, "\r");
+        const bar = std.mem.indexOfScalar(u8, line, '|') orelse continue;
+        if (std.mem.eql(u8, line[bar + 1 ..], name)) return line[0..bar];
+    }
+    return null;
 }
 
 pub fn hasSession(ctx: sys.Ctx, name: []const u8) bool {
@@ -550,7 +566,8 @@ fn psColumns(row: []const u8) ?struct { pid: []const u8, ppid: []const u8 } {
 }
 
 /// Attaches this terminal to a local session (switching client inside tmux).
-pub fn attach(ctx: sys.Ctx, name: []const u8, detach_others: bool) noreturn {
+pub fn attach(ctx: sys.Ctx, asked: []const u8, detach_others: bool) noreturn {
+    const name = resolveSession(ctx, asked) orelse asked;
     if (!hasSession(ctx, name)) {
         std.debug.print("agb: no session '{s}' on this machine\n", .{name});
         std.process.exit(1);
@@ -597,9 +614,6 @@ fn hasWord(text: []const u8, word: []const u8) bool {
     return false;
 }
 
-/// Renaming the conversation in the agent renames the tmux session: the agent
-/// publishes its name as the terminal title, which tmux keeps as pane_title.
-/// The repo prefix stays ("web-app-xpto" renamed to "bug" becomes "web-app-bug").
 /// A session name from an agent's terminal title: without the console's
 /// prefix (an elevated Windows console shows "Administrador: …") and the
 /// agent's status glyph, accents folded ("custódia" is "custodia"), words
@@ -635,26 +649,107 @@ pub fn sessionSlug(ctx: sys.Ctx, raw: []const u8) ![]const u8 {
     return std.mem.trim(u8, name.items, "-");
 }
 
-fn syncName(ctx: sys.Ctx, session: []const u8, agent: []const u8, task: []const u8, title: []const u8) ?[]const u8 {
+/// The name the agent gave its conversation: Claude Code's `/rename` (its
+/// record, "nameSource":"user"), or Codex's thread name, which it shows as the
+/// terminal title "<name> | <folder>". Empty when the agent has none: a
+/// shell's title is its folder, never a name.
+fn harnessName(states: []const PaneState, pane: []const u8, agent: []const u8, title: []const u8) []const u8 {
+    for (states) |st| if (std.mem.eql(u8, st.pane, pane)) return st.name;
+    if (!std.mem.startsWith(u8, agent, "codex")) return "";
+    const bar = std.mem.lastIndexOf(u8, title, " | ") orelse return "";
+    return std.mem.trim(u8, title[0..bar], " ");
+}
+
+/// Renaming the conversation in the agent (`/rename`) renames the tmux session
+/// to the same name. `@agb_name` keeps the name last taken from the agent, so
+/// a session renamed on purpose in tmux or with `agb rename` stays so until
+/// the agent's name changes again. Returns the new session name.
+fn syncName(ctx: sys.Ctx, session: []const u8, task: []const u8, seen: []const u8, harness: []const u8) ?[]const u8 {
     if (ctx.getenv("WORK_NO_RENAME")) |v| if (std.mem.eql(u8, v, "1")) return null;
-    if (!(std.mem.startsWith(u8, agent, "claude") or std.mem.startsWith(u8, agent, "codex"))) return null;
-    var slug = sessionSlug(ctx, title) catch return null;
-    // A title that names the program, not the work ("claude" before the
-    // conversation has a name, a shell): nothing to rename to.
-    for ([_][]const u8{ "claude", "codex", "Claude-Code", "claude-code", "bash", "zsh", "sh", "fish", "pwsh", "winpty", "tmux" }) |generic| {
-        if (std.ascii.eqlIgnoreCase(slug, generic)) return null;
-    }
-    if (slug.len > 40) slug = slug[0..40];
-    if (slug.len == 0 or std.mem.eql(u8, slug, task) or std.mem.eql(u8, slug, session)) return null;
-    var next: []const u8 = slug;
-    if (task.len > 0 and std.mem.endsWith(u8, session, task) and session.len > task.len + 1)
-        next = ctx.fmt("{s}-{s}", .{ session[0 .. session.len - task.len - 1], slug }) catch return null;
-    if (std.mem.eql(u8, next, session) or hasSession(ctx, next)) return null;
-    // Old sessions have no @work_task: record the current name so `agb new
-    // <old-name>` still finds it after the rename.
-    if (task.len == 0) _ = tmux(ctx, &.{ "set-option", "-t", session, "@work_task", session });
-    if (!tmux(ctx, &.{ "rename-session", "-t", ctx.fmt("={s}", .{session}) catch return null, next }).ok) return null;
+    var slug = sessionSlug(ctx, harness) catch return null;
+    if (slug.len > 40) slug = std.mem.trimEnd(u8, slug[0..40], "-");
+    if (slug.len == 0 or std.mem.eql(u8, slug, seen)) return null;
+    // set-option resolves its target as a pane: "=name" alone is not found.
+    const opts = ctx.fmt("={s}:", .{session}) catch return null;
+    _ = tmux(ctx, &.{ "set-option", "-t", opts, "@agb_name", slug });
+    if (std.mem.eql(u8, slug, session)) return null;
+    // Old sessions have no @work_task: keep the current name, which `agb new
+    // <name>` and `agb attach <name>` still find after the rename.
+    if (task.len == 0) _ = tmux(ctx, &.{ "set-option", "-t", opts, "@work_task", session });
+    const next = freeName(ctx, slug) catch return null;
+    if (!tmux(ctx, &.{ "rename-session", "-t", opts[0 .. opts.len - 1], next }).ok) return null;
     return next;
+}
+
+/// `base`, or base-2, base-3… when another session has it.
+fn freeName(ctx: sys.Ctx, base: []const u8) ![]const u8 {
+    var name = base;
+    var n: usize = 2;
+    while (hasSession(ctx, name)) : (n += 1) name = try ctx.fmt("{s}-{d}", .{ base, n });
+    return name;
+}
+
+pub const Renamed = struct { name: []const u8, told_agent: bool };
+
+/// `agb rename`: renames a session in tmux and, when its agent is idle at its
+/// prompt, in the agent too (`/rename`), so the two keep one name. A busy
+/// agent keeps its own until renamed there; the sync then follows it.
+pub fn rename(ctx: sys.Ctx, old: []const u8, wanted: []const u8) !Renamed {
+    if (!hasSession(ctx, old)) return error.NoSession;
+    const slug = try sessionSlug(ctx, wanted);
+    if (slug.len == 0 or !sys.validTarget(slug)) return error.InvalidName;
+    const fields = "#{?@work_agent,#{@work_agent},}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{pane_id}|#{pane_title}";
+    const info = tmux(ctx, &.{ "display-message", "-p", "-t", try paneTarget(ctx, old), fields });
+    var f = std.mem.splitScalar(u8, std.mem.trimEnd(u8, info.stdout, "\r\n"), '|');
+    var agent = f.next() orelse "";
+    const tty = f.next() orelse "";
+    const command = f.next() orelse "";
+    const task = f.next() orelse "";
+    const pane = f.next() orelse "";
+    const title = f.rest();
+    if (agent.len == 0) agent = inferAgent(ctx, tty, command);
+    const states = claudeStates(ctx);
+    const id = try ctx.fmt("={s}", .{old});
+    const next = if (std.mem.eql(u8, slug, old)) old else try freeName(ctx, slug);
+    if (task.len == 0) _ = tmux(ctx, &.{ "set-option", "-t", try paneTarget(ctx, old), "@work_task", old });
+    if (!std.mem.eql(u8, next, old) and !tmux(ctx, &.{ "rename-session", "-t", id, next }).ok) return error.TmuxFailed;
+    const new_id = try paneTarget(ctx, next);
+    // The agent's current name counts as seen: the sync leaves this one alone.
+    const current = sessionSlug(ctx, harnessName(states, pane, agent, title)) catch "";
+    _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", if (current.len > 0) current else next });
+    const idle = std.mem.eql(u8, paneState(states, pane, title), "idle");
+    const told = idle and tellAgent(ctx, next, agent, wanted);
+    if (told) _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", slug });
+    return .{ .name = next, .told_agent = told };
+}
+
+/// Types `/rename` into Claude Code (the name inline) or Codex (a dialog asks
+/// for it, filled with the current name). A command typed and entered at once
+/// loses the Enter to the agent's command popup: each waits for the screen.
+fn tellAgent(ctx: sys.Ctx, session: []const u8, agent: []const u8, name: []const u8) bool {
+    const target = paneTarget(ctx, session) catch return false;
+    const claude = std.mem.startsWith(u8, agent, "claude");
+    if (!claude and !std.mem.startsWith(u8, agent, "codex")) return false;
+    const command = if (claude) ctx.fmt("/rename {s}", .{name}) catch return false else "/rename";
+    if (!typeThenEnter(ctx, target, command)) return false;
+    if (claude) return true;
+    var tries: usize = 0;
+    while (tries < 15) : (tries += 1) {
+        std.Io.sleep(ctx.io, .fromMilliseconds(200), .awake) catch {};
+        const screen = tmux(ctx, &.{ "capture-pane", "-p", "-t", target }).stdout;
+        if (std.mem.indexOf(u8, screen, "Name thread") != null or std.mem.indexOf(u8, screen, "Rename thread") != null) {
+            _ = tmux(ctx, &.{ "send-keys", "-t", target, "C-u" });
+            return typeThenEnter(ctx, target, name);
+        }
+    }
+    _ = tmux(ctx, &.{ "send-keys", "-t", target, "Escape" });
+    return false;
+}
+
+fn typeThenEnter(ctx: sys.Ctx, target: []const u8, text: []const u8) bool {
+    if (!tmux(ctx, &.{ "send-keys", "-t", target, "-l", "--", text }).ok) return false;
+    std.Io.sleep(ctx.io, .fromMilliseconds(500), .awake) catch {};
+    return tmux(ctx, &.{ "send-keys", "-t", target, "Enter" }).ok;
 }
 
 /// Terminals running an agent outside tmux (they cannot be attached). Counted
@@ -792,10 +887,10 @@ fn titleWorking(title: []const u8) bool {
 /// is busy, idle or waiting). Under tmux it keeps a static title, so the title
 /// alone no longer shows it working. A parked session's state is its
 /// background job's.
-const PaneState = struct { pane: []const u8, status: []const u8 };
+const PaneState = struct { pane: []const u8, status: []const u8, name: []const u8 = "" };
 
 fn claudeStates(ctx: sys.Ctx) []PaneState {
-    const Record = struct { pid: i64 = 0, tmux: []const u8 = "", status: []const u8 = "", kind: []const u8 = "", jobId: []const u8 = "", parkedJobId: []const u8 = "" };
+    const Record = struct { pid: i64 = 0, tmux: []const u8 = "", status: []const u8 = "", kind: []const u8 = "", jobId: []const u8 = "", parkedJobId: []const u8 = "", name: []const u8 = "", nameSource: []const u8 = "" };
     var records: std.ArrayList(Record) = .empty;
     const dir_path = ctx.join(&.{ ctx.home(), ".claude", "sessions" }) catch return &.{};
     var dir = std.Io.Dir.cwd().openDir(ctx.io, dir_path, .{ .iterate = true }) catch return &.{};
@@ -817,7 +912,10 @@ fn claudeStates(ctx: sys.Ctx) []PaneState {
         if (r.parkedJobId.len > 0) for (records.items) |job| {
             if (std.mem.eql(u8, job.jobId, r.parkedJobId)) status = job.status;
         };
-        states.append(ctx.gpa, .{ .pane = r.tmux[dot + 1 ..], .status = status }) catch break;
+        // Only a name the user gave (`/rename`, `--name`): Claude also names
+        // conversations on its own, and those change as the work goes.
+        const name = if (std.mem.eql(u8, r.nameSource, "user")) r.name else "";
+        states.append(ctx.gpa, .{ .pane = r.tmux[dot + 1 ..], .status = status, .name = name }) catch break;
     }
     return states.items;
 }
@@ -842,7 +940,7 @@ fn paneState(states: []const PaneState, pane: []const u8, title: []const u8) []c
 pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     if (sys.platform == .windows) dropOrphanClients(ctx);
-    const fields = "#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,1,0}|#{?@work_agent,#{@work_agent},}|#{session_path}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{pane_id}|#{pane_title}";
+    const fields = "#{session_name}|#{session_windows}|#{session_created}|#{?session_attached,1,0}|#{?@work_agent,#{@work_agent},}|#{session_path}|#{pane_tty}|#{pane_current_command}|#{?@work_task,#{@work_task},}|#{?@agb_name,#{@agb_name},}|#{pane_id}|#{pane_title}";
     const list = tmux(ctx, &.{ "list-sessions", "-F", fields });
     const states = claudeStates(ctx);
     var lines = std.mem.splitScalar(u8, list.stdout, '\n');
@@ -859,10 +957,11 @@ pub fn lsRaw(ctx: sys.Ctx) ![]const u8 {
         const tty = f.next() orelse "";
         const command = f.next() orelse "";
         const task = f.next() orelse "";
+        const seen = f.next() orelse "";
         const pane = f.next() orelse "";
         const title = f.rest();
         if (agent.len == 0) agent = inferAgent(ctx, tty, command);
-        if (syncName(ctx, name, agent, task, title)) |renamed| name = renamed;
+        if (syncName(ctx, name, task, seen, harnessName(states, pane, agent, title))) |renamed| name = renamed;
         try out.appendSlice(ctx.gpa, try ctx.fmt("{s}|{s}|{s}|{s}|{s}|{s}|{s}\n", .{ try field(ctx, name), windows, created, attached, agent, try field(ctx, path), paneState(states, pane, title) }));
     }
     try out.appendSlice(ctx.gpa, try ctx.fmt("#outside|{d}\n", .{agentsOutside(ctx)}));
@@ -953,6 +1052,34 @@ pub fn adoptList(ctx: sys.Ctx) ![]Adoptable {
     return list.items;
 }
 
+/// The name the user gave a running agent's conversation: Claude Code's record
+/// of the process ("nameSource":"user"), or the last thread name Codex indexed
+/// for the conversation (~/.codex/session_index.jsonl).
+fn agentName(ctx: sys.Ctx, a: Adoptable) ?[]const u8 {
+    if (std.mem.eql(u8, a.agent, "claude")) {
+        const path = ctx.join(&.{ ctx.home(), ".claude", "sessions", ctx.fmt("{s}.json", .{a.pid}) catch return null }) catch return null;
+        const Record = struct { name: []const u8 = "", nameSource: []const u8 = "" };
+        const r = std.json.parseFromSliceLeaky(Record, ctx.gpa, sys.readFile(ctx, path) orelse return null, .{ .ignore_unknown_fields = true }) catch return null;
+        return if (std.mem.eql(u8, r.nameSource, "user") and r.name.len > 0) r.name else null;
+    }
+    const index = sys.readFile(ctx, ctx.join(&.{ ctx.home(), ".codex", "session_index.jsonl" }) catch return null) orelse return null;
+    return codexThreadName(ctx, index, a.conversation);
+}
+
+/// The latest name of thread `id` in Codex's session index.
+fn codexThreadName(ctx: sys.Ctx, index: []const u8, id: []const u8) ?[]const u8 {
+    if (id.len == 0) return null;
+    const Entry = struct { id: []const u8 = "", thread_name: []const u8 = "" };
+    var name: ?[]const u8 = null;
+    var lines = std.mem.splitScalar(u8, index, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.indexOf(u8, line, id) == null) continue;
+        const e = std.json.parseFromSliceLeaky(Entry, ctx.gpa, line, .{ .ignore_unknown_fields = true }) catch continue;
+        if (std.mem.eql(u8, e.id, id) and e.thread_name.len > 0) name = e.thread_name;
+    }
+    return name;
+}
+
 /// Stops process `pid` and reopens its conversation in a new tmux session.
 /// Returns the session name.
 pub fn adoptDo(ctx: sys.Ctx, pid: []const u8) ![]const u8 {
@@ -967,7 +1094,9 @@ pub fn adoptDo(ctx: sys.Ctx, pid: []const u8) ![]const u8 {
             try ctx.fmt("{s} --dangerously-skip-permissions --resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation })
         else
             try ctx.fmt("{s} --dangerously-bypass-approvals-and-sandbox resume {s}", .{ try sys.shQuote(ctx, bin), a.conversation });
-        const cleaned = try ctx.gpa.dupe(u8, std.fs.path.basename(a.dir));
+        // The name the agent gave the conversation, else the folder's.
+        const given = sessionSlug(ctx, agentName(ctx, a) orelse "") catch "";
+        const cleaned = try ctx.gpa.dupe(u8, if (given.len > 0) given else std.fs.path.basename(a.dir));
         for (cleaned) |*c| if (!(std.ascii.isAlphanumeric(c.*) or c.* == '.' or c.* == '_' or c.* == '-')) {
             c.* = '-';
         };
@@ -1106,6 +1235,27 @@ test "every harness is recognized in a pane" {
     try std.testing.expect(!isAgentCommand("fxtop"));
     try std.testing.expectEqualStrings("dsh", Agent.deepseek.program());
     try std.testing.expectEqual(Agent.zcode, parseAgent("zcode").?);
+}
+
+test "a session takes the name its agent was given, never a shell's folder" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var env = std.process.Environ.Map.init(arena.allocator());
+    const ctx = sys.Ctx{ .io = std.testing.io, .gpa = arena.allocator(), .env = &env };
+    const states = [_]PaneState{ .{ .pane = "%3", .status = "idle", .name = "Revisão do login" }, .{ .pane = "%4", .status = "busy" } };
+    try std.testing.expectEqualStrings("Revisão do login", harnessName(&states, "%3", "claude", "✳ Claude Code"));
+    try std.testing.expectEqualStrings("", harnessName(&states, "%4", "claude", "✳ auto title"));
+    try std.testing.expectEqualStrings("meu teste codex", harnessName(&states, "%9", "codex", "meu teste codex | web-app"));
+    try std.testing.expectEqualStrings("", harnessName(&states, "%9", "codex", "web-app"));
+    try std.testing.expectEqualStrings("", harnessName(&states, "%9", "shell", "notes | tmp"));
+    try std.testing.expectEqualStrings("Revisao-do-login", try sessionSlug(ctx, "Revisão do login"));
+    const index =
+        \\{"id":"01a0-aaaa","thread_name":"Fix login","updated_at":"2026-09-28T10:00:00Z"}
+        \\{"id":"01a0-bbbb","thread_name":"Other","updated_at":"2026-09-28T10:01:00Z"}
+        \\{"id":"01a0-aaaa","thread_name":"login review","updated_at":"2026-09-28T10:02:00Z"}
+    ;
+    try std.testing.expectEqualStrings("login review", codexThreadName(ctx, index, "01a0-aaaa").?);
+    try std.testing.expect(codexThreadName(ctx, index, "01a0-cccc") == null);
 }
 
 test "an orphan tmux client is found by its missing parent" {

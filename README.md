@@ -166,6 +166,7 @@ agb ls                  # the same list, as text
 agb attach <session> [machine]
 agb hosts · agb doctor · agb deploy --all
 agb send <session> "…" · agb peek <session> · agb stop <session>   # orchestration
+agb rename <session> <new name>     # tmux and the agent (/rename) keep one name
 ```
 
 All of it, including the `--detach` mode for scripts and other agents, is in
@@ -291,6 +292,7 @@ agb new <words> | --task …        create an agent session (plain words or flag
 agb sessions|ls|attach|hosts      agent sessions across machines
 agb repos [machine]               the repository names agb new accepts there
 agb send|peek|stop                drive a session's agent (scripts, orchestrators)
+agb rename                        rename a session in tmux and in its agent
 agb doctor|adopt|deploy|tm        session engine housekeeping
 agb led <color 0-7> <mode 0-5>    lights by hand
 agb permissions                   open the macOS privacy lists
