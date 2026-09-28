@@ -131,6 +131,16 @@ fn nextKey(bytes: []const u8) struct { key: Key, len: usize } {
     return .{ .key = key, .len = 1 };
 }
 
+/// Does `bytes` end in the middle of an escape sequence?
+fn incomplete(bytes: []const u8) bool {
+    const esc = std.mem.lastIndexOfScalar(u8, bytes, 0x1b) orelse return false;
+    const seq = bytes[esc + 1 ..];
+    if (seq.len == 0) return true;
+    if (seq[0] != '[' and seq[0] != 'O') return false;
+    for (seq[1..]) |c| if (std.ascii.isAlphabetic(c) or c == '~') return false;
+    return true;
+}
+
 fn decode(bytes: []const u8) Key {
     return nextKey(bytes).key;
 }
@@ -149,8 +159,10 @@ const Shared = struct {
     lock: std.Io.Mutex = .init,
     pending: ?Listing = null,
     refreshing: bool = false,
+    /// The selected session's screen, in memory of its own (preview_arena).
     preview: ?[]const u8 = null,
     preview_for: []const u8 = "",
+    preview_arena: ?*std.heap.ArenaAllocator = null,
     wake: std.atomic.Value(bool) = .init(false),
 };
 
@@ -215,13 +227,30 @@ fn refresher(ctx: sys.Ctx, reg: hosts.Registry, shared: *Shared) void {
 }
 
 /// The end of the selected session's screen, fetched off the main thread
-/// (from another machine it takes an ssh round trip).
-fn previewer(ctx: sys.Ctx, row: cli.Row, key: []const u8, shared: *Shared) void {
-    const text = cli.peekRow(ctx, row, 12);
-    shared.lock.lockUncancelable(ctx.io);
+/// (from another machine it takes an ssh round trip). The worker works on
+/// copies in its own arena: a refresh frees the listing the row came from.
+const PreviewJob = struct { arena: *std.heap.ArenaAllocator, ctx: sys.Ctx, row: cli.Row, key: []const u8 };
+
+fn previewJob(ctx: sys.Ctx, row: cli.Row, key: []const u8) ?PreviewJob {
+    const arena = newArena() orelse return null;
+    const a = arena.allocator();
+    var c = ctx;
+    c.gpa = a;
+    var r = row;
+    r.name = a.dupe(u8, row.name) catch return null;
+    r.host = .{ .name = a.dupe(u8, row.host.name) catch return null, .target = a.dupe(u8, row.host.target) catch return null, .kind = row.host.kind };
+    return .{ .arena = arena, .ctx = c, .row = r, .key = a.dupe(u8, key) catch return null };
+}
+
+fn previewer(job: PreviewJob, shared: *Shared) void {
+    const text = cli.peekRow(job.ctx, job.row, 12);
+    shared.lock.lockUncancelable(job.ctx.io);
+    const old = shared.preview_arena;
     shared.preview = text;
-    shared.preview_for = key;
-    shared.lock.unlock(ctx.io);
+    shared.preview_for = job.key;
+    shared.preview_arena = job.arena;
+    shared.lock.unlock(job.ctx.io);
+    if (old) |arena| freeListing(.{ .arena = arena, .collected = undefined, .at = 0 });
     shared.wake.store(true, .release);
 }
 
@@ -440,8 +469,10 @@ fn drawDetail(ui: *Ui, f: *Frame, lines: usize) void {
 /// The bottom of the selected session's screen: the agent's prompt and status.
 fn drawScreen(ui: *Ui, f: *Frame) void {
     const ctx = f.ctx;
+    // A copy, taken under the lock: the next preview frees this one.
     ui.shared.lock.lockUncancelable(ctx.io);
-    const text = if (std.mem.eql(u8, ui.shared.preview_for, ui.selected_key)) ui.shared.preview else null;
+    const shown = if (std.mem.eql(u8, ui.shared.preview_for, ui.selected_key)) ui.shared.preview else null;
+    const text = if (shown) |t| ctx.gpa.dupe(u8, t) catch null else null;
     ui.shared.lock.unlock(ctx.io);
     f.line("{s} screen:{s}", .{ dim, reset });
     const screen = std.mem.trimEnd(u8, text orelse "  (loading…)", " \r\n");
@@ -510,7 +541,8 @@ fn select(ui: *Ui, index: usize) void {
 
 fn askPreview(ui: *Ui) void {
     const r = ui.current() orelse return;
-    const t = std.Thread.spawn(.{}, previewer, .{ ui.ctx, r, ui.selected_key, ui.shared }) catch return;
+    const job = previewJob(ui.ctx, r, ui.selected_key) orelse return;
+    const t = std.Thread.spawn(.{}, previewer, .{ job, ui.shared }) catch return;
     t.detach();
 }
 
@@ -655,8 +687,15 @@ pub fn run(ctx: sys.Ctx, reg: hosts.Registry) ?u8 {
             draw(&ui);
             last_draw = now;
         }
-        const n = Term.read(&buf, 200);
+        var n = Term.read(&buf, 200);
         if (n == 0) continue;
+        // An arrow key can arrive in two reads (ESC, then "[A"): a sequence
+        // cut short waits a moment for the rest instead of reading as Escape.
+        while (n < buf.len and incomplete(buf[0..n])) {
+            const more = Term.read(buf[n..], 50);
+            if (more == 0) break;
+            n += more;
+        }
         var rest: []const u8 = buf[0..n];
         while (rest.len > 0 and !ui.quit) {
             const k = nextKey(rest);
@@ -674,6 +713,10 @@ test "keys decode from what terminals send" {
     try std.testing.expectEqual(Key.enter, decode("\r"));
     try std.testing.expectEqual(Key.escape, decode("\x1b"));
     try std.testing.expectEqual(Key{ .char = 'x' }, decode("x"));
+    try std.testing.expect(incomplete("\x1b"));
+    try std.testing.expect(incomplete("j\x1b["));
+    try std.testing.expect(!incomplete("\x1b[A"));
+    try std.testing.expect(!incomplete("x"));
     const typed = "\x1b[Bp";
     const first = nextKey(typed);
     try std.testing.expectEqual(Key.down, first.key);
