@@ -194,11 +194,22 @@ pub const owner_only_dir: std.Io.File.Permissions = if (platform == .windows) .d
 /// half-written file behind. The rename also repairs the mode of a file an
 /// older version left readable by everyone.
 pub fn writeFileAtomic(ctx: Ctx, path: []const u8, bytes: []const u8) !void {
-    const tmp = try ctx.fmt("{s}.agb.tmp", .{path});
+    // A temporary file per writer: two threads (the session list refreshing
+    // on its own and on R) wrote the same snapshot through one "<path>.agb.tmp"
+    // and could rename each other's half-written file.
+    const stamp = std.Io.Clock.real.now(ctx.io).toNanoseconds();
+    const tmp = try ctx.fmt("{s}.{d}-{d}.agb.tmp", .{ path, stamp, capture_seq.fetchAdd(1, .monotonic) });
     var file = try std.Io.Dir.cwd().createFile(ctx.io, tmp, .{ .truncate = true, .permissions = owner_only_file });
-    try file.writeStreamingAll(ctx.io, bytes);
+    file.writeStreamingAll(ctx.io, bytes) catch |err| {
+        file.close(ctx.io);
+        std.Io.Dir.cwd().deleteFile(ctx.io, tmp) catch {};
+        return err;
+    };
     file.close(ctx.io);
-    try std.Io.Dir.rename(std.Io.Dir.cwd(), tmp, std.Io.Dir.cwd(), path, ctx.io);
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp, std.Io.Dir.cwd(), path, ctx.io) catch |err| {
+        std.Io.Dir.cwd().deleteFile(ctx.io, tmp) catch {};
+        return err;
+    };
 }
 
 /// Creates a directory only this user can enter, and refuses one that is not:

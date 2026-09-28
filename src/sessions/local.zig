@@ -673,7 +673,9 @@ fn syncName(ctx: sys.Ctx, session: []const u8, task: []const u8, seen: []const u
     // set-option resolves its target as a pane: "=name" alone is not found.
     const opts = ctx.fmt("={s}:", .{session}) catch return null;
     _ = tmux(ctx, &.{ "set-option", "-t", opts, "@agb_name", slug });
-    if (std.mem.eql(u8, slug, session)) return null;
+    // The name agb gave the agent (`--name <task>`, the session being
+    // <repo>-<task>) is not a rename: the session keeps its repo prefix.
+    if (std.mem.eql(u8, slug, session) or std.mem.eql(u8, slug, task)) return null;
     // Old sessions have no @work_task: keep the current name, which `agb new
     // <name>` and `agb attach <name>` still find after the rename.
     if (task.len == 0) _ = tmux(ctx, &.{ "set-option", "-t", opts, "@work_task", session });
@@ -719,8 +721,11 @@ pub fn rename(ctx: sys.Ctx, old: []const u8, wanted: []const u8) !Renamed {
     const current = sessionSlug(ctx, harnessName(states, pane, agent, title)) catch "";
     _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", if (current.len > 0) current else next });
     const idle = std.mem.eql(u8, paneState(states, pane, title), "idle");
-    const told = idle and tellAgent(ctx, next, agent, wanted);
-    if (told) _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", slug });
+    // Another session had the name: the agent gets the one tmux took
+    // ("review-2"), or the two would stay apart.
+    const told_name = if (std.mem.eql(u8, next, slug)) wanted else next;
+    const told = idle and tellAgent(ctx, next, agent, told_name);
+    if (told) _ = tmux(ctx, &.{ "set-option", "-t", new_id, "@agb_name", next });
     return .{ .name = next, .told_agent = told, .agent = agent };
 }
 

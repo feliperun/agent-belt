@@ -192,16 +192,17 @@ fn remoteHandOver(ctx: sys.Ctx, host: hosts.Host, args: []const []const u8) !u8 
 
 /// Attaches this terminal to a session on another machine. A Windows machine
 /// is reached through its MSYS2 sshd when it runs one (msys_ssh.zig): Windows'
-/// own sshd stalls the screen for seconds while an agent draws. An older agb
-/// there, or an sshd that is down, fails at once (ssh's 255 within seconds)
-/// and the attach goes the old way.
+/// own sshd stalls the screen for seconds while an agent draws. A quick
+/// failure goes the old way, through agb there: an sshd that is down (ssh's
+/// 255), or a name tmux does not know (1), such as the old name of a renamed
+/// session, which agb resolves.
 fn remoteAttach(ctx: sys.Ctx, host: hosts.Host, name: []const u8, detach_others: bool) !u8 {
     const slow: []const []const u8 = if (detach_others) &.{ "attach", "-d", name } else &.{ "attach", name };
     if (host.kind != .msys or !sys.validTarget(name)) return remoteHandOver(ctx, host, slow);
     if (ctx.getenv("TERM")) |term| if (!knownTerm(term)) try ctx.env.put("TERM", "xterm-256color");
     const started = std.Io.Clock.awake.now(ctx.io);
     const code = sys.interactive(ctx, try msys_ssh.attachArgv(ctx, host, name, detach_others), null);
-    if (code == 255 and started.durationTo(std.Io.Clock.awake.now(ctx.io)).toSeconds() < 8) return remoteHandOver(ctx, host, slow);
+    if (code != 0 and started.durationTo(std.Io.Clock.awake.now(ctx.io)).toSeconds() < 8) return remoteHandOver(ctx, host, slow);
     return code;
 }
 
