@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/feliperun/agent-belt/compare/v0.5.0...v0.6.0) (2026-09-28)
+
+
+### Features
+
+* external microphone over a local socket ([05cb804](https://github.com/feliperun/agent-belt/commit/05cb80456c81d6bf1155dbabb2fbafc2054eb9b8))
+* **macos:** open the panel's new agents in their repository's Orca project ([b78cd1d](https://github.com/feliperun/agent-belt/commit/b78cd1dae1da218615b64f8d8e12c8ac2853c045))
+* **sessions:** open a new agent's tab in its repository's Orca project ([778f132](https://github.com/feliperun/agent-belt/commit/778f1325a76fd9078c6990d900a8d0de411e6f3e))
+
 ## [0.5.0](https://github.com/feliperun/agent-belt/compare/v0.4.1...v0.5.0) (2026-09-25)
 
 
