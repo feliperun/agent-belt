@@ -20,7 +20,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_orca-open", "_sshd-setup" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "rename", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_orca-open", "_sshd-setup", "_rename" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -38,7 +38,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
     if (std.mem.eql(u8, verb, "doctor")) return cmdDoctor(env);
     if (std.mem.eql(u8, verb, "adopt")) return cmdAdopt(env, rest);
     if (std.mem.eql(u8, verb, "deploy")) return cmdDeploy(env, rest);
-    if (std.mem.eql(u8, verb, "send") or std.mem.eql(u8, verb, "peek") or std.mem.eql(u8, verb, "stop")) return cmdSessionAction(env, verb, rest);
+    if (std.mem.eql(u8, verb, "send") or std.mem.eql(u8, verb, "peek") or std.mem.eql(u8, verb, "stop") or std.mem.eql(u8, verb, "rename")) return cmdSessionAction(env, verb, rest);
     if (std.mem.eql(u8, verb, "_send")) {
         if (rest.len < 2) return 2;
         return if (local.send(ctx, rest[0], try std.mem.join(ctx.gpa, " ", rest[1..]))) 0 else 1;
@@ -49,6 +49,19 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
         return print(ctx, local.peek(ctx, rest[0], lines) orelse return 1);
     }
     if (std.mem.eql(u8, verb, "_stop")) return if (rest.len == 1 and local.stop(ctx, rest[0])) 0 else 1;
+    if (std.mem.eql(u8, verb, "_rename")) {
+        if (rest.len < 2) return 2;
+        const done = local.rename(ctx, rest[0], try std.mem.join(ctx.gpa, " ", rest[1..])) catch |err| {
+            _ = print(ctx, try ctx.fmt("agb: {s}\n", .{switch (err) {
+                error.NoSession => "no such session here",
+                error.InvalidName => "a name needs letters or digits",
+                else => @errorName(err),
+            }}));
+            return 1;
+        };
+        const agent_note = if (done.told_agent) "the agent was renamed too" else "the agent keeps its own name until you /rename it there";
+        return print(ctx, try ctx.fmt("{s} -> {s} ({s})\n", .{ rest[0], done.name, agent_note }));
+    }
     if (std.mem.eql(u8, verb, "tm")) local.tmuxHandOver(ctx, &.{ "new", "-A", "-s", if (rest.len > 0) rest[0] else "main" });
     // Machine-to-machine protocol.
     if (std.mem.eql(u8, verb, "_ls-raw")) return print(ctx, try local.lsRaw(ctx));
@@ -680,7 +693,7 @@ fn cmdAttach(env: Env, args: []const []const u8) !u8 {
         return remoteAttach(ctx, h, name, detach_others);
     }
     // Called over ssh by another machine: the session is here, skip the network scan.
-    if (local.hasSession(ctx, name)) local.attach(ctx, name, detach_others);
+    if (local.resolveSession(ctx, name) != null) local.attach(ctx, name, detach_others);
     const c = try collect(ctx, reg);
     for (c.rows) |r| if (std.mem.eql(u8, r.name, name)) return attachRow(env, reg, r, detach_others);
     say("agb: no session '{s}' on any registered machine", .{name});
@@ -691,8 +704,9 @@ fn cmdAttach(env: Env, args: []const []const u8) !u8 {
 /// registered one when not given.
 fn cmdSessionAction(env: Env, verb: []const u8, args: []const []const u8) anyerror!u8 {
     const ctx = env.ctx;
-    if (args.len == 0 or (std.mem.eql(u8, verb, "send") and args.len < 2)) {
-        say("usage: agb send <session> [machine] <text…> | agb peek <session> [machine] [lines] | agb stop <session> [machine]", .{});
+    const takes_text = std.mem.eql(u8, verb, "send") or std.mem.eql(u8, verb, "rename");
+    if (args.len == 0 or (takes_text and args.len < 2)) {
+        say("usage: agb send <session> [machine] <text…> | agb peek <session> [machine] [lines] | agb stop <session> [machine] | agb rename <session> [machine] <new name…>", .{});
         return 2;
     }
     const reg = try loadRegistry(ctx);
@@ -701,7 +715,7 @@ fn cmdSessionAction(env: Env, verb: []const u8, args: []const []const u8) anyerr
     var host: ?hosts.Host = null;
     if (rest.len > 0) if (reg.find(rest[0])) |h| {
         // A lone word after the session is a machine only if it names one.
-        if (!(std.mem.eql(u8, verb, "send") and rest.len == 1)) {
+        if (!(takes_text and rest.len == 1)) {
             host = h;
             rest = rest[1..];
         }
@@ -721,7 +735,7 @@ fn cmdSessionAction(env: Env, verb: []const u8, args: []const []const u8) anyerr
     const internal = try ctx.fmt("_{s}", .{verb});
     var call: std.ArrayList([]const u8) = .empty;
     try call.appendSlice(ctx.gpa, &.{ internal, name });
-    if (std.mem.eql(u8, verb, "send")) try call.append(ctx.gpa, try std.mem.join(ctx.gpa, " ", rest));
+    if (takes_text) try call.append(ctx.gpa, try std.mem.join(ctx.gpa, " ", rest));
     if (std.mem.eql(u8, verb, "peek") and rest.len > 0) try call.append(ctx.gpa, rest[0]);
     const h = host orelse {
         if (local.hasSession(ctx, name)) return main(env, call.items);

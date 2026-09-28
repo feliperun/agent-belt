@@ -20,6 +20,7 @@ agb attach [-d] <session> [machine]
 agb send <session> [machine] <text…>     type an instruction into the agent
 agb peek <session> [machine] [lines]     read the end of its screen
 agb stop <session> [machine]
+agb rename <session> [machine] <new name…>   in tmux and, when idle, in the agent (/rename)
 agb adopt [machine]               reopen an agent started outside tmux inside tmux
 agb hosts [show|discover|add|rm|self]
 agb doctor                        test ssh, agb and the toolchain on every machine
@@ -79,8 +80,17 @@ The machine is optional in `send`/`peek`/`stop`: `agb` finds the session.
   A worktree that already had a Claude conversation continues it (`WORK_NEW=1` starts over).
 
 Asking for a task that already has a session attaches to it; a new prompt is typed into
-the running agent. Renaming the conversation in the agent renames the tmux session (the
-agent publishes its name as the terminal title), keeping the repo prefix.
+the running agent.
+
+One session, one name. `/rename` in Claude Code or Codex renames the tmux session to
+the same name within a listing (15 s): Claude Code's record of its process carries the
+name it was given, Codex shows its thread name as the terminal title. `agb rename`
+goes the other way, renaming the tmux session and typing `/rename` into the agent when
+it is idle at its prompt. `@agb_name` keeps the name last taken from the agent, so a
+session renamed on purpose stays so until the agent's name changes again; the old name
+stays in `@work_task`, which `agb attach` and `agb new` still find. A name the agent
+gave on its own (Claude names conversations as the work goes) does not rename anything,
+and neither does a shell's title. DeepSeek, ZCode and fx expose no name.
 
 | Agent | Command |
 |---|---|
