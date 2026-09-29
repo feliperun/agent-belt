@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/feliperun/agent-belt/compare/v0.7.0...v0.7.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **sessions:** agb sessions list asks which session to open again ([7b3b711](https://github.com/feliperun/agent-belt/commit/7b3b711ad4cef489e08970133a312adc3b32d3fc))
+
 ## [0.7.0](https://github.com/feliperun/agent-belt/compare/v0.6.0...v0.7.0) (2026-09-28)
 
 
