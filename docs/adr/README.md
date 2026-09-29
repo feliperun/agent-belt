@@ -54,3 +54,4 @@ proposed → active → superseded
 | [0005](0005-new-agents-in-their-orca-project.md) | New agents open in their repository's Orca project | active |
 | [0006](0006-external-microphone-socket.md) | External microphone over a local socket | active |
 | [0007](0007-attach-to-windows-through-msys2-sshd.md) | Attach to Windows sessions through MSYS2's sshd | active |
+| [0008](0008-tab-command-is-typed-into-the-terminal.md) | The tab's command is typed into the terminal, not passed to create | active |

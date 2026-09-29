@@ -112,11 +112,13 @@ static NSData *MKRunFor(NSString *path, NSArray<NSString *> *arguments, double t
 
 static NSData *MKRun(NSString *path, NSArray<NSString *> *arguments) { return MKRunFor(path, arguments, 2.0); }
 
-static NSDictionary *MKOrca(NSArray<NSString *> *arguments) {
-    NSData *data = MKRun(MKToolPath(@"orca", @"AGENT_BELT_ORCA_CLI"), [arguments arrayByAddingObject:@"--json"]);
+static NSDictionary *MKOrcaFor(NSArray<NSString *> *arguments, double timeout) {
+    NSData *data = MKRunFor(MKToolPath(@"orca", @"AGENT_BELT_ORCA_CLI"), [arguments arrayByAddingObject:@"--json"], timeout);
     id json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
     return [json isKindOfClass:NSDictionary.class] && MKBool(json[@"ok"]) ? json[@"result"] : nil;
 }
+
+static NSDictionary *MKOrca(NSArray<NSString *> *arguments) { return MKOrcaFor(arguments, 2.0); }
 
 static NSArray<NSArray<NSString *> *> *MKRows(NSString *text) {
     NSMutableArray *rows = [NSMutableArray array];
@@ -1050,13 +1052,42 @@ void mk_agents_monitor(void) {
 // A new agent's `agb new` runs in a new Orca terminal (Terminal without Orca).
 // The create-agent panel (src/create_panel.m) decides what to run.
 
+// The tab is created WITHOUT `--command` and the line is typed into it
+// afterwards. A command passed at creation is typed by the Orca app when it
+// adopts the tab, so a tab it holds in the background opens on a bare prompt and
+// the command never runs: `agb attach` is never called and the session never
+// opens. Typing it ourselves has one owner and is observable.
+static NSArray<NSString *> *MKTabCreate(NSString *title) {
+    return @[@"terminal", @"create", @"--worktree", [@"path:" stringByAppendingString:NSHomeDirectory()],
+             @"--title", title];
+}
+
+// The shell titles a tab with the command it runs, so the line names it first.
+// Create without `--focus` and switch to the handle after: `--focus` resolves the
+// tab inside a workspace Orca may keep hidden, and the tab then opens in a view
+// the user is not looking at (ADR 0005).
+static NSArray<NSArray<NSString *> *> *MKTabRun(NSString *command, NSString *title, NSString *handle) {
+    NSString *line = [NSString stringWithFormat:@"printf '\\033]0;%%s\\007' %@; %@", MKQuote(title), command];
+    return @[ @[@"terminal", @"send", @"--terminal", handle, @"--text", line, @"--enter"],
+              @[@"terminal", @"switch", @"--terminal", handle] ];
+}
+
 static void MKOpenTerminal(NSString *command, NSString *title) {
     NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
-    if (orca && MKOrca(@[@"terminal", @"create", @"--worktree", [@"path:" stringByAppendingString:NSHomeDirectory()],
-                         @"--title", title, @"--command", command, @"--focus"])) {
-        MKRestoreWindows(orca);
-        MKBringToFront(orca);
-        return;
+    if (orca) {
+        NSDictionary *created = MKOrcaFor(MKTabCreate(title), 15.0);
+        NSString *handle = MKString(created[@"terminal"][@"handle"]);
+        if (handle.length) {
+            NSArray<NSArray<NSString *> *> *run = MKTabRun(command, title, handle);
+            if (!MKOrcaFor(run[0], 10.0))
+                fprintf(stderr, "[agent-belt] Orca: the tab opened but the command could not be typed into it\n");
+            if (!MKOrca(run[1]))
+                fprintf(stderr, "[agent-belt] Orca: the tab opened but could not be brought forward\n");
+            MKRestoreWindows(orca);
+            MKBringToFront(orca);
+            return;
+        }
+        fprintf(stderr, "[agent-belt] Orca did not open the tab; falling back to a terminal window\n");
     }
     // No Orca: a .command file opens in Terminal. It carries what was dictated,
     // so it is the owner's alone and removes itself the moment it runs — zsh has

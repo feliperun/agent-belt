@@ -27,7 +27,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/ext_mic.c` | the external microphone socket (`mic.sock`): a connection is push-to-talk held, its bytes are the audio ([ADR 0006](adr/0006-external-microphone-socket.md)) |
 | `src/macos_shim.c` | HID monitor, event tap (swallowing and global shortcuts), audio capture, key injection |
 | `src/status_item.m` | overlay, switch HUD, agent menu, menu bar icon and menu |
-| `src/agent_switcher.m` | agent discovery (Orca + tmux here, every machine's sessions through `agb _sessions`), states, priority, focus, voice commands |
+| `src/agent_switcher.m` | agent discovery (Orca + tmux here, every machine's sessions through `agb _sessions`), states, priority, focus, voice commands; a session with no terminal opens in a new Orca tab whose command is typed into it ([ADR 0008](adr/0008-tab-command-is-typed-into-the-terminal.md)) |
 | `src/agent_stats.m` | titles, recaps, tokens, cost and quotas from local agent files |
 | `src/led.m` | keypad LED worker (latest state wins, repeats skipped) |
 | `src/updater.m` | release checks, notifications, source updates |

@@ -144,6 +144,25 @@ int main(void) {
         w.state = y.state = MKStateIdle;
         assert(MKPickIndex(agentRing, @"x", @"orca") == 2); // plain ring order
 
+        // A session opened from the menu is started by typing the line into the new
+        // tab. It is never handed to `create --command`: Orca runs a creation command
+        // when it adopts the tab, so a tab it keeps in the background opens on a bare
+        // prompt with `agb attach` never called and the session never opens.
+        NSArray<NSString *> *create = MKTabCreate(@"report @ windows-pc");
+        assert(![create containsObject:@"--command"]);
+        assert([create containsObject:@"--title"] && [create containsObject:@"report @ windows-pc"]);
+
+        NSString *attach = @"'/Applications/Agent Belt.app/Contents/MacOS/agb' attach report windows-pc";
+        NSArray<NSArray<NSString *> *> *run = MKTabRun(attach, @"report @ windows-pc", @"term_1");
+        assert(run.count == 2);
+        NSArray<NSString *> *send = run[0];
+        assert([send[0] isEqual:@"terminal"] && [send[1] isEqual:@"send"]);
+        assert([send containsObject:@"term_1"] && [send containsObject:@"--enter"]);
+        NSString *line = send[[send indexOfObject:@"--text"] + 1];
+        assert([line hasPrefix:@"printf '"]); // the line names the tab it runs in
+        assert([line hasSuffix:attach]);
+        assert([run[1] isEqualToArray:(@[@"terminal", @"switch", @"--terminal", @"term_1"])]);
+
         puts("agent switcher: ring, tmux/Orca agent detection, process env, session filters, agent states, priority and menu presses and voice commands OK");
     }
 }

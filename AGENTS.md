@@ -231,6 +231,15 @@ file — keep appending.
   worktree created a moment ago may not be adopted yet. The shell retitles the tab with
   the command it runs, so the command sets the title itself (`src/sessions/orca.zig`).
 
+- **Orca: `terminal create --command` can open a tab on a bare prompt.** Orca types a
+  creation command when its UI adopts the tab, so a tab it keeps in the background
+  opens with the command never run: the tab appears, `agb attach` is never called and
+  the session never opens, with no error anywhere (the daemon log shows no fallback,
+  because the create did return a handle). Create the tab without `--command` and type
+  the line with `terminal send --text … --enter`
+  ([ADR 0008](docs/adr/0008-tab-command-is-typed-into-the-terminal.md),
+  `MKTabCreate`/`MKTabRun` in `src/agent_switcher.m`).
+
 ---
 
 Adapted from [Marcos Hernanz](https://x.com/MarcosHernanz/status/2083954734487212511).
