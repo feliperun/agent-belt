@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/feliperun/agent-belt/compare/v0.7.1...v0.7.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **switcher:** type the command into the new Orca tab ([fdcb4d4](https://github.com/feliperun/agent-belt/commit/fdcb4d413a2a2e0f3e713e56b3af574bbb68d333))
+
 ## [0.7.1](https://github.com/feliperun/agent-belt/compare/v0.7.0...v0.7.1) (2026-09-29)
 
 
