@@ -735,6 +735,41 @@ fn readLine(ctx: sys.Ctx) ?[]const u8 {
     return ctx.gpa.dupe(u8, std.mem.trim(u8, line orelse return null, " \r\t")) catch null;
 }
 
+/// `agb sessions list` on a terminal: the table, then the number (or the name)
+/// of the session to open. Piped, it is the plain listing.
+fn cmdPick(env: Env) !u8 {
+    const ctx = env.ctx;
+    const reg = try loadRegistry(ctx);
+    if (reg.hosts.len == 0) {
+        say("no machines registered; start with: agb hosts discover", .{});
+        return 1;
+    }
+    const c = try collect(ctx, reg);
+    try render(ctx, reg, c);
+    if (c.rows.len == 0) {
+        say("\nno sessions yet: agb new [agent] [machine] [repo] [what to do]", .{});
+        return 0;
+    }
+    std.debug.print("\nsession (number or name, empty to quit): ", .{});
+    const choice = readLine(ctx) orelse return 0;
+    if (choice.len == 0 or std.mem.eql(u8, choice, "q")) return 0;
+    const index = chooseRows(c.rows, choice) orelse {
+        say("agb: '{s}' is not on the list", .{choice});
+        return 1;
+    };
+    return attachRow(env, reg, c.rows[index], false);
+}
+
+/// The row a typed choice names: the number as printed, or the session's name.
+fn chooseRows(rows: []const Row, choice: []const u8) ?usize {
+    if (std.fmt.parseInt(usize, choice, 10)) |n| {
+        if (n >= 1 and n <= rows.len) return n - 1;
+    } else |_| {
+        for (rows, 0..) |r, i| if (std.mem.eql(u8, r.name, choice)) return i;
+    }
+    return null;
+}
+
 /// `agb sessions`: the live list on a terminal (tui.zig), else the plain one;
 /// `list`, `open`, `close` and `rename` act without it.
 fn cmdSessions(env: Env, args: []const []const u8) !u8 {
@@ -742,7 +777,10 @@ fn cmdSessions(env: Env, args: []const []const u8) !u8 {
     if (args.len > 0) {
         const sub = args[0];
         const rest = args[1..];
-        if (std.mem.eql(u8, sub, "list") or std.mem.eql(u8, sub, "ls")) return cmdLs(env);
+        if (std.mem.eql(u8, sub, "list") or std.mem.eql(u8, sub, "ls")) {
+            if (std.Io.File.stdout().isTty(ctx.io) catch false) return cmdPick(env);
+            return cmdLs(env);
+        }
         if (std.mem.eql(u8, sub, "open") or std.mem.eql(u8, sub, "attach")) return cmdAttach(env, rest);
         if (std.mem.eql(u8, sub, "close") or std.mem.eql(u8, sub, "stop")) return cmdSessionAction(env, "stop", rest);
         if (std.mem.eql(u8, sub, "rename")) return cmdSessionAction(env, "rename", rest);
@@ -1246,4 +1284,17 @@ test "a confirmed plan as agb new arguments" {
     defer gpa.free(research);
     try std.testing.expectEqualStrings("--no-repo", research[5]);
     try std.testing.expectEqual(@as(usize, 10), research.len);
+}
+
+test "the session list takes a number or a name" {
+    const rows = [_]Row{
+        .{ .host = .{ .name = "macbook", .target = "alice@macbook", .kind = .posix }, .name = "web-app", .windows = "", .created = "", .attached = false, .agent = "claude", .path = "" },
+        .{ .host = .{ .name = "windows-pc", .target = "alice@windows-pc", .kind = .msys }, .name = "api", .windows = "", .created = "", .attached = false, .agent = "codex", .path = "" },
+    };
+    try std.testing.expectEqual(@as(?usize, 0), chooseRows(&rows, "1"));
+    try std.testing.expectEqual(@as(?usize, 1), chooseRows(&rows, "api"));
+    try std.testing.expectEqual(@as(?usize, null), chooseRows(&rows, "3"));
+    try std.testing.expectEqual(@as(?usize, null), chooseRows(&rows, "0"));
+    try std.testing.expectEqual(@as(?usize, null), chooseRows(&rows, "web"));
+    try std.testing.expectEqual(@as(?usize, null), chooseRows(&rows, ""));
 }

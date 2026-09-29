@@ -67,7 +67,7 @@ fn usageSessions() !void {
         \\agb (Agent Belt) {s}: agent sessions on any machine of your tailnet
         \\
         \\  agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
-        \\  agb sessions [list|open|close|rename] | ls | repos [machine] | attach [-d] <session> [machine]
+        \\  agb sessions | sessions list (pick by number) | ls | repos [machine] | attach [-d] <session> [machine]
         \\  agb send <session> [machine] <text…> | peek <session> [machine] [lines] | stop <session> [machine]
         \\  agb rename <session> [machine] <new name…>
         \\  agb hosts [discover|add|rm|self] | doctor | adopt [machine] | tm [name] | deploy <machine…|--all>
@@ -110,7 +110,6 @@ fn macMain(init: std.process.Init, argv: []const []const u8) !void {
         const cfg = parsed.value;
         return macos.statusReport(cfg.vendor_id, cfg.product_id, cfg.deepgram_api_key_env);
     }
-
 
     if (std.mem.eql(u8, argv[1], "update")) {
         // agb update [tag]: builds that release (default: the latest) from source.

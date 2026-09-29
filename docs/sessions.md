@@ -14,7 +14,8 @@ tmux marks it wrote are still read.
 ```
 agb new [claude|codex|deepseek|zcode|fx|shell] [machine|here] [repo] [what to do…]
 agb sessions                      live list across all machines: open, close, rename, screen
-agb sessions list|open|close|rename   the same actions without the list (list = agb ls)
+agb sessions list                 the list as text, then the number of the session to open
+agb sessions open|close|rename    the same actions without the list
 agb ls                            the list as text: state, age, tokens, cost, summary
 agb repos [machine]               the repository names agb new accepts there
 agb attach [-d] <session> [machine]
