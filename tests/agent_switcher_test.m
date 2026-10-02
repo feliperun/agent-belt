@@ -1,5 +1,6 @@
 #import "../src/agent_switcher.m"
 #include <assert.h>
+#import "../src/login_path.m"
 
 void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
 void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (void)tone; } // status_item.m
@@ -89,6 +90,20 @@ int main(void) {
         NSString *childEnv = [[NSString alloc] initWithData:MKRun(@"/usr/bin/env", @[]) encoding:NSUTF8StringEncoding];
         assert([childEnv containsString:@"LANG=en_US.UTF-8"]);
         assert(MKProcessEnv(getpid(), "MK_TEST_MISSING") == nil);
+
+        // The daemon takes the PATH of the user's login shell (rc files may print around it).
+        assert([MKParseLoginPath(@"hello\n__AGB_PATH__/a/bin:/usr/bin__AGB_PATH__") isEqual:@"/a/bin:/usr/bin"]);
+        assert(MKParseLoginPath(@"no marks") == nil && MKParseLoginPath(@"__AGB_PATH__relative__AGB_PATH__") == nil);
+        NSString *originalPath = @(getenv("PATH"));
+        setenv("PATH", "/nonexistent", 1);
+        setenv("SHELL", "/bin/sh", 1); // a login shell sets its own PATH
+        mk_login_path();
+        assert(strcmp(getenv("PATH"), "/nonexistent") && getenv("PATH")[0] == '/' && strstr(getenv("PATH"), "/usr/bin"));
+        setenv("SHELL", "/usr/bin/false", 1); // no answer: the PATH stays
+        setenv("PATH", "/nonexistent", 1);
+        mk_login_path();
+        assert(!strcmp(getenv("PATH"), "/nonexistent"));
+        setenv("PATH", originalPath.UTF8String, 1);
 
         // A terminal's host is told by its handle: Orca's read "term_…", cmux's are UUIDs.
         assert([MKHostBundle(@"term_ab12") isEqual:MKOrcaBundle]);

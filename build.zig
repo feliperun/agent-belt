@@ -43,6 +43,10 @@ pub fn build(b: *std.Build) void {
             .flags = &.{"-fobjc-arc"},
         });
         exe.root_module.addCSourceFile(.{
+            .file = b.path("src/login_path.m"),
+            .flags = &.{"-fobjc-arc"},
+        });
+        exe.root_module.addCSourceFile(.{
             .file = b.path("src/system.m"),
             .flags = &.{"-fobjc-arc"},
         });
