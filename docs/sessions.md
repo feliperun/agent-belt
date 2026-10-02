@@ -183,3 +183,8 @@ chosen one and reopens **that exact conversation** inside tmux (`claude --resume
 be established, adopt refuses rather than falling back to "the latest conversation here",
 which can belong to another agent and leaves two processes fighting over one conversation.
 The turn in progress and the scrollback are lost.
+
+A Claude Code or Codex that cmux's hooks recorded, running in a cmux tab outside tmux, can
+also be adopted from the menu bar: **Adopt into tmux** lists them, asks first, and then runs
+the same adoption and types `agb attach` into the tab the agent ran in, so the tab now holds
+the session and the agent shows up in `agb ls` and on every machine.

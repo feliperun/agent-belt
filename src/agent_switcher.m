@@ -32,6 +32,7 @@
 @property NSString *host;       // an agb session opened with `agb attach` (another machine, or detached here)
 @property NSString *session;
 @property NSString *status;     // the agent's own state when it records one: busy, idle or waiting
+@property NSNumber *adoptPid;   // a cmux agent outside tmux: its process, which `agb _adopt-do` can reopen in tmux
 @end
 @implementation MKAgentTarget
 @end
@@ -437,6 +438,7 @@ static NSArray<MKAgentTarget *> *MKCmuxTargets(NSDictionary<NSString *, NSString
         target.title = session ? agentPanes[session][1] : title;
         target.label = [NSString stringWithFormat:@"%@ · %@", session ?: (title.length ? MKCleanTitle(title) : handle), agent];
         target.status = record ? MKCmuxStatus(MKString(record[@"agent_lifecycle"])) : nil;
+        if (!session && [@[@"claude", @"codex"] containsObject:agent]) target.adoptPid = record[@"pid"]; // the two with a conversation to reopen
         target.bundle = cmux.bundleIdentifier;
         target.app = cmux;
         [targets addObject:target];
@@ -670,10 +672,14 @@ static void MKOpenTerminal(NSString *command, NSString *title);
 // cmux has no "switch to terminal": the surface's workspace is selected, then
 // the surface focused in it. The workspace is looked up now, since a surface can
 // be moved after it was listed.
-static BOOL MKCmuxFocus(NSString *surface) {
-    NSString *workspace = nil;
+static NSString *MKCmuxWorkspaceOf(NSString *surface) {
     for (NSDictionary *entry in MKCmuxSurfaces(MKCmuxFor(@[@"tree", @"--all"], 2.0)))
-        if ([entry[@"id"] isEqual:surface]) workspace = entry[@"workspace_id"];
+        if ([entry[@"id"] isEqual:surface]) return entry[@"workspace_id"];
+    return nil;
+}
+
+static BOOL MKCmuxFocus(NSString *surface) {
+    NSString *workspace = MKCmuxWorkspaceOf(surface);
     return workspace && MKCmuxFor(@[@"workspace", @"select", workspace], 2.0) &&
            MKCmuxFor(@[@"focus-panel", @"--panel", surface, @"--workspace", workspace], 2.0);
 }
@@ -1086,7 +1092,8 @@ static void MKTakeSnapshot(NSArray<MKAgentTarget *> *ring) {
     NSMutableArray *rows = [NSMutableArray array];
     for (MKAgentTarget *target in ring)
         [rows addObject:@{@"title": MKTitleOf(target), @"detail": target.detail ?: @"",
-                          @"tone": @(target.state), @"key": target.key, @"host": target.host ?: @""}];
+                          @"tone": @(target.state), @"key": target.key, @"host": target.host ?: @"",
+                          @"adopt": @(target.adoptPid != nil)}];
     NSString *quota = MKQuotaLine();
     @synchronized([MKAgentTarget class]) { mk_snapshot = rows; mk_snapshot_quota = quota; }
     mk_status_agents((int)rows.count);
@@ -1107,6 +1114,40 @@ void MKAgentsOpenKey(NSString *key) {
                 if (MKFocus(target)) MKOpened(target, mk_ring);
                 return;
             }
+    });
+}
+
+// A cmux agent started outside tmux becomes an agb session: its conversation
+// reopens in tmux (`agb _adopt-do` stops the process), and `agb attach` is typed
+// into the surface the agent ran in, so that tab now holds the session.
+static BOOL MKAdopt(MKAgentTarget *target) {
+    NSString *agb = NSBundle.mainBundle.executablePath;
+    NSData *data = MKRunFor(agb, @[@"_adopt-do", target.adoptPid.stringValue], 30);
+    NSString *reply = [[[NSString alloc] initWithData:data ?: NSData.data encoding:NSUTF8StringEncoding]
+                       stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (![reply hasPrefix:@"ok|"]) {
+        fprintf(stderr, "[agent-belt] adopt %s: %s\n", MKTitleOf(target).UTF8String, reply.UTF8String);
+        return NO;
+    }
+    NSString *session = [reply substringFromIndex:3];
+    NSString *workspace = MKCmuxWorkspaceOf(target.terminal);
+    // \n is how `cmux send` spells Enter.
+    NSString *line = [NSString stringWithFormat:@"%@ attach %@\\n", MKQuote(agb), MKQuote(session)];
+    if (!workspace || !MKCmuxFor(@[@"send", @"--workspace", workspace, @"--surface", target.terminal, line], 5)) {
+        fprintf(stderr, "[agent-belt] adopted as %s, but could not type `agb attach` into its cmux tab\n", session.UTF8String);
+        return NO;
+    }
+    return YES;
+}
+
+void MKAgentsAdoptKey(NSString *key) {
+    MKAgentsAsync(^{
+        for (MKAgentTarget *target in MKRefreshRing(NO)) {
+            if (![target.key isEqual:key] || !target.adoptPid) continue;
+            if (MKAdopt(target)) MKFocus(target);
+            else mk_hud_show(MKTitleOf(target).UTF8String, "could not adopt it; see the log", 3);
+            return;
+        }
     });
 }
 

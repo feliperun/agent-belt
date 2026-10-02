@@ -817,7 +817,15 @@ static void mk_refresh_title(void) {
         item.representedObject = agent[@"key"];
         item.toolTip = [NSString stringWithFormat:@"%@ · %@", states[tone], agent[@"detail"]];
     }
+    // A cmux agent outside tmux can become an agb session (attachable from any machine).
+    NSMenu *adopt = [NSMenu new];
+    for (NSDictionary *agent in agents) {
+        if (![agent[@"adopt"] boolValue]) continue;
+        NSMenuItem *item = [self add:adopt title:agent[@"title"] action:@selector(adoptAgent:)];
+        item.representedObject = agent;
+    }
     [menu addItem:NSMenuItem.separatorItem];
+    if (adopt.numberOfItems) [self add:menu title:@"Adopt into tmux" action:nil].submenu = adopt;
     [self add:menu title:@"New agent…   hold 5" action:@selector(newAgent:)];
     [self add:menu title:@"Agent menu   ⌃⌥Space" action:@selector(floatingMenu:)];
     [self add:menu title:@"Sessions in a terminal" action:@selector(sessions:)];
@@ -833,6 +841,16 @@ static void mk_refresh_title(void) {
     [self add:menu title:@"Open log" action:@selector(openLog:)];
 }
 - (void)openAgent:(NSMenuItem *)item { MKAgentsOpenKey(item.representedObject); }
+- (void)adoptAgent:(NSMenuItem *)item {
+    NSDictionary *agent = item.representedObject;
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = [NSString stringWithFormat:@"Adopt “%@” into tmux?", agent[@"title"]];
+    alert.informativeText = @"The agent stops and its conversation reopens inside tmux, in the same cmux tab. "
+                            @"It becomes an agb session you can attach from any machine. The turn in progress and the scrollback are lost.";
+    [alert addButtonWithTitle:@"Adopt"];
+    [alert addButtonWithTitle:@"Cancel"];
+    if ([alert runModal] == NSAlertFirstButtonReturn) MKAgentsAdoptKey(agent[@"key"]);
+}
 - (void)floatingMenu:(id)sender { (void)sender; mk_agents_menu_click(); }
 - (void)sessions:(id)sender {
     (void)sender;

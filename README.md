@@ -155,6 +155,10 @@ to `"automation"` in `~/.config/cmux/cmux.json` (or the same mode in Settings > 
 cmux terminal counts as an agent when a tmux session in it runs one, or when cmux's agent hooks
 recorded one (`cmux hooks setup` installs them for the agents other than Claude Code).
 
+A Claude Code or Codex running in a cmux tab outside tmux can be turned into an `agb` session
+from the menu bar (**Adopt into tmux**): its conversation reopens in tmux in the same tab, and
+you can attach to it from any machine ([docs/sessions.md](docs/sessions.md#adopting-an-agent-started-outside-tmux)).
+
 The switch key and the menu take you to the chosen agent: they switch the Orca tab or the cmux
 workspace, restore a minimized window and bring the app forward.
 

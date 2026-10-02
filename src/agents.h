@@ -5,5 +5,8 @@
 NSArray<NSDictionary *> *MKAgentsSnapshot(void);
 // Focuses the agent with that key (asynchronous).
 void MKAgentsOpenKey(NSString *key);
+// Reopens the cmux agent with that key inside tmux, as an agb session (asynchronous).
+// Its snapshot row says "adopt" when it can.
+void MKAgentsAdoptKey(NSString *key);
 // Plan quotas line for the menu, or nil.
 NSString *MKAgentsQuotaLine(void);
