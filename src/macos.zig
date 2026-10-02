@@ -112,6 +112,14 @@ pub fn agentsMenuPress() void {
     c.mk_agents_menu_press();
 }
 
+pub fn loginPath() void {
+    c.mk_login_path();
+}
+
+pub fn setTerminal(name: [:0]const u8) void {
+    c.mk_agents_set_terminal(name.ptr);
+}
+
 pub fn agentsMonitor() void {
     c.mk_agents_monitor();
 }

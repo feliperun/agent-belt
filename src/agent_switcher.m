@@ -32,6 +32,7 @@
 @property NSString *host;       // an agb session opened with `agb attach` (another machine, or detached here)
 @property NSString *session;
 @property NSString *status;     // the agent's own state when it records one: busy, idle or waiting
+@property NSNumber *adoptPid;   // a cmux agent outside tmux: its process, which `agb _adopt-do` can reopen in tmux
 @end
 @implementation MKAgentTarget
 @end
@@ -63,7 +64,8 @@ static NSString *MKToolPath(NSString *name, NSString *overrideVar) {
     for (NSString *dir in [NSProcessInfo.processInfo.environment[@"PATH"] componentsSeparatedByString:@":"])
         if ([dir hasPrefix:@"/"]) [paths addObject:[dir stringByAppendingPathComponent:name]];
     // launchd starts the daemon with a minimal PATH.
-    for (NSString *dir in @[@"/opt/homebrew/bin", @"/usr/local/bin", @"/Applications/Orca.app/Contents/Resources/bin"])
+    for (NSString *dir in @[@"/opt/homebrew/bin", @"/usr/local/bin", @"/Applications/Orca.app/Contents/Resources/bin",
+                          @"/Applications/cmux.app/Contents/Resources/bin"])
         [paths addObject:[dir stringByAppendingPathComponent:name]];
     for (NSString *path in paths)
         if ([NSFileManager.defaultManager isExecutableFileAtPath:path]) return path;
@@ -119,6 +121,51 @@ static NSDictionary *MKOrcaFor(NSArray<NSString *> *arguments, double timeout) {
 }
 
 static NSDictionary *MKOrca(NSArray<NSString *> *arguments) { return MKOrcaFor(arguments, 2.0); }
+
+static NSString *const MKOrcaBundle = @"com.stablyai.orca";
+static NSString *const MKCmuxBundle = @"com.cmuxterm.app";
+
+// cmux prints a bare JSON document (no {"ok", "result"} envelope), and only
+// answers processes it started unless Settings > Automation allows others
+// (ADR 0009). Ids are UUIDs: refs shift when a workspace closes.
+static id MKCmuxFor(NSArray<NSString *> *arguments, double timeout) {
+    NSData *data = MKRunFor(MKToolPath(@"cmux", @"AGENT_BELT_CMUX_CLI"),
+                            [@[@"--json", @"--id-format", @"uuids"] arrayByAddingObjectsFromArray:arguments], timeout);
+    return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+}
+
+// Every terminal surface in a `tree --all` answer, with its workspace's id.
+static NSArray<NSDictionary *> *MKCmuxSurfaces(id tree) {
+    NSMutableArray *surfaces = [NSMutableArray array];
+    for (NSDictionary *window in MKArray([tree isKindOfClass:NSDictionary.class] ? tree[@"windows"] : nil))
+        for (NSDictionary *workspace in MKArray(window[@"workspaces"]))
+            for (NSDictionary *pane in MKArray(workspace[@"panes"]))
+                for (NSDictionary *surface in MKArray(pane[@"surfaces"])) {
+                    if (![MKString(surface[@"type"]) isEqual:@"terminal"] || !MKString(surface[@"id"]).length) continue;
+                    NSMutableDictionary *entry = [surface mutableCopy];
+                    entry[@"workspace_id"] = MKString(workspace[@"id"]);
+                    [surfaces addObject:entry];
+                }
+    return surfaces;
+}
+
+// The coding agent each live surface runs, from the records cmux's agent hooks
+// keep (`sessions list`): the newest record of a live process, by surface id.
+static NSDictionary<NSString *, NSDictionary *> *MKCmuxAgents(id sessions) {
+    NSMutableDictionary *agents = [NSMutableDictionary dictionary];
+    for (NSDictionary *record in MKArray([sessions isKindOfClass:NSDictionary.class] ? sessions[@"sessions"] : nil)) {
+        NSString *surface = MKString(record[@"surface_id"]);
+        pid_t pid = (pid_t)[record[@"pid"] intValue];
+        if (!surface.length || !MKString(record[@"agent"]).length || pid <= 0 || kill(pid, 0) != 0) continue;
+        if ([agents[surface][@"updated_at_unix"] doubleValue] <= [record[@"updated_at_unix"] doubleValue]) agents[surface] = record;
+    }
+    return agents;
+}
+
+// The agent's own state in the vocabulary Claude Code's records use.
+static NSString *MKCmuxStatus(NSString *lifecycle) {
+    return [lifecycle isEqual:@"running"] ? @"busy" : [lifecycle isEqual:@"needsInput"] ? @"waiting" : @"idle";
+}
 
 static NSArray<NSArray<NSString *> *> *MKRows(NSString *text) {
     NSMutableArray *rows = [NSMutableArray array];
@@ -186,6 +233,16 @@ NSString *MKProcessEnv(pid_t pid, const char *name) {
         p += entry + 1;
     }
     return nil;
+}
+
+// The terminal an app hosts for a process: Orca's handle or cmux's surface id.
+NSString *MKHostedHandle(pid_t pid) {
+    return MKProcessEnv(pid, "ORCA_TERMINAL_HANDLE") ?: MKProcessEnv(pid, "CMUX_SURFACE_ID");
+}
+
+// Orca's handles read "term_…", cmux's are UUIDs.
+static NSString *MKHostBundle(NSString *handle) {
+    return [handle hasPrefix:@"term_"] ? MKOrcaBundle : MKCmuxBundle;
 }
 
 // The GUI application hosting a process, e.g. the terminal a tmux client runs in.
@@ -314,9 +371,9 @@ static NSArray<MKAgentTarget *> *MKSessionTargets(NSArray<MKAgentTarget *> *show
         target.detail = [NSString stringWithFormat:@"%@ · %@%@", agent, host, MKBool(session[@"attached"]) ? @" · attached" : @""];
         NSNumber *pid = attached[[NSString stringWithFormat:@"%@\t%@", host, name]];
         if (pid) {
-            NSString *handle = MKProcessEnv(pid.intValue, "ORCA_TERMINAL_HANDLE");
+            NSString *handle = MKHostedHandle(pid.intValue);
             target.terminal = handle.length ? handle : nil;
-            target.app = handle.length ? [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject
+            target.app = handle.length ? [NSRunningApplication runningApplicationsWithBundleIdentifier:MKHostBundle(handle)].firstObject
                                        : MKOwningApp(pid.intValue);
             target.bundle = target.app.bundleIdentifier;
         }
@@ -325,37 +382,13 @@ static NSArray<MKAgentTarget *> *MKSessionTargets(NSArray<MKAgentTarget *> *show
     return targets;
 }
 
-static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
-    NSArray *paneRows = MKTmux(@[@"list-panes", @"-a", @"-F",
-        @"#{session_name}\t#{@work_agent}\t#{pane_current_command}\t#{pane_id}\t#{pane_title}"]);
-    NSDictionary *agents = MKSessionAgents(paneRows);
-    NSDictionary *agentPanes = MKSessionAgentPanes(paneRows);
-    // tmux clients attached to agent sessions, keyed by the Orca terminal
-    // hosting them; clients in other terminal apps are kept separately.
-    NSMutableDictionary<NSString *, NSString *> *sessionByHandle = [NSMutableDictionary dictionary];
-    NSMutableArray<MKAgentTarget *> *outside = [NSMutableArray array];
-    for (NSArray<NSString *> *client in MKTmux(@[@"list-clients", @"-F", @"#{client_pid}\t#{session_name}"])) {
-        if (client.count < 2 || !agents[client[1]]) continue;
-        pid_t pid = (pid_t)client[0].intValue;
-        NSString *handle = MKProcessEnv(pid, "ORCA_TERMINAL_HANDLE");
-        if (handle.length) { sessionByHandle[handle] = client[1]; continue; }
-        NSRunningApplication *app = MKOwningApp(pid);
-        if (!app) continue;
-        MKAgentTarget *target = [MKAgentTarget new];
-        target.key = [@"tmux:" stringByAppendingString:client[1]];
-        target.tmuxSession = client[1];
-        target.label = [NSString stringWithFormat:@"%@ · %@", client[1], agents[client[1]]];
-        target.pane = agentPanes[client[1]][0];
-        target.title = agentPanes[client[1]][1];
-        target.bundle = app.bundleIdentifier;
-        target.app = app;
-        [outside addObject:target];
-    }
-
-    NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
-    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
+// Orca's terminals running an agent, directly or through a tmux session.
+static NSArray<MKAgentTarget *> *MKOrcaTargets(NSDictionary<NSString *, NSString *> *sessionByHandle,
+                                               NSDictionary *agents, NSDictionary *agentPanes) {
+    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:MKOrcaBundle].firstObject;
     NSDictionary *result = orca ? MKOrca(@[@"terminal", @"list", @"--limit", @"100"]) : nil;
     if (orca && !result) fprintf(stderr, "[agent-belt] Orca: its CLI is unavailable; check AGENT_BELT_ORCA_CLI\n");
+    NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
     for (NSDictionary *terminal in MKArray(result[@"terminals"])) {
         if (!MKLiveTerminal(terminal)) continue;
         NSString *handle = terminal[@"handle"];
@@ -374,11 +407,81 @@ static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
         target.app = orca;
         [targets addObject:target];
     }
-    // Orca returns most-recent-output order. Never let agent output reorder the ring.
+    return targets;
+}
+
+// cmux's terminals running an agent: through a tmux session, or one cmux's
+// agent hooks recorded (`cmux sessions list`, which needs no socket).
+static NSArray<MKAgentTarget *> *MKCmuxTargets(NSDictionary<NSString *, NSString *> *sessionByHandle,
+                                               NSDictionary *agents, NSDictionary *agentPanes) {
+    NSRunningApplication *cmux = [NSRunningApplication runningApplicationsWithBundleIdentifier:MKCmuxBundle].firstObject;
+    if (!cmux) return @[];
+    id tree = MKCmuxFor(@[@"tree", @"--all"], 2.0);
+    if (!tree) {
+        fprintf(stderr, "[agent-belt] cmux: its CLI is unavailable or refuses this process; check AGENT_BELT_CMUX_CLI and Settings > Automation\n");
+        return @[];
+    }
+    NSDictionary *records = MKCmuxAgents(MKCmuxFor(@[@"sessions", @"list"], 2.0));
+    NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
+    for (NSDictionary *surface in MKCmuxSurfaces(tree)) {
+        NSString *handle = surface[@"id"];
+        NSString *session = sessionByHandle[handle];
+        NSDictionary *record = records[handle];
+        NSString *agent = session ? agents[session] : MKString(record[@"agent"]);
+        if (!agent.length) continue;
+        MKAgentTarget *target = [MKAgentTarget new];
+        target.key = handle;
+        target.terminal = handle;
+        target.tmuxSession = session;
+        NSString *title = MKString(surface[@"title"]);
+        target.pane = session ? agentPanes[session][0] : nil;
+        target.title = session ? agentPanes[session][1] : title;
+        target.label = [NSString stringWithFormat:@"%@ · %@", session ?: (title.length ? MKCleanTitle(title) : handle), agent];
+        target.status = record ? MKCmuxStatus(MKString(record[@"agent_lifecycle"])) : nil;
+        if (!session && [@[@"claude", @"codex"] containsObject:agent]) target.adoptPid = record[@"pid"]; // the two with a conversation to reopen
+        target.bundle = cmux.bundleIdentifier;
+        target.app = cmux;
+        [targets addObject:target];
+    }
+    return targets;
+}
+
+static NSArray<MKAgentTarget *> *MKTerminalTargets(void) {
+    NSArray *paneRows = MKTmux(@[@"list-panes", @"-a", @"-F",
+        @"#{session_name}\t#{@work_agent}\t#{pane_current_command}\t#{pane_id}\t#{pane_title}"]);
+    NSDictionary *agents = MKSessionAgents(paneRows);
+    NSDictionary *agentPanes = MKSessionAgentPanes(paneRows);
+    // tmux clients attached to agent sessions, keyed by the Orca or cmux
+    // terminal hosting them; clients in other terminal apps are kept separately.
+    NSMutableDictionary<NSString *, NSString *> *sessionByHandle = [NSMutableDictionary dictionary];
+    NSMutableArray<MKAgentTarget *> *outside = [NSMutableArray array];
+    for (NSArray<NSString *> *client in MKTmux(@[@"list-clients", @"-F", @"#{client_pid}\t#{session_name}"])) {
+        if (client.count < 2 || !agents[client[1]]) continue;
+        pid_t pid = (pid_t)client[0].intValue;
+        NSString *handle = MKHostedHandle(pid);
+        if (handle.length) { sessionByHandle[handle] = client[1]; continue; }
+        NSRunningApplication *app = MKOwningApp(pid);
+        if (!app) continue;
+        MKAgentTarget *target = [MKAgentTarget new];
+        target.key = [@"tmux:" stringByAppendingString:client[1]];
+        target.tmuxSession = client[1];
+        target.label = [NSString stringWithFormat:@"%@ · %@", client[1], agents[client[1]]];
+        target.pane = agentPanes[client[1]][0];
+        target.title = agentPanes[client[1]][1];
+        target.bundle = app.bundleIdentifier;
+        target.app = app;
+        [outside addObject:target];
+    }
+
+    // Each app lists its own terminals; the ring order is stable by key (Orca
+    // answers in most-recent-output order, and agent output must never reorder it).
+    NSMutableArray<MKAgentTarget *> *targets = [NSMutableArray array];
+    [targets addObjectsFromArray:MKOrcaTargets(sessionByHandle, agents, agentPanes)];
+    [targets addObjectsFromArray:MKCmuxTargets(sessionByHandle, agents, agentPanes)];
     [targets sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [outside sortUsingComparator:^NSComparisonResult(MKAgentTarget *a, MKAgentTarget *b) { return [a.key compare:b.key]; }];
     [targets addObjectsFromArray:outside];
-    // An Orca terminal running `agb attach` is listed once, as its session.
+    // A terminal running `agb attach` is listed once, as its session.
     NSArray<MKAgentTarget *> *sessions = MKSessionTargets(targets);
     NSSet *attachTerminals = [NSSet setWithArray:[sessions valueForKeyPath:@"terminal"] ?: @[]];
     [targets filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(MKAgentTarget *t, NSDictionary *b) {
@@ -488,7 +591,7 @@ static NSArray<MKAgentTarget *> *MKDesktopTargets(NSRunningApplication *app, BOO
     return targets;
 }
 
-// Terminal agents (Orca panes, `work` tmux sessions) form the ring. Codex and
+// Terminal agents (Orca and cmux terminals, `work` tmux sessions) form the ring. Codex and
 // Claude desktop windows join only when the binding asks for "desktop".
 static NSArray<MKAgentTarget *> *MKDiscover(BOOL desktop) {
     NSMutableArray *ring = [MKTerminalTargets() mutableCopy];
@@ -565,6 +668,22 @@ static BOOL MKFocusFailed(MKAgentTarget *target, const char *step) {
 }
 
 static void MKOpenTerminal(NSString *command, NSString *title);
+
+// cmux has no "switch to terminal": the surface's workspace is selected, then
+// the surface focused in it. The workspace is looked up now, since a surface can
+// be moved after it was listed.
+static NSString *MKCmuxWorkspaceOf(NSString *surface) {
+    for (NSDictionary *entry in MKCmuxSurfaces(MKCmuxFor(@[@"tree", @"--all"], 2.0)))
+        if ([entry[@"id"] isEqual:surface]) return entry[@"workspace_id"];
+    return nil;
+}
+
+static BOOL MKCmuxFocus(NSString *surface) {
+    NSString *workspace = MKCmuxWorkspaceOf(surface);
+    return workspace && MKCmuxFor(@[@"workspace", @"select", workspace], 2.0) &&
+           MKCmuxFor(@[@"focus-panel", @"--panel", surface, @"--workspace", workspace], 2.0);
+}
+
 static NSString *MKQuote(NSString *s) {
     return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
 }
@@ -579,7 +698,9 @@ static BOOL MKFocus(MKAgentTarget *target) {
     if (target.app.terminated) return MKFocusFailed(target, "app encerrado");
     if (target.terminal || target.tmuxSession || target.host) {
         MKRestoreWindows(target.app);
-        if (target.terminal && !MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal]))
+        if ([target.bundle isEqual:MKCmuxBundle] && target.terminal && !MKCmuxFocus(target.terminal))
+            return MKFocusFailed(target, "cmux focus");
+        if ([target.bundle isEqual:MKOrcaBundle] && target.terminal && !MKOrca(@[@"terminal", @"switch", @"--terminal", target.terminal]))
             return MKFocusFailed(target, "orca terminal switch");
         if (!MKBringToFront(target.app)) return MKFocusFailed(target, "bring the app forward");
         if (!MKWaitFrontmost(target.app)) return MKFocusFailed(target, "esperar o app ficar em primeiro plano");
@@ -634,7 +755,8 @@ static void MKObserve(NSArray<MKAgentTarget *> *ring) {
 }
 
 // Approval prompts are only looked for when the key is pressed, concurrently:
-// a tmux screen capture or Orca's own wait detection per terminal.
+// a tmux screen capture or Orca's own wait detection per terminal (cmux's hooks
+// report it as the agent's status).
 static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
     dispatch_apply(ring.count, DISPATCH_APPLY_AUTO, ^(size_t i) {
         MKAgentTarget *target = ring[i];
@@ -646,7 +768,7 @@ static void MKDetectWaiting(NSArray<MKAgentTarget *> *ring) {
         } else if (target.pane) {
             NSData *screen = MKRun(MKToolPath(@"tmux", @"AGENT_BELT_TMUX"), @[@"capture-pane", @"-p", @"-t", target.pane]);
             waiting = screen && MKWaitingScreen([[NSString alloc] initWithData:screen encoding:NSUTF8StringEncoding] ?: @"");
-        } else if (target.terminal) {
+        } else if (target.terminal && [target.bundle isEqual:MKOrcaBundle]) {
             NSDictionary *shown = MKOrca(@[@"terminal", @"show", @"--terminal", target.terminal]);
             id wait = shown[@"terminal"][@"agentWait"];
             waiting = wait && wait != NSNull.null;
@@ -705,10 +827,10 @@ static void MKEnrich(NSArray<MKAgentTarget *> *ring) {
     for (MKAgentTarget *target in ring) {
         if (target.host) { target.name = target.session; continue; } // detail and state set at discovery
         MKSessionInfo *info = target.pane ? sessions[[@"pane:" stringByAppendingString:target.pane]] : nil;
-        if (!info && target.terminal) info = sessions[[@"orca:" stringByAppendingString:target.terminal]];
+        if (!info && target.terminal) info = sessions[[@"terminal:" stringByAppendingString:target.terminal]];
         NSString *agent = [target.label componentsSeparatedByString:@" · "].lastObject;
         target.name = info.title.length ? info.title : [target.label componentsSeparatedByString:@" · "].firstObject;
-        target.status = info.status;
+        target.status = info.status ?: target.status; // else what the terminal app recorded
         NSMutableArray *parts = [NSMutableArray arrayWithObject:agent ?: @""];
         NSString *stats = info ? MKSessionStatsText(info) : @"";
         if (stats.length) [parts addObject:stats];
@@ -739,7 +861,7 @@ static int MKCycle(BOOL desktop) {
         return -1;
     }
     MKRefreshRing(desktop);
-    if (!mk_ring.count) { fprintf(stderr, "[agent-belt] no terminal with a coding agent (Orca or agb sessions)\n"); return -1; }
+    if (!mk_ring.count) { fprintf(stderr, "[agent-belt] no terminal with a coding agent (Orca, cmux or agb sessions)\n"); return -1; }
     NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
     NSUInteger start = MKPickIndex(mk_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
     for (NSUInteger offset = 0; offset < mk_ring.count; offset++) {
@@ -832,7 +954,7 @@ static void MKMenuPress(void) {
     case MKMenuShow: {
         if (!AXIsProcessTrusted()) { fprintf(stderr, "[agent-belt] menu de agents requer Accessibility\n"); return; }
         mk_menu_ring = MKRefreshRing(NO);
-        if (!mk_menu_ring.count) { mk_hud_show("No coding agents", "Orca or agb sessions", 0); return; }
+        if (!mk_menu_ring.count) { mk_hud_show("No coding agents", "Orca, cmux or agb sessions", 0); return; }
         NSString *lastKey = [NSString stringWithContentsOfFile:MKLastKeyPath() encoding:NSUTF8StringEncoding error:nil];
         mk_menu_selected = MKPickIndex(mk_menu_ring, lastKey, NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier);
         mk_menu_visible = YES;
@@ -925,7 +1047,7 @@ int mk_agents_command(int mode, int desktop) {
         for (MKAgentTarget *target in targets)
             printf("%-12s %s\n             %s\n", [@[@"idle", @"working", @"finished", @"waiting"][target.state] UTF8String],
                    MKTitleOf(target).UTF8String, target.detail.UTF8String);
-        if (!targets.count) printf("No terminal with a coding agent (Orca or agb sessions).\n");
+        if (!targets.count) printf("No terminal with a coding agent (Orca, cmux or agb sessions).\n");
         NSString *quotas = MKQuotaLine();
         printf("\nquotas: %s\n", quotas ? quotas.UTF8String : "unavailable");
         return 0;
@@ -934,7 +1056,7 @@ int mk_agents_command(int mode, int desktop) {
 
 // Hosts where "back to the bottom" may scroll the view under the pointer.
 static BOOL MKAgentHost(NSString *bundle) {
-    return [@[@"com.stablyai.orca", @"com.openai.codex", @"com.anthropic.claudefordesktop",
+    return [@[MKOrcaBundle, MKCmuxBundle, @"com.openai.codex", @"com.anthropic.claudefordesktop",
               @"com.mitchellh.ghostty", @"com.apple.Terminal", @"com.googlecode.iterm2",
               @"com.github.wez.wezterm", @"net.kovidgoyal.kitty", @"org.alacritty",
               @"dev.warp.Warp-Stable"] containsObject:bundle];
@@ -970,7 +1092,8 @@ static void MKTakeSnapshot(NSArray<MKAgentTarget *> *ring) {
     NSMutableArray *rows = [NSMutableArray array];
     for (MKAgentTarget *target in ring)
         [rows addObject:@{@"title": MKTitleOf(target), @"detail": target.detail ?: @"",
-                          @"tone": @(target.state), @"key": target.key, @"host": target.host ?: @""}];
+                          @"tone": @(target.state), @"key": target.key, @"host": target.host ?: @"",
+                          @"adopt": @(target.adoptPid != nil)}];
     NSString *quota = MKQuotaLine();
     @synchronized([MKAgentTarget class]) { mk_snapshot = rows; mk_snapshot_quota = quota; }
     mk_status_agents((int)rows.count);
@@ -991,6 +1114,40 @@ void MKAgentsOpenKey(NSString *key) {
                 if (MKFocus(target)) MKOpened(target, mk_ring);
                 return;
             }
+    });
+}
+
+// A cmux agent started outside tmux becomes an agb session: its conversation
+// reopens in tmux (`agb _adopt-do` stops the process), and `agb attach` is typed
+// into the surface the agent ran in, so that tab now holds the session.
+static BOOL MKAdopt(MKAgentTarget *target) {
+    NSString *agb = NSBundle.mainBundle.executablePath;
+    NSData *data = MKRunFor(agb, @[@"_adopt-do", target.adoptPid.stringValue], 30);
+    NSString *reply = [[[NSString alloc] initWithData:data ?: NSData.data encoding:NSUTF8StringEncoding]
+                       stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (![reply hasPrefix:@"ok|"]) {
+        fprintf(stderr, "[agent-belt] adopt %s: %s\n", MKTitleOf(target).UTF8String, reply.UTF8String);
+        return NO;
+    }
+    NSString *session = [reply substringFromIndex:3];
+    NSString *workspace = MKCmuxWorkspaceOf(target.terminal);
+    // \n is how `cmux send` spells Enter.
+    NSString *line = [NSString stringWithFormat:@"%@ attach %@\\n", MKQuote(agb), MKQuote(session)];
+    if (!workspace || !MKCmuxFor(@[@"send", @"--workspace", workspace, @"--surface", target.terminal, line], 5)) {
+        fprintf(stderr, "[agent-belt] adopted as %s, but could not type `agb attach` into its cmux tab\n", session.UTF8String);
+        return NO;
+    }
+    return YES;
+}
+
+void MKAgentsAdoptKey(NSString *key) {
+    MKAgentsAsync(^{
+        for (MKAgentTarget *target in MKRefreshRing(NO)) {
+            if (![target.key isEqual:key] || !target.adoptPid) continue;
+            if (MKAdopt(target)) MKFocus(target);
+            else mk_hud_show(MKTitleOf(target).UTF8String, "could not adopt it; see the log", 3);
+            return;
+        }
     });
 }
 
@@ -1049,7 +1206,7 @@ void mk_agents_monitor(void) {
 
 // ---------------------------------------------------------------- new agents
 
-// A new agent's `agb new` runs in a new Orca terminal (Terminal without Orca).
+// A new agent's `agb new` runs in a new Orca tab or cmux workspace (Terminal without the configured one).
 // The create-agent panel (src/create_panel.m) decides what to run.
 
 // The tab is created WITHOUT `--command` and the line is typed into it
@@ -1072,24 +1229,49 @@ static NSArray<NSArray<NSString *> *> *MKTabRun(NSString *command, NSString *tit
               @[@"terminal", @"switch", @"--terminal", handle] ];
 }
 
+// The terminal app a new agent opens in is the configured one ("terminal" in
+// config.json, cmux by default), when it is running.
+static NSString *mk_terminal_bundle;
+
+void mk_agents_set_terminal(const char *name) {
+    mk_terminal_bundle = !strcmp(name, "orca") ? MKOrcaBundle : MKCmuxBundle;
+}
+
+static NSRunningApplication *MKTerminalHost(void) {
+    return [NSRunningApplication runningApplicationsWithBundleIdentifier:mk_terminal_bundle ?: MKCmuxBundle].firstObject;
+}
+
+// cmux types `--command` into the shell it starts, so there is nothing to
+// retry: the workspace is named, focused and running the line in one call.
+static BOOL MKCmuxOpen(NSString *command, NSString *title) {
+    return MKCmuxFor(@[@"workspace", @"create", @"--cwd", NSHomeDirectory(), @"--name", title,
+                       @"--command", command, @"--focus", @"true"], 15.0) != nil;
+}
+
+static BOOL MKOrcaOpen(NSString *command, NSString *title) {
+    NSDictionary *created = MKOrcaFor(MKTabCreate(title), 15.0);
+    NSString *handle = MKString(created[@"terminal"][@"handle"]);
+    if (!handle.length) return NO;
+    NSArray<NSArray<NSString *> *> *run = MKTabRun(command, title, handle);
+    if (!MKOrcaFor(run[0], 10.0))
+        fprintf(stderr, "[agent-belt] Orca: the tab opened but the command could not be typed into it\n");
+    if (!MKOrca(run[1]))
+        fprintf(stderr, "[agent-belt] Orca: the tab opened but could not be brought forward\n");
+    return YES;
+}
+
 static void MKOpenTerminal(NSString *command, NSString *title) {
-    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
-    if (orca) {
-        NSDictionary *created = MKOrcaFor(MKTabCreate(title), 15.0);
-        NSString *handle = MKString(created[@"terminal"][@"handle"]);
-        if (handle.length) {
-            NSArray<NSArray<NSString *> *> *run = MKTabRun(command, title, handle);
-            if (!MKOrcaFor(run[0], 10.0))
-                fprintf(stderr, "[agent-belt] Orca: the tab opened but the command could not be typed into it\n");
-            if (!MKOrca(run[1]))
-                fprintf(stderr, "[agent-belt] Orca: the tab opened but could not be brought forward\n");
-            MKRestoreWindows(orca);
-            MKBringToFront(orca);
+    NSRunningApplication *host = MKTerminalHost();
+    if (host) {
+        BOOL cmux = [host.bundleIdentifier isEqual:MKCmuxBundle];
+        if (cmux ? MKCmuxOpen(command, title) : MKOrcaOpen(command, title)) {
+            MKRestoreWindows(host);
+            MKBringToFront(host);
             return;
         }
-        fprintf(stderr, "[agent-belt] Orca did not open the tab; falling back to a terminal window\n");
+        fprintf(stderr, "[agent-belt] %s did not open the tab; falling back to a terminal window\n", cmux ? "cmux" : "Orca");
     }
-    // No Orca: a .command file opens in Terminal. It carries what was dictated,
+    // No Orca or cmux: a .command file opens in Terminal. It carries what was dictated,
     // so it is the owner's alone and removes itself the moment it runs — zsh has
     // a two-line script buffered whole before the first command executes.
     NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/agent-belt"];
@@ -1104,17 +1286,18 @@ static void MKOpenTerminal(NSString *command, NSString *title) {
 // The create-agent panel (src/create_panel.m) opens its `agb new` the same way.
 void mk_open_terminal(NSString *command, NSString *title) { MKOpenTerminal(command, title); }
 
-// A new agent from the panel: with Orca open, its tab goes in its repository's
-// project (`agb _orca-open`, src/sessions/orca.zig: a new workspace for an agent
-// here, the local clone's project for another machine). Without a project for
-// it, or without Orca, `agb new` runs in a new terminal as before; it attaches
-// to the session if the first attempt already created it.
+// A new agent from the panel: with the configured terminal app open, its workspace goes with
+// its repository (`agb _tab-open`, src/sessions/tabs.zig: a new workspace for an
+// agent here, the local clone's for another machine). Without a repository for
+// it, or without that app, `agb new` runs in a new terminal as before; it
+// attaches to the session if the first attempt already created it.
 void mk_open_agent(NSArray<NSString *> *arguments, NSString *command, NSString *title) {
-    NSRunningApplication *orca = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.stablyai.orca"].firstObject;
-    if (orca && MKRunFor(NSBundle.mainBundle.executablePath, [@[@"_orca-open"] arrayByAddingObjectsFromArray:arguments], 60)) {
-        fprintf(stderr, "[agent-belt] new agent in its Orca project: %s\n", title.UTF8String);
-        MKRestoreWindows(orca);
-        MKBringToFront(orca);
+    NSRunningApplication *host = MKTerminalHost();
+    NSString *name = [host.bundleIdentifier isEqual:MKCmuxBundle] ? @"cmux" : @"orca";
+    if (host && MKRunFor(NSBundle.mainBundle.executablePath, [@[@"_tab-open", name] arrayByAddingObjectsFromArray:arguments], 60)) {
+        fprintf(stderr, "[agent-belt] new agent in its %s workspace: %s\n", name.UTF8String, title.UTF8String);
+        MKRestoreWindows(host);
+        MKBringToFront(host);
         return;
     }
     MKOpenTerminal(command, title);

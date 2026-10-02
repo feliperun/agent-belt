@@ -7,7 +7,7 @@
 - [Sentrux CLI](sentrux.md#install) for the structural quality gate.
 - To work on the keypad, overlay and menus: macOS 14+ and the Xcode Command Line
   Tools — they are AppKit and IOKit code. Optional there: the 514c:8850 macropad,
-  Orca terminals, tmux.
+  Orca or cmux terminals, tmux.
 
 `agb`, the session CLI, builds and runs on macOS, Linux and Windows; the daemon and
 its UI are macOS, the tray app is Windows, and the compositor binds are Hyprland. CI

@@ -98,6 +98,13 @@ file — keep appending.
 - **Subprocesses need a locale.** launchd starts the daemon without `LANG`; tmux then
   sanitizes format output and turns every `\t` separator into `_`, so every tmux
   session vanished. `MKRun` sets `LANG=en_US.UTF-8`, and so does the LaunchAgent.
+- **The daemon's PATH is launchd's.** Everything it starts inherits it, the tmux server of an
+  agent opened from the menu or the panel included: Claude Code's hooks then ran with
+  "node: command not found" (node is an asdf shim) in every session adopted or created from
+  the daemon. Only an interactive login shell (`-ilc`; `-lc` skips `.zshrc`) knows the
+  terminals' PATH, so the daemon takes it at start (`mk_login_path`, `src/login_path.m`).
+  A tmux server keeps the PATH it started with: restart it for sessions made before.
+
 - **A privacy grant is invisible to the process that asked.** `AXIsProcessTrusted`
   stays stale after the user grants Accessibility. Missing permissions make the daemon
   exit and launchd restart it (`mk_check_permissions`), never wait in-process.
@@ -231,6 +238,14 @@ file — keep appending.
   worktree created a moment ago may not be adopted yet. The shell retitles the tab with
   the command it runs, so the command sets the title itself (`src/sessions/orca.zig`).
 
+- **cmux refuses the daemon by default.** Its socket mode is `cmuxOnly`: only processes
+  started inside cmux connect, so the launchd daemon gets "Access denied" from every call
+  and no cmux agent appears (a run from a cmux terminal works, which hides it while
+  developing). `automation.socketControlMode: "automation"` lets it in
+  ([ADR 0009](docs/adr/0009-new-agents-in-orca-or-cmux.md), `MKCmuxFor`). Its focus calls take
+  UUIDs, and `focus-panel` needs the surface's workspace (`MKCmuxFocus`); refs shift when a
+  workspace closes.
+
 - **Orca: `terminal create --command` can open a tab on a bare prompt.** Orca types a
   creation command when its UI adopts the tab, so a tab it keeps in the background
   opens with the command never run: the tab appears, `agb attach` is never called and
@@ -239,6 +254,12 @@ file — keep appending.
   the line with `terminal send --text … --enter`
   ([ADR 0008](docs/adr/0008-tab-command-is-typed-into-the-terminal.md),
   `MKTabCreate`/`MKTabRun` in `src/agent_switcher.m`).
+
+- **A process's environment read by PID is its exec-time snapshot.** Adding a terminal
+  handle with `setenv` after startup was invisible to `KERN_PROCARGS2` in CI, although
+  the test passed inside a terminal that already provided the variable. Synthetic
+  process-environment fixtures must be set before re-exec, with competing inherited
+  handles cleared (`tests/agent_switcher_test.m`, `MKProcessEnv` in `src/agent_switcher.m`).
 
 ---
 

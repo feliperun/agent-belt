@@ -17,7 +17,7 @@ The vocabulary of the codebase.
 | Term | Meaning |
 |---|---|
 | Binding | what a keypad key does: `ptt`, `agents`, `menu`, `key`, `command`, `script`, `text` |
-| Target | one agent the switcher can focus: an Orca terminal, or a tmux session attached in some terminal |
+| Target | one agent the switcher can focus: an Orca terminal, a cmux surface, or a tmux session attached in some terminal |
 | Ring | the stable order of targets the switch key walks |
 | State | idle, working, done (finished and not seen), waiting (needs your decision) |
 | Session info | title, recap, time, tokens, cost read from an agent's transcript |
@@ -27,9 +27,10 @@ The vocabulary of the codebase.
 
 | System | Boundary |
 |---|---|
-| Keypad (514c:8850) | HID values in; vendor output reports for LEDs (`led.m`) |
+| Keypad (USB or Bluetooth `MINI-KEYBOARD`) | HID values in; shared identity matching (`keypad_hid.m`); USB-only vendor output reports for RGB LEDs (`led.m`) |
 | Deepgram | one REST call per recording (`deepgram.zig`) |
 | Orca | its CLI (`orca terminal list/show/switch/create`) via `MKOrca` |
+| cmux | its CLI (`tree`, `sessions list`, `workspace select`, `focus-panel`, `workspace create`) via `MKCmuxFor`; refuses the daemon unless `automation.socketControlMode` is `automation` ([ADR 0009](adr/0009-new-agents-in-orca-or-cmux.md)) |
 | tmux | `list-panes`, `list-clients`, `capture-pane`, `send-keys` via `MKTmux` |
 | Claude Code / Codex | read-only: `~/.claude/sessions`, transcripts, `~/.codex/sessions` |
 | Jev (`agb _intent`) | turns a spoken or typed request into agent, machine, repo and intent |
@@ -40,4 +41,4 @@ The vocabulary of the codebase.
 - The event tap never blocks; slow work runs on queues.
 - Text is inserted only after the overlay has fully disappeared.
 - An LED state is written once; repeats are skipped.
-- The switcher never trusts Orca for UI focus; it keeps its own position.
+- The switcher never trusts Orca or cmux for UI focus; it keeps its own position.

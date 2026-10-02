@@ -7,7 +7,11 @@ Obtained by reverse engineering the official Mac configurator
 
 ## Transport
 
-- Configuration interface: usage page `0xFF00`, usage `0x01`, report ID `0x03`.
+- USB configuration interface: usage page `0xFF00`, usage `0x01`, report ID `0x03`.
+- Bluetooth `MINI-KEYBOARD` exposes mouse, keyboard and Consumer Control collections,
+  but no vendor collection. Its output report is the standard keyboard LED bitmask
+  (Caps Lock, etc.), not RGB control. Agent Belt never sends this protocol over Bluetooth;
+  keys and knob work wirelessly, RGB status lights require USB.
 - 65-byte output reports (report ID + 64 data bytes, zeros for the rest), via
   `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput, 0x03, buf, 65)`.
 - The device only responds ~250 ms after being opened.

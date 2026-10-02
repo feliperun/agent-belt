@@ -7,7 +7,7 @@ nothing is sent or authenticated. Code in `src/agent_stats.m`.
 | Data | Source |
 |---|---|
 | live session → transcript | `~/.claude/sessions/<pid>.json` (`sessionId`, `tmux` with the pane, `startedAt`, `parkedJobId`/`jobId` for sessions parked in a background process) |
-| match to the terminal | tmux pane (`%24`) or the process's `ORCA_TERMINAL_HANDLE` |
+| match to the terminal | tmux pane (`%24`) or the process's `ORCA_TERMINAL_HANDLE` / `CMUX_SURFACE_ID` |
 | title | last `custom-title`, otherwise the transcript's `ai-title` |
 | recap | last `system/away_summary`, otherwise `last-prompt` |
 | tokens and cost | `message.usage` of each `assistant`, **deduplicated by `message.id`** (one line per block, repeated usage), plus `subagents/*.jsonl`; Anthropic list price (table in the code, 2026-09-23) |

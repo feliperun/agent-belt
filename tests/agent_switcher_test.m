@@ -1,5 +1,6 @@
 #import "../src/agent_switcher.m"
 #include <assert.h>
+#import "../src/login_path.m"
 
 void mk_scroll_down(int32_t lines) { (void)lines; } // lives in macos_shim.c
 void mk_hud_show(const char *t, const char *d, int tone) { (void)t; (void)d; (void)tone; } // status_item.m
@@ -19,6 +20,22 @@ static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     return t;
 }
 
+// The daemon takes the PATH of the user's login shell (rc files may print around it).
+static void testLoginPath(void) {
+    assert([MKParseLoginPath(@"hello\n__AGB_PATH__/a/bin:/usr/bin__AGB_PATH__") isEqual:@"/a/bin:/usr/bin"]);
+    assert(MKParseLoginPath(@"no marks") == nil && MKParseLoginPath(@"__AGB_PATH__relative__AGB_PATH__") == nil);
+    NSString *originalPath = @(getenv("PATH"));
+    setenv("PATH", "/nonexistent", 1);
+    setenv("SHELL", "/bin/sh", 1); // a login shell sets its own PATH
+    mk_login_path();
+    assert(strcmp(getenv("PATH"), "/nonexistent") && getenv("PATH")[0] == '/' && strstr(getenv("PATH"), "/usr/bin"));
+    setenv("SHELL", "/usr/bin/false", 1); // no answer: the PATH stays
+    setenv("PATH", "/nonexistent", 1);
+    mk_login_path();
+    assert(!strcmp(getenv("PATH"), "/nonexistent"));
+    setenv("PATH", originalPath.UTF8String, 1);
+}
+
 int main(void) {
     // A terminal already attached to a session: `agb attach` from the app (a path with a space).
     assert([MKAttachKey(@"  4242 /Applications/Agent Belt.app/Contents/MacOS/agb attach report windows-pc") isEqual:@"windows-pc\treport"]);
@@ -28,6 +45,8 @@ int main(void) {
     // Environment is read by pid through sysctl, so it must be set before exec.
     if (!getenv("MK_TEST_MARK")) {
         setenv("MK_TEST_MARK", "switcher", 1);
+        setenv("CMUX_SURFACE_ID", "D5459E3A-D004-46A7-A132-6EA1040E5FCC", 1);
+        unsetenv("ORCA_TERMINAL_HANDLE");
         extern char **environ;
         char path[PROC_PIDPATHINFO_MAXSIZE];
         proc_pidpath(getpid(), path, sizeof(path));
@@ -89,6 +108,45 @@ int main(void) {
         NSString *childEnv = [[NSString alloc] initWithData:MKRun(@"/usr/bin/env", @[]) encoding:NSUTF8StringEncoding];
         assert([childEnv containsString:@"LANG=en_US.UTF-8"]);
         assert(MKProcessEnv(getpid(), "MK_TEST_MISSING") == nil);
+
+        testLoginPath();
+
+        // A terminal's host is told by its handle: Orca's read "term_…", cmux's are UUIDs.
+        assert([MKHostBundle(@"term_ab12") isEqual:MKOrcaBundle]);
+        assert([MKHostBundle(@"D5459E3A-D004-46A7-A132-6EA1040E5FCC") isEqual:MKCmuxBundle]);
+        assert([MKHostedHandle(getpid()) isEqual:@"D5459E3A-D004-46A7-A132-6EA1040E5FCC"]);
+
+        // The terminal new agents open in is a setting; cmux unless it says "orca".
+        mk_agents_set_terminal("orca");
+        assert([mk_terminal_bundle isEqual:MKOrcaBundle]);
+        mk_agents_set_terminal("cmux");
+        assert([mk_terminal_bundle isEqual:MKCmuxBundle]);
+        mk_agents_set_terminal("unknown");
+        assert([mk_terminal_bundle isEqual:MKCmuxBundle]);
+
+        // cmux: terminal surfaces of every workspace, tagged with the workspace's id.
+        NSDictionary *tree = @{@"windows": @[@{@"workspaces": @[
+            @{@"id": @"W1", @"panes": @[@{@"surfaces": @[@{@"id": @"S1", @"type": @"terminal", @"title": @"✳ api"},
+                                                         @{@"id": @"S2", @"type": @"browser"}]}]},
+            @{@"id": @"W2", @"panes": @[@{@"surfaces": @[@{@"id": @"S3", @"type": @"terminal"}]}]}]}]};
+        NSArray *surfaces = MKCmuxSurfaces(tree);
+        assert(surfaces.count == 2);
+        assert([surfaces[0][@"id"] isEqual:@"S1"] && [surfaces[0][@"workspace_id"] isEqual:@"W1"]);
+        assert([surfaces[1][@"id"] isEqual:@"S3"] && [surfaces[1][@"workspace_id"] isEqual:@"W2"]);
+        assert(MKCmuxSurfaces(nil).count == 0);
+
+        // cmux's agent records: a dead process is no agent, the newest record of a surface wins.
+        int alive = getpid();
+        NSDictionary *records = MKCmuxAgents(@{@"sessions": @[
+            @{@"surface_id": @"S1", @"agent": @"codex", @"pid": @(alive), @"updated_at_unix": @100, @"agent_lifecycle": @"idle"},
+            @{@"surface_id": @"S1", @"agent": @"claude", @"pid": @(alive), @"updated_at_unix": @200, @"agent_lifecycle": @"running"},
+            @{@"surface_id": @"S2", @"agent": @"claude", @"pid": @(2147483646), @"updated_at_unix": @300},
+            @{@"surface_id": @"S3", @"agent": @"", @"pid": @(alive)}]});
+        assert(records.count == 1 && [records[@"S1"][@"agent"] isEqual:@"claude"]);
+        assert(MKCmuxAgents(nil).count == 0);
+        assert([MKCmuxStatus(@"running") isEqual:@"busy"]);
+        assert([MKCmuxStatus(@"needsInput") isEqual:@"waiting"]);
+        assert([MKCmuxStatus(@"idle") isEqual:@"idle"] && [MKCmuxStatus(@"unknown") isEqual:@"idle"]);
 
         assert([MKLiveSessionName(@"Em execução projeto") isEqual:@"projeto"]);
         assert([MKLiveSessionName(@"Idle project") isEqual:@"project"]);

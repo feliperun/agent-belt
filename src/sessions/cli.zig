@@ -20,7 +20,7 @@ pub const Env = struct {
 };
 
 pub fn isSessionCommand(verb: []const u8) bool {
-    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "rename", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_orca-open", "_sshd-setup", "_rename" };
+    const verbs = [_][]const u8{ "new", "sessions", "ls", "repos", "attach", "hosts", "doctor", "adopt", "tm", "deploy", "send", "peek", "stop", "rename", "_ls-raw", "_run", "_probe", "_repos", "_adopt-list", "_adopt-do", "_send", "_peek", "_stop", "_intent", "_summary", "_repos-cache", "_sessions", "_tab-open", "_sshd-setup", "_rename" };
     for (verbs) |v| if (std.mem.eql(u8, v, verb)) return true;
     return false;
 }
@@ -76,7 +76,7 @@ pub fn main(env: Env, args: []const []const u8) anyerror!u8 {
         return print(ctx, try ctx.fmt("{f}\n", .{std.json.fmt(summary, .{})}));
     }
     if (std.mem.eql(u8, verb, "_sessions")) return print(ctx, try sessionsJson(ctx));
-    if (std.mem.eql(u8, verb, "_orca-open")) return @import("orca.zig").open(env, rest);
+    if (std.mem.eql(u8, verb, "_tab-open")) return @import("tabs.zig").open(env, rest);
     if (std.mem.eql(u8, verb, "_sshd-setup")) {
         if (sys.platform == .windows) msys_ssh.setup(ctx);
         return 0;

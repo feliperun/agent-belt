@@ -174,11 +174,13 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, config: Config, history_dir
         std.debug.print("[agent-belt] another daemon is already running (launchctl print gui/$UID/com.frb.agentbelt)\n", .{});
         return err;
     };
+    macos.loginPath();
     macos.checkPermissions() catch |err| {
         // Exit and let launchd restart us: only a new process sees a fresh grant.
         std.Io.sleep(io, .fromSeconds(10), .awake) catch {};
         return err;
     };
+    macos.setTerminal(@tagName(config.terminal));
     macos.agentsMonitor();
     macos.updaterStart(@import("build_options").version);
     if (config.led) macos.ledStart(config.vendor_id, config.product_id);

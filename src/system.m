@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "macos_shim.h"
+#include "keypad_hid.h"
 
 // Secrets live in the login Keychain: a LaunchAgent does not inherit the
 // shell's environment. Caller frees with mk_free_buffer.
@@ -97,8 +98,9 @@ static NSString *MKCommandOutput(NSString *path, NSArray<NSString *> *arguments)
 static NSUInteger MKDeviceCount(uint16_t vendor_id, uint16_t product_id) {
     IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
     if (!manager) return 0;
-    IOHIDManagerSetDeviceMatching(manager, (__bridge CFDictionaryRef)@{
-        @kIOHIDVendorIDKey: @(vendor_id), @kIOHIDProductIDKey: @(product_id)});
+    CFArrayRef matching = mk_keypad_matching(vendor_id, product_id, 0);
+    IOHIDManagerSetDeviceMatchingMultiple(manager, matching);
+    CFRelease(matching);
     IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone);
     CFSetRef devices = IOHIDManagerCopyDevices(manager);
     IOHIDManagerClose(manager, kIOHIDOptionsTypeNone);

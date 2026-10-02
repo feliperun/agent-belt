@@ -2,7 +2,8 @@
 type: ADR
 id: "0005"
 title: "New agents open in their repository's Orca project"
-status: active
+status: superseded
+superseded_by: "0009"
 date: 2026-09-27
 ---
 

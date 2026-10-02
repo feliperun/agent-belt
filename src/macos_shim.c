@@ -1,5 +1,6 @@
 #include "macos_shim.h"
 #include "audio_meter.h"
+#include "keypad_hid.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -25,7 +26,7 @@ struct mk_hid_context {
     mk_hid_callback callback;
     mk_knob_callback knob;
     mk_f5_callback f5;
-    uint16_t vendor_id;
+    uint16_t vendor_id, product_id;
     mk_event_filter_callback filter;
     void *context;
     CFMachPortRef event_tap;
@@ -159,10 +160,7 @@ static void mk_input_value_callback(
     const uint32_t usage_page = IOHIDElementGetUsagePage(element);
     const uint32_t usage = IOHIDElementGetUsage(element);
     // The Mac's own keyboards only contribute F5, the microphone key.
-    int32_t vendor = 0;
-    CFNumberRef vendor_number = IOHIDDeviceGetProperty(IOHIDElementGetDevice(element), CFSTR(kIOHIDVendorIDKey));
-    if (vendor_number) CFNumberGetValue(vendor_number, kCFNumberSInt32Type, &vendor);
-    if (vendor != state->vendor_id) {
+    if (!mk_keypad_is_device(IOHIDElementGetDevice(element), state->vendor_id, state->product_id)) {
         if (usage_page == 0x07 && usage == 0x3e && state->f5)
             state->f5(state->context, IOHIDValueGetIntegerValue(value) != 0);
         return;
@@ -192,55 +190,15 @@ int mk_hid_run(
     IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
     if (!manager) return -1;
 
-    int32_t vendor = vendor_id;
-    int32_t product = product_id;
-    CFNumberRef vendor_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &vendor);
-    CFNumberRef product_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &product);
-    if (!vendor_number || !product_number) {
-        if (vendor_number) CFRelease(vendor_number);
-        if (product_number) CFRelease(product_number);
+    CFArrayRef matching = mk_keypad_matching(vendor_id, product_id, f5 != NULL);
+    if (!matching) {
         CFRelease(manager);
         return -2;
     }
 
-    const void *keys[] = { CFSTR(kIOHIDVendorIDKey), CFSTR(kIOHIDProductIDKey) };
-    const void *values[] = { vendor_number, product_number };
-    CFDictionaryRef matching = CFDictionaryCreate(
-        kCFAllocatorDefault,
-        keys,
-        values,
-        2,
-        &kCFTypeDictionaryKeyCallBacks,
-        &kCFTypeDictionaryValueCallBacks
-    );
-    CFRelease(vendor_number);
-    CFRelease(product_number);
-    if (!matching) {
-        CFRelease(manager);
-        return -3;
-    }
-
-    struct mk_hid_context state = { .callback = callback, .knob = knob, .f5 = f5, .vendor_id = vendor_id, .context = context };
-
-    if (f5) {
-        // Also every keyboard, for F5 (their other keys are ignored above).
-        int32_t page = 0x01, keyboard = 0x06;
-        CFNumberRef page_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &page);
-        CFNumberRef usage_number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &keyboard);
-        const void *kb_keys[] = { CFSTR(kIOHIDDeviceUsagePageKey), CFSTR(kIOHIDDeviceUsageKey) };
-        const void *kb_values[] = { page_number, usage_number };
-        CFDictionaryRef keyboards = CFDictionaryCreate(kCFAllocatorDefault, kb_keys, kb_values, 2,
-            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        const void *both[] = { matching, keyboards };
-        CFArrayRef list = CFArrayCreate(kCFAllocatorDefault, both, 2, &kCFTypeArrayCallBacks);
-        IOHIDManagerSetDeviceMatchingMultiple(manager, list);
-        CFRelease(list);
-        CFRelease(keyboards);
-        CFRelease(page_number);
-        CFRelease(usage_number);
-    } else {
-        IOHIDManagerSetDeviceMatching(manager, matching);
-    }
+    struct mk_hid_context state = { .callback = callback, .knob = knob, .f5 = f5,
+        .vendor_id = vendor_id, .product_id = product_id, .context = context };
+    IOHIDManagerSetDeviceMatchingMultiple(manager, matching);
     IOHIDManagerRegisterInputValueCallback(manager, mk_input_value_callback, &state);
     IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
     const IOReturn result = IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone);

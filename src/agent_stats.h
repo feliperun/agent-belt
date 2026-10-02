@@ -11,7 +11,7 @@
 @property NSString *status;     // Claude Code's own state: busy, idle or waiting
 @end
 
-// Live Claude Code sessions keyed by "pane:<tmux pane id>" and "orca:<terminal handle>".
+// Live Claude Code sessions keyed by "pane:<tmux pane id>" and "terminal:<Orca terminal handle or cmux surface id>".
 NSDictionary<NSString *, MKSessionInfo *> *MKClaudeSessionInfo(void);
 // "Claude 5h 23% · 7d 41%  ·  Codex 5h 5% · 7d 21%", or nil when nothing is known.
 NSString *MKQuotaLine(void);
@@ -20,3 +20,4 @@ NSString *MKSessionStatsText(MKSessionInfo *info);
 
 // agent_switcher.m
 NSString *MKProcessEnv(pid_t pid, const char *name);
+NSString *MKHostedHandle(pid_t pid); // the Orca or cmux terminal a process runs in
