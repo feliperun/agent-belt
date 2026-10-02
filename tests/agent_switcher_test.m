@@ -20,6 +20,22 @@ static MKAgentTarget *target(NSString *key, NSString *bundle, BOOL selected) {
     return t;
 }
 
+// The daemon takes the PATH of the user's login shell (rc files may print around it).
+static void testLoginPath(void) {
+    assert([MKParseLoginPath(@"hello\n__AGB_PATH__/a/bin:/usr/bin__AGB_PATH__") isEqual:@"/a/bin:/usr/bin"]);
+    assert(MKParseLoginPath(@"no marks") == nil && MKParseLoginPath(@"__AGB_PATH__relative__AGB_PATH__") == nil);
+    NSString *originalPath = @(getenv("PATH"));
+    setenv("PATH", "/nonexistent", 1);
+    setenv("SHELL", "/bin/sh", 1); // a login shell sets its own PATH
+    mk_login_path();
+    assert(strcmp(getenv("PATH"), "/nonexistent") && getenv("PATH")[0] == '/' && strstr(getenv("PATH"), "/usr/bin"));
+    setenv("SHELL", "/usr/bin/false", 1); // no answer: the PATH stays
+    setenv("PATH", "/nonexistent", 1);
+    mk_login_path();
+    assert(!strcmp(getenv("PATH"), "/nonexistent"));
+    setenv("PATH", originalPath.UTF8String, 1);
+}
+
 int main(void) {
     // A terminal already attached to a session: `agb attach` from the app (a path with a space).
     assert([MKAttachKey(@"  4242 /Applications/Agent Belt.app/Contents/MacOS/agb attach report windows-pc") isEqual:@"windows-pc\treport"]);
@@ -91,19 +107,7 @@ int main(void) {
         assert([childEnv containsString:@"LANG=en_US.UTF-8"]);
         assert(MKProcessEnv(getpid(), "MK_TEST_MISSING") == nil);
 
-        // The daemon takes the PATH of the user's login shell (rc files may print around it).
-        assert([MKParseLoginPath(@"hello\n__AGB_PATH__/a/bin:/usr/bin__AGB_PATH__") isEqual:@"/a/bin:/usr/bin"]);
-        assert(MKParseLoginPath(@"no marks") == nil && MKParseLoginPath(@"__AGB_PATH__relative__AGB_PATH__") == nil);
-        NSString *originalPath = @(getenv("PATH"));
-        setenv("PATH", "/nonexistent", 1);
-        setenv("SHELL", "/bin/sh", 1); // a login shell sets its own PATH
-        mk_login_path();
-        assert(strcmp(getenv("PATH"), "/nonexistent") && getenv("PATH")[0] == '/' && strstr(getenv("PATH"), "/usr/bin"));
-        setenv("SHELL", "/usr/bin/false", 1); // no answer: the PATH stays
-        setenv("PATH", "/nonexistent", 1);
-        mk_login_path();
-        assert(!strcmp(getenv("PATH"), "/nonexistent"));
-        setenv("PATH", originalPath.UTF8String, 1);
+        testLoginPath();
 
         // A terminal's host is told by its handle: Orca's read "term_…", cmux's are UUIDs.
         assert([MKHostBundle(@"term_ab12") isEqual:MKOrcaBundle]);
