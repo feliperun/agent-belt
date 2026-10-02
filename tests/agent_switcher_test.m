@@ -90,6 +90,44 @@ int main(void) {
         assert([childEnv containsString:@"LANG=en_US.UTF-8"]);
         assert(MKProcessEnv(getpid(), "MK_TEST_MISSING") == nil);
 
+        // A terminal's host is told by its handle: Orca's read "term_…", cmux's are UUIDs.
+        assert([MKHostBundle(@"term_ab12") isEqual:MKOrcaBundle]);
+        assert([MKHostBundle(@"D5459E3A-D004-46A7-A132-6EA1040E5FCC") isEqual:MKCmuxBundle]);
+        setenv("CMUX_SURFACE_ID", "D5459E3A-D004-46A7-A132-6EA1040E5FCC", 1);
+        assert([MKHostedHandle(getpid()) isEqual:@"D5459E3A-D004-46A7-A132-6EA1040E5FCC"]);
+
+        // The terminal new agents open in is a setting; cmux unless it says "orca".
+        mk_agents_set_terminal("orca");
+        assert([mk_terminal_bundle isEqual:MKOrcaBundle]);
+        mk_agents_set_terminal("cmux");
+        assert([mk_terminal_bundle isEqual:MKCmuxBundle]);
+        mk_agents_set_terminal("unknown");
+        assert([mk_terminal_bundle isEqual:MKCmuxBundle]);
+
+        // cmux: terminal surfaces of every workspace, tagged with the workspace's id.
+        NSDictionary *tree = @{@"windows": @[@{@"workspaces": @[
+            @{@"id": @"W1", @"panes": @[@{@"surfaces": @[@{@"id": @"S1", @"type": @"terminal", @"title": @"✳ api"},
+                                                         @{@"id": @"S2", @"type": @"browser"}]}]},
+            @{@"id": @"W2", @"panes": @[@{@"surfaces": @[@{@"id": @"S3", @"type": @"terminal"}]}]}]}]};
+        NSArray *surfaces = MKCmuxSurfaces(tree);
+        assert(surfaces.count == 2);
+        assert([surfaces[0][@"id"] isEqual:@"S1"] && [surfaces[0][@"workspace_id"] isEqual:@"W1"]);
+        assert([surfaces[1][@"id"] isEqual:@"S3"] && [surfaces[1][@"workspace_id"] isEqual:@"W2"]);
+        assert(MKCmuxSurfaces(nil).count == 0);
+
+        // cmux's agent records: a dead process is no agent, the newest record of a surface wins.
+        int alive = getpid();
+        NSDictionary *records = MKCmuxAgents(@{@"sessions": @[
+            @{@"surface_id": @"S1", @"agent": @"codex", @"pid": @(alive), @"updated_at_unix": @100, @"agent_lifecycle": @"idle"},
+            @{@"surface_id": @"S1", @"agent": @"claude", @"pid": @(alive), @"updated_at_unix": @200, @"agent_lifecycle": @"running"},
+            @{@"surface_id": @"S2", @"agent": @"claude", @"pid": @(2147483646), @"updated_at_unix": @300},
+            @{@"surface_id": @"S3", @"agent": @"", @"pid": @(alive)}]});
+        assert(records.count == 1 && [records[@"S1"][@"agent"] isEqual:@"claude"]);
+        assert(MKCmuxAgents(nil).count == 0);
+        assert([MKCmuxStatus(@"running") isEqual:@"busy"]);
+        assert([MKCmuxStatus(@"needsInput") isEqual:@"waiting"]);
+        assert([MKCmuxStatus(@"idle") isEqual:@"idle"] && [MKCmuxStatus(@"unknown") isEqual:@"idle"]);
+
         assert([MKLiveSessionName(@"Em execução projeto") isEqual:@"projeto"]);
         assert([MKLiveSessionName(@"Idle project") isEqual:@"project"]);
         assert([MKLiveSessionName(@"Resposta não lida project") isEqual:@"project"]);

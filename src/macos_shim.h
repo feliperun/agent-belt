@@ -27,6 +27,7 @@ void mk_scroll_down(int32_t lines);
 int mk_system_media_key(const void *event, int *key, int *pressed);
 void mk_agents_bottom(void);
 void mk_agents_monitor(void);
+void mk_agents_set_terminal(const char *name); // "cmux" or "orca": where new agents open
 void mk_agents_menu_press(void);
 /* Agent menu overlay; tones as mk_hud_show. */
 void mk_menu_show(const char *const *labels, const char *const *details, const int *tones, int count,

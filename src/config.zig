@@ -19,6 +19,9 @@ pub const Binding = struct {
     value: []const u8 = "",
 };
 
+/// The terminal app a new agent opens in (the create panel and the menus).
+pub const Terminal = enum { cmux, orca };
+
 pub const Config = struct {
     vendor_id: u16 = 0x514c,
     product_id: u16 = 0x8850,
@@ -40,6 +43,9 @@ pub const Config = struct {
     f5_push_to_talk: bool = true,
     /// Discreet sounds when recording starts and stops.
     sounds: bool = true,
+    /// Where a new agent opens: "cmux" or "orca". When that app is not running, a
+    /// Terminal window.
+    terminal: Terminal = .cmux,
     bindings: [6]Binding = .{
         .{ .action = "key", .value = "escape" },
         .{ .action = "agents_menu" },
@@ -118,6 +124,7 @@ pub fn defaultConfigJson() []const u8 {
         "  \"led\": true,\n" ++
         "  \"f5_push_to_talk\": true,\n" ++
         "  \"sounds\": true,\n" ++
+        "  \"terminal\": \"cmux\",\n" ++
         "  \"bindings\": [\n" ++
         "    {\"action\": \"key\", \"value\": \"escape\"},\n" ++
         "    {\"action\": \"agents_menu\", \"value\": \"\"},\n" ++
@@ -243,6 +250,7 @@ test "default JSON and struct agree: Esc 0, menu 1, Delete 2, PTT 3, agents 4, c
     try std.testing.expectEqualStrings((Config{}).knob, parsed.value.knob);
     try std.testing.expectEqual((Config{}).knob_scroll_lines, parsed.value.knob_scroll_lines);
     try std.testing.expectEqual((Config{}).led, parsed.value.led);
+    try std.testing.expectEqual((Config{}).terminal, parsed.value.terminal);
     for ((Config{}).bindings, parsed.value.bindings, 0..) |expected, actual, index| {
         try std.testing.expectEqualStrings(expected.action, actual.action);
         const action = try actionType(actual.action);

@@ -191,8 +191,8 @@ NSDictionary<NSString *, MKSessionInfo *> *MKClaudeSessionInfo(void) {
         if (!info.title && [@[@"user", @"auto"] containsObject:session[@"nameSource"] ?: @""]) info.title = MKStr(session[@"name"]);
         NSString *pane = [[MKStr(session[@"tmux"]) componentsSeparatedByString:@"."] lastObject];
         if ([pane hasPrefix:@"%"]) result[[@"pane:" stringByAppendingString:pane]] = info;
-        NSString *handle = MKProcessEnv((pid_t)MKNum(session[@"pid"]), "ORCA_TERMINAL_HANDLE");
-        if (handle.length) result[[@"orca:" stringByAppendingString:handle]] = info;
+        NSString *handle = MKHostedHandle((pid_t)MKNum(session[@"pid"]));
+        if (handle.length) result[[@"terminal:" stringByAppendingString:handle]] = info;
     }
     return result;
 }

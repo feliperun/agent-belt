@@ -138,8 +138,8 @@ beside it, and `agb menu` opens Omarchy's own menu. To dictate with another key,
   <img src="assets/menu.png" width="440" alt="Agent menu">
 </p>
 
-Agent Belt sees the agents running in Orca terminals and in `agb` tmux sessions, whether the
-tmux client is inside Orca or another terminal. For each one it shows:
+Agent Belt sees the agents running in Orca and cmux terminals and in `agb` tmux sessions, whether the
+tmux client is inside one of them or in another terminal. For each one it shows:
 
 - **State:** 🔴 waiting for your decision (an approval prompt on screen), 🟢 finished and not
   seen yet, 🔵 working, ⚪ idle.
@@ -149,8 +149,14 @@ tmux client is inside Orca or another terminal. For each one it shows:
 
 Details and sources for each number are in [docs/agent-stats.md](docs/agent-stats.md).
 
-The switch key and the menu take you to the chosen agent: they switch the Orca tab, restore a
-minimized window and bring the app forward.
+cmux refuses processes it did not start, the daemon included. Set `automation.socketControlMode`
+to `"automation"` in `~/.config/cmux/cmux.json` (or the same mode in Settings > Automation) and run
+`cmux reload-config`; without it the daemon logs that cmux refuses it and lists no cmux agent. A
+cmux terminal counts as an agent when a tmux session in it runs one, or when cmux's agent hooks
+recorded one (`cmux hooks setup` installs them for the agents other than Claude Code).
+
+The switch key and the menu take you to the chosen agent: they switch the Orca tab or the cmux
+workspace, restore a minimized window and bring the app forward.
 
 ### Sessions on any machine
 
@@ -179,10 +185,11 @@ the dictation overlay's sibling, opens at the center of the screen with the word
 as you speak and what they mean: **agent**, **machine**, **repo** and the **intent** the agent
 will get as its first prompt. Release to review. Hold again to add or correct, type to fix a
 word, or click a field to pick another option; tap 5 (or press Return) to create the agent,
-Esc to cancel. With Orca open, the agent opens in its repository's Orca project: an
-agent here gets a workspace of its own (its worktree), one on another machine a tab in the
-project of your clone of the same repo, and a repository Orca does not know yet is added to
-it. Research agents, and repos you have no clone of, open in a new terminal as before.
+Esc to cancel. With the terminal app of your choice open (`"terminal": "cmux"`, the default, or `"orca"`), the
+agent opens in its repository: an agent here gets a workspace of its own (its worktree), one on another machine a
+tab in the project of your clone of the same repo, and in Orca a repository it does not know yet
+is added as a project. Research agents, and repos you have no clone of, open in a new terminal as
+before.
 
 Requests are understood in **English and Portuguese** — `create`, `crie`, `open`, `abra`,
 `start` and `inicie` all open one — so the Portuguese examples below work as written. Set
@@ -274,7 +281,8 @@ agb bind 2 command 'open -a Calculator'
 agb bind 5 text 'Hello!'
 ```
 
-Other settings: `"knob": "scroll"` or `"system"` (volume), `"knob_scroll_lines": 3` (negative
+Other settings: `"terminal": "cmux"` or `"orca"` (where new agents open; a Terminal window when
+that app is not running), `"knob": "scroll"` or `"system"` (volume), `"knob_scroll_lines": 3` (negative
 inverts), `"led": true`, `"f5_push_to_talk": true` and `"sounds": true`.
 
 Dictation: `"deepgram_language": "pt-BR"` — set your own ([Deepgram's
@@ -325,8 +333,8 @@ Versions come from [release-please](https://github.com/googleapis/release-please
   held, the transcript growing in the overlay; on release only the last words are awaited
   (~350 ms), and the text is typed as Unicode key events once the overlay is gone. Without a
   stream (no network), the recording is sent whole on release.
-- **Agents:** Orca's `terminal list`, tmux clients (matched to Orca through
-  `ORCA_TERMINAL_HANDLE`), the titles agents write to the terminal and the transcripts in
+- **Agents:** Orca's `terminal list`, cmux's `tree` and agent hook records (`sessions list`),
+  tmux clients (matched to their terminal through `ORCA_TERMINAL_HANDLE` or `CMUX_SURFACE_ID`), the titles agents write to the terminal and the transcripts in
   `~/.claude`.
 - **Sessions:** the session engine in `src/sessions/` (Zig), the same `agb` binary on macOS,
   Linux and Windows; see [docs/sessions.md](docs/sessions.md).

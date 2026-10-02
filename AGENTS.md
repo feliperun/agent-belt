@@ -231,6 +231,14 @@ file — keep appending.
   worktree created a moment ago may not be adopted yet. The shell retitles the tab with
   the command it runs, so the command sets the title itself (`src/sessions/orca.zig`).
 
+- **cmux refuses the daemon by default.** Its socket mode is `cmuxOnly`: only processes
+  started inside cmux connect, so the launchd daemon gets "Access denied" from every call
+  and no cmux agent appears (a run from a cmux terminal works, which hides it while
+  developing). `automation.socketControlMode: "automation"` lets it in
+  ([ADR 0009](docs/adr/0009-new-agents-in-orca-or-cmux.md), `MKCmuxFor`). Its focus calls take
+  UUIDs, and `focus-panel` needs the surface's workspace (`MKCmuxFocus`); refs shift when a
+  workspace closes.
+
 - **Orca: `terminal create --command` can open a tab on a bare prompt.** Orca types a
   creation command when its UI adopts the tab, so a tab it keeps in the background
   opens with the command never run: the tab appears, `agb attach` is never called and
