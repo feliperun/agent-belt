@@ -33,6 +33,10 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/status_item.m"),
             .flags = &.{"-fobjc-arc"},
         });
+        exe.root_module.addCSourceFile(.{
+            .file = b.path("src/keypad_hid.m"),
+            .flags = &.{"-fobjc-arc"},
+        });
         exe.root_module.addIncludePath(b.path("src"));
         exe.root_module.addCSourceFile(.{
             .file = b.path("src/agent_switcher.m"),
@@ -111,16 +115,33 @@ pub fn build(b: *std.Build) void {
     // Every module with tests is listed: a file only imported by one of these is
     // compiled, but its own `test` blocks are not collected, so the clients below
     // would keep their regression tests and never run them.
-    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/sessions/local.zig",
-        "src/sessions/tabs.zig", "src/sessions/orca.zig", "src/sessions/msys_ssh.zig", "src/sessions/stats.zig", "src/sessions/tui.zig", "src/sessions/intent.zig", "src/audio_level.zig", "src/history.zig", "src/wav_stream.zig", "src/deepgram.zig", "src/transcribe_stream.zig", "src/sessions/jev.zig", "src/sessions/deepseek.zig" }) |path| {
+    inline for (.{ "src/config.zig", "src/key_edges.zig", "src/knob.zig", "src/f5.zig", "src/sessions/cli.zig", "src/sessions/local.zig", "src/sessions/tabs.zig", "src/sessions/orca.zig", "src/sessions/msys_ssh.zig", "src/sessions/stats.zig", "src/sessions/tui.zig", "src/sessions/intent.zig", "src/audio_level.zig", "src/history.zig", "src/wav_stream.zig", "src/deepgram.zig", "src/transcribe_stream.zig", "src/sessions/jev.zig", "src/sessions/deepseek.zig" }) |path| {
         const unit_test = b.addTest(.{
             .root_module = b.createModule(.{
-                .root_source_file = b.path(path), .target = target, .optimize = optimize,
+                .root_source_file = b.path(path),
+                .target = target,
+                .optimize = optimize,
             }),
         });
         test_step.dependOn(&b.addRunArtifact(unit_test).step);
     }
     if (!is_macos) return;
+    const keypad_test = b.addExecutable(.{
+        .name = "keypad-hid-test",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    keypad_test.root_module.addCSourceFile(.{
+        .file = b.path("tests/keypad_hid_test.m"),
+        .flags = &.{ "-fobjc-arc", "-fblocks", "-UNDEBUG" },
+    });
+    keypad_test.root_module.addIncludePath(b.path("src"));
+    inline for (.{ "Foundation", "IOKit", "CoreGraphics", "AudioToolbox" }) |framework| {
+        keypad_test.root_module.linkFramework(framework, .{});
+    }
+    const keypad_cmd = b.addRunArtifact(keypad_test);
+    test_step.dependOn(&keypad_cmd.step);
+    const keypad_step = b.step("test-keypad", "Test USB and Bluetooth keypad input without hardware");
+    keypad_step.dependOn(&keypad_cmd.step);
     const overlay_test = b.addExecutable(.{
         .name = "overlay-test",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),

@@ -42,6 +42,11 @@
 └──────┴──────┴──────┘
 ```
 
+On macOS, connect the minikeyboard by USB or pair **MINI-KEYBOARD** in Bluetooth settings.
+The six keys and knob work over either connection, including reconnecting while the daemon
+is running. RGB attention lights require USB: the Bluetooth HID interface does not expose
+the vendor LED channel. No separate Bluetooth configuration is needed.
+
 - **3, hold:** dictation (with the agent menu open, the words go to the new-agent panel).
 - **4:** next agent, those waiting for you first.
 - **1:** agent menu. A tap moves, a double tap opens.

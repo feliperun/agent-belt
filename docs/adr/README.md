@@ -56,3 +56,4 @@ proposed → active → superseded
 | [0007](0007-attach-to-windows-through-msys2-sshd.md) | Attach to Windows sessions through MSYS2's sshd | active |
 | [0008](0008-tab-command-is-typed-into-the-terminal.md) | The tab's command is typed into the terminal, not passed to create | active |
 | [0009](0009-new-agents-in-orca-or-cmux.md) | New agents open in Orca or cmux, as configured | active |
+| [0010](0010-usb-and-bluetooth-keypad-identity.md) | USB and Bluetooth keypad identity | active |

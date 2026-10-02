@@ -27,7 +27,7 @@ The vocabulary of the codebase.
 
 | System | Boundary |
 |---|---|
-| Keypad (514c:8850) | HID values in; vendor output reports for LEDs (`led.m`) |
+| Keypad (USB or Bluetooth `MINI-KEYBOARD`) | HID values in; shared identity matching (`keypad_hid.m`); USB-only vendor output reports for RGB LEDs (`led.m`) |
 | Deepgram | one REST call per recording (`deepgram.zig`) |
 | Orca | its CLI (`orca terminal list/show/switch/create`) via `MKOrca` |
 | cmux | its CLI (`tree`, `sessions list`, `workspace select`, `focus-panel`, `workspace create`) via `MKCmuxFor`; refuses the daemon unless `automation.socketControlMode` is `automation` ([ADR 0009](adr/0009-new-agents-in-orca-or-cmux.md)) |

@@ -7,11 +7,11 @@
 ## High-level flow
 
 ```
-macropad (HID) ─┐                       ┌─> Deepgram (transcript) ─> Unicode key events
-Mac keyboard ───┼─> event tap + HID ────┼─> agent switcher ─> Orca CLI / cmux CLI / tmux / Accessibility
-knob ───────────┘   monitor (daemon)    ├─> key LEDs (vendor HID reports)
-                                        ├─> overlay, HUD, agent menu, menu bar (AppKit)
-                                        └─> session engine (Zig) ─> tmux + worktree + agent, any host
+macropad (USB/Bluetooth HID) ─┐                       ┌─> Deepgram (transcript) ─> Unicode key events
+Mac keyboard ────────────────┼─> event tap + HID ──────┼─> agent switcher ─> Orca CLI / cmux CLI / tmux / Accessibility
+knob ────────────────────────┘   monitor (daemon)     ├─> key LEDs (USB vendor HID reports)
+                                                     ├─> overlay, HUD, agent menu, menu bar (AppKit)
+                                                     └─> session engine (Zig) ─> tmux + worktree + agent, any host
 ```
 
 A single LaunchAgent process (`agb daemon`) owns the input, the UI and the agent
@@ -26,6 +26,7 @@ bookkeeping on macOS. The CLI (`agb`) is the same binary, and on Linux and Windo
 | `src/daemon.zig` | key bindings, push-to-talk flow, knob, F5, external microphone sessions |
 | `src/ext_mic.c` | the external microphone socket (`mic.sock`): a connection is push-to-talk held, its bytes are the audio ([ADR 0006](adr/0006-external-microphone-socket.md)) |
 | `src/macos_shim.c` | HID monitor, event tap (swallowing and global shortcuts), audio capture, key injection |
+| `src/keypad_hid.m` | shared USB/Bluetooth keypad identity for HID input and status; Bluetooth matches the exact product name and transport ([ADR 0010](adr/0010-usb-and-bluetooth-keypad-identity.md)) |
 | `src/status_item.m` | overlay, switch HUD, agent menu, menu bar icon and menu |
 | `src/agent_switcher.m` | agent discovery (Orca, cmux and tmux here, every machine's sessions through `agb _sessions`), states, priority, focus, voice commands; a session with no terminal opens in a new Orca tab whose command is typed into it ([ADR 0008](adr/0008-tab-command-is-typed-into-the-terminal.md)) or a new cmux workspace that runs it ([ADR 0009](adr/0009-new-agents-in-orca-or-cmux.md)) |
 | `src/agent_stats.m` | titles, recaps, tokens, cost and quotas from local agent files |
