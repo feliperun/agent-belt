@@ -255,6 +255,12 @@ file — keep appending.
   ([ADR 0008](docs/adr/0008-tab-command-is-typed-into-the-terminal.md),
   `MKTabCreate`/`MKTabRun` in `src/agent_switcher.m`).
 
+- **A process's environment read by PID is its exec-time snapshot.** Adding a terminal
+  handle with `setenv` after startup was invisible to `KERN_PROCARGS2` in CI, although
+  the test passed inside a terminal that already provided the variable. Synthetic
+  process-environment fixtures must be set before re-exec, with competing inherited
+  handles cleared (`tests/agent_switcher_test.m`, `MKProcessEnv` in `src/agent_switcher.m`).
+
 ---
 
 Adapted from [Marcos Hernanz](https://x.com/MarcosHernanz/status/2083954734487212511).

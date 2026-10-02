@@ -45,6 +45,8 @@ int main(void) {
     // Environment is read by pid through sysctl, so it must be set before exec.
     if (!getenv("MK_TEST_MARK")) {
         setenv("MK_TEST_MARK", "switcher", 1);
+        setenv("CMUX_SURFACE_ID", "D5459E3A-D004-46A7-A132-6EA1040E5FCC", 1);
+        unsetenv("ORCA_TERMINAL_HANDLE");
         extern char **environ;
         char path[PROC_PIDPATHINFO_MAXSIZE];
         proc_pidpath(getpid(), path, sizeof(path));
@@ -112,7 +114,6 @@ int main(void) {
         // A terminal's host is told by its handle: Orca's read "term_…", cmux's are UUIDs.
         assert([MKHostBundle(@"term_ab12") isEqual:MKOrcaBundle]);
         assert([MKHostBundle(@"D5459E3A-D004-46A7-A132-6EA1040E5FCC") isEqual:MKCmuxBundle]);
-        setenv("CMUX_SURFACE_ID", "D5459E3A-D004-46A7-A132-6EA1040E5FCC", 1);
         assert([MKHostedHandle(getpid()) isEqual:@"D5459E3A-D004-46A7-A132-6EA1040E5FCC"]);
 
         // The terminal new agents open in is a setting; cmux unless it says "orca".
