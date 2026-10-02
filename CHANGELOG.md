@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/feliperun/agent-belt/compare/v0.7.2...v0.8.0) (2026-10-02)
+
+
+### Features
+
+* add cmux terminal hosting and Bluetooth keypad support ([a1288ae](https://github.com/feliperun/agent-belt/commit/a1288aec4fee602adfbbe43b13a3102899e9ac85))
+* **keypad:** support USB and Bluetooth input ([2e751f2](https://github.com/feliperun/agent-belt/commit/2e751f24677ae09d2d03ff2e531f0da69650fe8e))
+* **switcher:** adopt a cmux agent into tmux from the menu bar ([78ed2a5](https://github.com/feliperun/agent-belt/commit/78ed2a541e333ffbdcd3f423a985f7fe9c107aef))
+* **switcher:** work with cmux, and choose the terminal new agents open in ([bb6c9cf](https://github.com/feliperun/agent-belt/commit/bb6c9cf30d19f47fd9cb58b0e4bfc5d6d0edde49))
+
+
+### Bug Fixes
+
+* **macos:** inherit the interactive login shell PATH ([c0df357](https://github.com/feliperun/agent-belt/commit/c0df3578909b7998b42b843ed2150de6a79c182e))
+
 ## [0.7.2](https://github.com/feliperun/agent-belt/compare/v0.7.1...v0.7.2) (2026-09-29)
 
 
